@@ -7,10 +7,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useResizeDetector } from 'react-resize-detector'
 import { Label } from '../ui/label'
 import { RadioGroup, RadioGroupItem } from '../ui/radio-group'
-import { Percent, Ruler } from 'lucide-react'
+import { Percent, Ruler, ZoomIn, ZoomOut, Search, MousePointer } from 'lucide-react'
 
+// --- Color Helper Functions ---
 const getAbsColor = (percentage: number | null): string => {
-    if (percentage === null) return 'rgba(128,128,128,0.5)'; // Grey for ND
+    if (percentage === null) return 'transparent';
     if (percentage <= 60) return '#ff0000'; // Red
     if (percentage <= 80) return '#ffa500'; // Orange
     if (percentage <= 95) return '#ffff00'; // Yellow
@@ -18,227 +19,163 @@ const getAbsColor = (percentage: number | null): string => {
 };
 
 const getNormalizedColor = (normalizedPercent: number | null): string => {
-    if (normalizedPercent === null) return 'rgba(128,128,128,0.5)';
+    if (normalizedPercent === null) return 'transparent';
     const hue = 240 * (1 - normalizedPercent);
     return `hsl(${hue}, 100%, 50%)`;
 };
 
-
-const AXIS_COLOR = '#888';
-const FONT = '10px sans-serif';
-const MARGIN = { top: 20, right: 20, bottom: 40, left: 50 };
-
-const getNiceTickInterval = (maxVal: number, maxTicks = 10) => {
-    if (maxVal === 0) return 1;
-    const roughStep = maxVal / maxTicks;
-    const stepPower = Math.pow(10, -Math.floor(Math.log10(roughStep)));
-    const normalizedStep = roughStep * stepPower;
-    const goodNormalizedSteps = [1, 2, 5, 10, 20, 25, 50, 100, 200, 500, 1000];
-    const goodNormalizedStep = goodNormalizedSteps.find(step => step >= normalizedStep) || 1000;
-    return goodNormalizedStep / stepPower;
-};
-
-const ColorLegend = ({ mode, stats, nominalThickness }: { mode: ColorMode, stats: any, nominalThickness: number}) => {
-    const renderMmLegend = () => {
-        const levels = [
-            { pct: 100, label: `> 95%`, color: getAbsColor(100) },
-            { pct: 95, label: `80-95%`, color: getAbsColor(95) },
-            { pct: 80, label: `60-80%`, color: getAbsColor(80) },
-            { pct: 60, label: `< 60%`, color: getAbsColor(60) },
-        ];
-        return (
-             <div className='flex flex-col gap-1'>
-                <div className="font-medium text-xs">Eff. Thickness (% of {nominalThickness}mm)</div>
-                 {levels.map(l => (
-                    <div key={l.pct} className="flex items-center gap-2 text-xs">
-                        <div className="w-3 h-3 rounded-sm border" style={{ backgroundColor: l.color }} />
-                        <span>{l.label}</span>
-                    </div>
-                ))}
-            </div>
-        )
-    }
-
-    const renderPercentLegend = () => {
-        const min = stats.minThickness;
-        const max = stats.maxThickness;
-        const gradientStops = 5;
-        const gradient = Array.from({ length: gradientStops }).map((_, i) => {
-            const pct = 1 - i / (gradientStops - 1);
-            return getNormalizedColor(pct);
-        }).join(', ');
-        
-        return (
-             <div className='flex flex-col gap-1'>
-                <div className="font-medium text-xs">Eff. Thickness (Normalized)</div>
-                <div className="flex items-center gap-2">
-                    <div className='h-20 w-4 border' style={{ background: `linear-gradient(to top, ${gradient})`}} />
-                    <div className='flex flex-col justify-between h-20 text-xs'>
-                        <span>{max.toFixed(2)}mm</span>
-                        <span>{min.toFixed(2)}mm</span>
-                    </div>
-                </div>
-            </div>
-        )
-    }
-
-    return (
-        <div className="bg-card/90 p-2 rounded-md border text-xs">
-            {mode === 'mm' ? renderMmLegend() : renderPercentLegend()}
-             <div className="text-xs text-muted-foreground mt-1">ND: Gray</div>
-        </div>
-    )
-}
-
-
+// --- Main Component ---
 export function TwoDeeHeatmapTab() {
   const { inspectionResult, selectedPoint, setSelectedPoint, colorMode, setColorMode } = useInspectionStore()
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const [hoveredPoint, setHoveredPoint] = useState<any>(null)
-  const { width, height, ref: containerRef } = useResizeDetector();
+  const { width: containerWidth, height: containerHeight, ref: containerRef } = useResizeDetector()
+  
+  const [transform, setTransform] = useState({ scale: 1, offsetX: 0, offsetY: 0 })
+  const [isPanning, setIsPanning] = useState(false)
+  const [lastPanPoint, setLastPanPoint] = useState({ x: 0, y: 0 })
 
+  const { processedData, stats } = inspectionResult || {};
+  const { gridSize, minThickness: minEffT, maxThickness: maxEffT } = stats || {};
+  const effTRange = (maxEffT && minEffT) ? maxEffT - minEffT : 0;
+
+  const dataMap = React.useMemo(() => {
+    const map = new Map<string, any>();
+    if (!processedData) return map;
+    processedData.forEach(p => map.set(`${p.x},${p.y}`, p));
+    return map;
+  }, [processedData]);
+
+  // --- Drawing Logic ---
   const draw = useCallback(() => {
-    const canvas = canvasRef.current
-    const ctx = canvas?.getContext('2d')
-    if (!ctx || !canvas || !inspectionResult || !width || !height) return;
+    const canvas = canvasRef.current;
+    if (!canvas || !gridSize || !containerWidth || !containerHeight) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
 
-    const { processedData, stats } = inspectionResult
-    const { gridSize, minThickness, maxThickness } = stats;
+    const { width: cols, height: rows } = gridSize;
+    const cellSize = containerWidth / cols;
 
-    const effectiveThicknesses = processedData.map(p => p.effectiveThickness).filter(t => t !== null) as number[];
-    const minEffT = Math.min(...effectiveThicknesses);
-    const maxEffT = Math.max(...effectiveThicknesses);
-    const effTRange = maxEffT - minEffT;
+    canvas.width = containerWidth;
+    canvas.height = containerHeight;
 
-    canvas.width = width;
-    canvas.height = height;
-    
-    const plotWidth = width - MARGIN.left - MARGIN.right;
-    const plotHeight = height - MARGIN.top - MARGIN.bottom;
-
-    ctx.clearRect(0, 0, width, height);
-    
     ctx.save();
-    ctx.translate(MARGIN.left, MARGIN.top);
-
-    const dataMap = new Map<string, any>();
-    processedData.forEach(p => dataMap.set(`${p.x},${p.y}`, p));
-
-    const pixelSizeX = plotWidth / gridSize.width;
-    const pixelSizeY = plotHeight / gridSize.height;
-
-    for (let i = 0; i < gridSize.width; i++) {
-        for (let j = 0; j < gridSize.height; j++) {
-            const point = dataMap.get(`${i},${j}`);
-            
-            let color: string;
-            if (colorMode === '%') {
-                const normalized = point?.effectiveThickness !== null && effTRange > 0
-                    ? (point.effectiveThickness - minEffT) / effTRange
-                    : null;
-                color = getNormalizedColor(normalized);
-            } else {
-                color = getAbsColor(point?.percentage ?? null);
-            }
-            ctx.fillStyle = color;
-            ctx.fillRect(i * pixelSizeX, j * pixelSizeY, pixelSizeX, pixelSizeY);
-
-            if(selectedPoint && selectedPoint.x === i && selectedPoint.y === j) {
-                ctx.strokeStyle = '#00ffff';
-                ctx.lineWidth = Math.max(2, pixelSizeX / 4);
-                ctx.strokeRect(i * pixelSizeX, j * pixelSizeY, pixelSizeX, pixelSizeY);
-            }
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.translate(transform.offsetX, transform.offsetY);
+    ctx.scale(transform.scale, transform.scale);
+    
+    // Draw Heatmap
+    for (let y = 0; y < rows; y++) {
+      for (let x = 0; x < cols; x++) {
+        const point = dataMap.get(`${x},${y}`);
+        let color: string;
+        if (colorMode === '%') {
+            const normalized = (point?.effectiveThickness !== null && effTRange > 0)
+                ? (point.effectiveThickness - minEffT) / effTRange
+                : null;
+            color = getNormalizedColor(normalized);
+        } else {
+            color = getAbsColor(point?.percentage ?? null);
         }
+
+        if (color !== 'transparent') {
+            ctx.fillStyle = color;
+            ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
+        }
+      }
+    }
+    
+    // Draw Bounded Grid Lines
+    if (transform.scale > 5) { // Only draw grid if sufficiently zoomed
+      ctx.strokeStyle = "rgba(200, 200, 200, 0.2)";
+      ctx.lineWidth = 1 / transform.scale;
+      for (let x = 0; x <= cols; x++) {
+        ctx.beginPath();
+        ctx.moveTo(x * cellSize, 0);
+        ctx.lineTo(x * cellSize, rows * cellSize);
+        ctx.stroke();
+      }
+      for (let y = 0; y <= rows; y++) {
+        ctx.beginPath();
+        ctx.moveTo(0, y * cellSize);
+        ctx.lineTo(cols * cellSize, rows * cellSize);
+        ctx.stroke();
+      }
+    }
+
+    // Draw selection outline
+    if (selectedPoint) {
+        ctx.strokeStyle = '#00ffff';
+        ctx.lineWidth = 2 / transform.scale;
+        ctx.strokeRect(selectedPoint.x * cellSize, selectedPoint.y * cellSize, cellSize, cellSize);
     }
     
     ctx.restore();
-    
-    ctx.fillStyle = AXIS_COLOR;
-    ctx.strokeStyle = AXIS_COLOR;
-    ctx.font = FONT;
-    ctx.lineWidth = 1;
 
-    // Y-Axis
-    ctx.beginPath();
-    ctx.moveTo(MARGIN.left, MARGIN.top);
-    ctx.lineTo(MARGIN.left, height - MARGIN.bottom);
-    ctx.stroke();
-    const yTickInterval = getNiceTickInterval(gridSize.height);
-    for (let i = 0; i <= gridSize.height; i += yTickInterval) {
-        const y = MARGIN.top + (i / gridSize.height) * plotHeight;
-        ctx.moveTo(MARGIN.left - 5, y);
-        ctx.lineTo(MARGIN.left, y);
-        ctx.stroke();
-        ctx.textAlign = "right";
-        ctx.textBaseline = "middle";
-        ctx.fillText(i.toString(), MARGIN.left - 8, y);
-    }
-    ctx.save();
-    ctx.translate(15, height/2);
-    ctx.rotate(-Math.PI/2);
-    ctx.textAlign = "center";
-    ctx.fillText("Y-axis (mm)", 0, 0);
-    ctx.restore();
-
-    // X-Axis
-    ctx.beginPath();
-    ctx.moveTo(MARGIN.left, height - MARGIN.bottom);
-    ctx.lineTo(width - MARGIN.right, height - MARGIN.bottom);
-    ctx.stroke();
-    const xTickInterval = getNiceTickInterval(gridSize.width);
-    for (let i = 0; i <= gridSize.width; i += xTickInterval) {
-        const x = MARGIN.left + (i / gridSize.width) * plotWidth;
-        ctx.moveTo(x, height - MARGIN.bottom);
-        ctx.lineTo(x, height - MARGIN.bottom + 5);
-        ctx.stroke();
-        ctx.textAlign = "center";
-        ctx.textBaseline = "top";
-        ctx.fillText(i.toString(), x, height - MARGIN.bottom + 8);
-    }
-    ctx.textAlign = "center";
-    ctx.fillText("X-axis (mm)", width/2, height - 15);
-
-  }, [inspectionResult, width, height, selectedPoint, colorMode]);
+  }, [gridSize, containerWidth, containerHeight, colorMode, dataMap, minEffT, effTRange, transform, selectedPoint]);
 
   useEffect(() => {
     draw();
   }, [draw]);
 
-  const handleCanvasInteraction = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current;
-    if (!canvas || !inspectionResult || !width || !height) return;
-    
-    const { stats } = inspectionResult;
-    const { gridSize } = stats;
-    
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    
-    const plotWidth = width - MARGIN.left - MARGIN.right;
-    const plotHeight = height - MARGIN.top - MARGIN.bottom;
-    const pixelSizeX = plotWidth / gridSize.width;
-    const pixelSizeY = plotHeight / gridSize.height;
-
-    const gridX = Math.floor((x - MARGIN.left) / pixelSizeX);
-    const gridY = Math.floor((y - MARGIN.top) / pixelSizeY);
-
-    if (gridX >= 0 && gridX < gridSize.width && gridY >= 0 && gridY < gridSize.height) {
-        const point = inspectionResult.processedData.find(p => p.x === gridX && p.y === gridY);
-        setHoveredPoint(point ? { ...point, clientX: e.clientX, clientY: e.clientY } : null);
-        
-        if (e.type === 'click' && point) {
-            setSelectedPoint({ x: point.x, y: point.y });
-        }
-    } else {
-        setHoveredPoint(null);
-    }
+  // --- Interaction Handlers ---
+  const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    setIsPanning(true);
+    setLastPanPoint({ x: e.clientX, y: e.clientY });
+  };
+  
+  const handleMouseUp = () => {
+    setIsPanning(false);
   };
 
   const handleMouseLeave = () => {
-    setHoveredPoint(null);
+    setIsPanning(false);
   };
 
+  const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!isPanning) return;
+    const dx = e.clientX - lastPanPoint.x;
+    const dy = e.clientY - lastPanPoint.y;
+    setTransform(t => ({ ...t, offsetX: t.offsetX + dx, offsetY: t.offsetY + dy }));
+    setLastPanPoint({ x: e.clientX, y: e.clientY });
+  };
+  
+  const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    const scaleAmount = e.deltaY > 0 ? 0.9 : 1.1;
+    const rect = canvasRef.current!.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+    
+    setTransform(t => {
+      const newScale = Math.max(0.1, t.scale * scaleAmount);
+      const newOffsetX = mouseX - (mouseX - t.offsetX) * scaleAmount;
+      const newOffsetY = mouseY - (mouseY - t.offsetY) * scaleAmount;
+      return { scale: newScale, offsetX: newOffsetX, offsetY: newOffsetY };
+    });
+  };
+
+  const handleDoubleClick = () => {
+    setTransform({ scale: 1, offsetX: 0, offsetY: 0 });
+  };
+
+  const handleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!gridSize || !containerWidth) return;
+    const rect = canvasRef.current!.getBoundingClientRect();
+    
+    // transform canvas click to world coordinates
+    const x = (e.clientX - rect.left - transform.offsetX) / transform.scale;
+    const y = (e.clientY - rect.top - transform.offsetY) / transform.scale;
+
+    const cellSize = containerWidth / gridSize.width;
+    const gridX = Math.floor(x / cellSize);
+    const gridY = Math.floor(y / cellSize);
+
+    if (gridX >= 0 && gridX < gridSize.width && gridY >= 0 && gridY < gridSize.height) {
+        setSelectedPoint({ x: gridX, y: gridY });
+    }
+  }
+
+  // --- Render ---
   if (!inspectionResult) return null
 
   return (
@@ -247,29 +184,23 @@ export function TwoDeeHeatmapTab() {
         <CardHeader>
           <CardTitle className="font-headline">2D Heatmap</CardTitle>
         </CardHeader>
-        <CardContent ref={containerRef} className="flex-grow relative p-0">
-          <canvas
-            ref={canvasRef}
-            onMouseMove={handleCanvasInteraction}
-            onMouseLeave={handleMouseLeave}
-            onClick={handleCanvasInteraction}
-            style={{ touchAction: 'none', imageRendering: 'pixelated', display: 'block' }}
-          />
-          {hoveredPoint && (
-            <div
-              className="absolute p-2 text-xs rounded-md shadow-lg pointer-events-none bg-popover text-popover-foreground border"
-              style={{
-                left: `${hoveredPoint.clientX - (containerRef.current?.getBoundingClientRect().left ?? 0)}px`,
-                top: `${hoveredPoint.clientY - (containerRef.current?.getBoundingClientRect().top ?? 0)}px`,
-                transform: `translate(15px, -100%)`
-              }}
-            >
-              <div className="font-bold">X: {hoveredPoint.x}, Y: {hoveredPoint.y}</div>
-              <div>Raw Thick: {hoveredPoint.rawThickness?.toFixed(2) ?? 'ND'} mm</div>
-              <div>Eff. Thick: {hoveredPoint.effectiveThickness?.toFixed(2) ?? 'ND'} mm</div>
-              <div>Percentage: {hoveredPoint.percentage?.toFixed(1) ?? 'N/A'}%</div>
+        <CardContent ref={containerRef} className="flex-grow relative p-0 overflow-hidden bg-muted/20">
+            <canvas
+                ref={canvasRef}
+                onMouseDown={handleMouseDown}
+                onMouseUp={handleMouseUp}
+                onMouseMove={handleMouseMove}
+                onMouseLeave={handleMouseLeave}
+                onWheel={handleWheel}
+                onDoubleClick={handleDoubleClick}
+                onClick={handleClick}
+                className="absolute top-0 left-0 cursor-grab active:cursor-grabbing"
+            />
+            <div className="absolute bottom-2 left-2 text-xs text-muted-foreground pointer-events-none p-2 rounded bg-background/80 border">
+              <p className="flex items-center gap-1"><MousePointer className="h-3 w-3"/> Drag to Pan</p>
+              <p className="flex items-center gap-1"><ZoomIn className="h-3 w-3"/> Scroll to Zoom</p>
+              <p className="flex items-center gap-1"><Search className="h-3 w-3"/> Dbl-Click to Reset</p>
             </div>
-          )}
         </CardContent>
       </Card>
       <div className="md:col-span-1 space-y-4">
@@ -289,14 +220,6 @@ export function TwoDeeHeatmapTab() {
                       <Label htmlFor="pct-2d" className="flex items-center gap-2 font-normal"><Percent className="h-4 w-4"/>Normalized (%)</Label>
                     </div>
                 </RadioGroup>
-            </CardContent>
-        </Card>
-        <Card>
-            <CardHeader>
-                 <CardTitle className="font-headline text-lg">Legend</CardTitle>
-            </CardHeader>
-            <CardContent>
-                <ColorLegend mode={colorMode} stats={inspectionResult.stats} nominalThickness={inspectionResult.nominalThickness} />
             </CardContent>
         </Card>
       </div>
