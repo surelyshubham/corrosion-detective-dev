@@ -98,6 +98,8 @@ export function TwoDeeHeatmapTab() {
   const { inspectionResult, selectedPoint, setSelectedPoint, colorMode, setColorMode } = useInspectionStore()
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+  const xAxisRef = useRef<HTMLCanvasElement>(null)
+  const yAxisRef = useRef<HTMLCanvasElement>(null)
   
   const [transform, setTransform] = useState({ scale: 1, offsetX: 0, offsetY: 0 })
   const [isPanning, setIsPanning] = useState(false)
@@ -124,27 +126,17 @@ export function TwoDeeHeatmapTab() {
     if (!canvas || !gridSize || !containerRef.current) return;
     
     const dpr = window.devicePixelRatio || 1;
-    const containerWidth = containerRef.current.clientWidth;
-    const containerHeight = containerRef.current.clientHeight;
-
-    // The canvas is always its "natural" size, the container div handles scrolling
+    
     const canvasWidth = gridSize.width * CELL_SIZE;
     const canvasHeight = gridSize.height * CELL_SIZE;
     
-    canvas.width = canvasWidth * dpr;
-    canvas.height = canvasHeight * dpr;
-    canvas.style.width = `${canvasWidth}px`;
-    canvas.style.height = `${canvasHeight}px`;
+    canvas.width = canvasWidth;
+    canvas.height = canvasHeight;
 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    
-    ctx.scale(dpr, dpr);
 
-    // No transforms here on the main context, they happen on a wrapper group if needed
-    // but for simple pan/zoom, we manage it via scroll and scale transform on the canvas element style
-
-    // Draw Heatmap
+    // Heatmap
     for (let y = 0; y < gridSize.height; y++) {
       for (let x = 0; x < gridSize.width; x++) {
         const point = dataMap.get(`${x},${y}`);
@@ -166,10 +158,10 @@ export function TwoDeeHeatmapTab() {
       }
     }
     
-    // Draw Bounded Grid Lines
+    // Grid Lines
     if (transform.scale > 5) {
       ctx.strokeStyle = "rgba(200, 200, 200, 0.2)";
-      ctx.lineWidth = 1; // It's always 1px regardless of zoom
+      ctx.lineWidth = 1 / transform.scale;
       for (let x = 0; x <= gridSize.width; x++) {
         ctx.beginPath();
         ctx.moveTo(x * CELL_SIZE, 0);
@@ -184,75 +176,128 @@ export function TwoDeeHeatmapTab() {
       }
     }
 
-    // Draw selection outline
+    // Selection outline
     if (selectedPoint) {
         ctx.strokeStyle = '#00ffff'; // Cyan
-        ctx.lineWidth = 2; // Always 2px
+        ctx.lineWidth = 2 / transform.scale;
         ctx.strokeRect(selectedPoint.x * CELL_SIZE, selectedPoint.y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
     }
     
   }, [gridSize, colorMode, dataMap, minEffT, effTRange, transform.scale, selectedPoint]);
 
+  const drawAxes = useCallback(() => {
+    if (!gridSize || !xAxisRef.current || !yAxisRef.current) return;
+    
+    const dpr = window.devicePixelRatio || 1;
+    const xAxis = xAxisRef.current;
+    const yAxis = yAxisRef.current;
+    const xCtx = xAxis.getContext('2d')!;
+    const yCtx = yAxis.getContext('2d')!;
+
+    const xAxisWidth = containerRef.current!.clientWidth - AXIS_SIZE;
+    const yAxisHeight = containerRef.current!.clientHeight - AXIS_SIZE;
+
+    xAxis.width = xAxisWidth * dpr;
+    xAxis.height = AXIS_SIZE * dpr;
+    xAxis.style.width = `${xAxisWidth}px`;
+    xAxis.style.height = `${AXIS_SIZE}px`;
+    
+    yAxis.width = AXIS_SIZE * dpr;
+    yAxis.height = yAxisHeight * dpr;
+    yAxis.style.width = `${AXIS_SIZE}px`;
+    yAxis.style.height = `${yAxisHeight}px`;
+
+    xCtx.scale(dpr, dpr);
+    yCtx.scale(dpr, dpr);
+
+    xCtx.clearRect(0, 0, xAxis.width, xAxis.height);
+    yCtx.clearRect(0, 0, yAxis.width, yAxis.height);
+    
+    xCtx.fillStyle = '#9ca3af'; // text-muted-foreground
+    yCtx.fillStyle = '#9ca3af';
+    xCtx.font = '10px sans-serif';
+    yCtx.font = '10px sans-serif';
+
+    const scaledCellSize = CELL_SIZE * transform.scale;
+    const xInterval = getNiceInterval(xAxisWidth / scaledCellSize, 10);
+    const yInterval = getNiceInterval(yAxisHeight / scaledCellSize, 10);
+    
+    // Draw X-Axis Ticks
+    for (let i = 0; i * xInterval < gridSize.width; i++) {
+        const xPos = i * xInterval * scaledCellSize - transform.offsetX;
+        if (xPos > -scaledCellSize && xPos < xAxisWidth) {
+            xCtx.fillText(String(i * xInterval), xPos, 20);
+            xCtx.fillRect(xPos, 0, 1, 5);
+        }
+    }
+
+    // Draw Y-Axis Ticks
+    for (let i = 0; i * yInterval < gridSize.height; i++) {
+        const yPos = i * yInterval * scaledCellSize - transform.offsetY;
+        if (yPos > -scaledCellSize && yPos < yAxisHeight) {
+            yCtx.fillText(String(i * yInterval), 15, yPos + 3);
+            yCtx.fillRect(AXIS_SIZE - 5, yPos, 5, 1);
+        }
+    }
+
+  }, [gridSize, transform, AXIS_SIZE]);
+
   useEffect(() => {
     draw();
-  }, [draw]);
-
-  const handleContainerResize = useCallback(() => {
-    draw();
-  }, [draw]);
+    drawAxes();
+  }, [draw, drawAxes]);
 
   useEffect(() => {
     if (!containerRef.current) return;
-    const resizeObserver = new ResizeObserver(handleContainerResize);
+    const resizeObserver = new ResizeObserver(() => {
+        draw();
+        drawAxes();
+    });
     resizeObserver.observe(containerRef.current);
     return () => resizeObserver.disconnect();
-  }, [handleContainerResize]);
+  }, [draw, drawAxes]);
 
 
   // --- Interaction Handlers ---
   const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (e.button !== 0 || !containerRef.current) return;
+    if (e.button !== 0) return;
     setIsPanning(true);
-    setLastPanPoint({ 
-        x: e.clientX, 
-        y: e.clientY 
-    });
-    containerRef.current.style.cursor = 'grabbing';
+    setLastPanPoint({ x: e.clientX, y: e.clientY });
+    e.currentTarget.style.cursor = 'grabbing';
   };
   
-  const handleMouseUp = () => {
-    if (!containerRef.current) return;
+  const handleMouseUp = (e: React.MouseEvent<HTMLDivElement>) => {
     setIsPanning(false);
-    containerRef.current.style.cursor = 'grab';
+    e.currentTarget.style.cursor = 'grab';
   };
 
-  const handleMouseLeave = () => {
-     if (!containerRef.current) return;
+  const handleMouseLeave = (e: React.MouseEvent<HTMLDivElement>) => {
     setIsPanning(false);
     setHoveredPoint(null);
-    containerRef.current.style.cursor = 'grab';
+    e.currentTarget.style.cursor = 'grab';
   };
 
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (isPanning && containerRef.current) {
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (isPanning) {
         const dx = e.clientX - lastPanPoint.x;
         const dy = e.clientY - lastPanPoint.y;
-        containerRef.current.scrollLeft -= dx;
-        containerRef.current.scrollTop -= dy;
+        setTransform(prev => ({
+            ...prev,
+            offsetX: prev.offsetX - dx,
+            offsetY: prev.offsetY - dy,
+        }));
         setLastPanPoint({ x: e.clientX, y: e.clientY });
     }
     
     // Tooltip logic
-    if (!gridSize || !containerRef.current || !canvasRef.current) {
-        setHoveredPoint(null);
-        return;
-    };
-    const rect = canvasRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    if (!gridSize) { setHoveredPoint(null); return; };
+    
+    const mouseX = e.clientX - rect.left - AXIS_SIZE;
+    const mouseY = e.clientY - rect.top - AXIS_SIZE;
 
-    const gridX = Math.floor(x / (CELL_SIZE * transform.scale));
-    const gridY = Math.floor(y / (CELL_SIZE * transform.scale));
+    const gridX = Math.floor((mouseX + transform.offsetX) / (CELL_SIZE * transform.scale));
+    const gridY = Math.floor((mouseY + transform.offsetY) / (CELL_SIZE * transform.scale));
 
     if (gridX >= 0 && gridX < gridSize.width && gridY >= 0 && gridY < gridSize.height) {
         const pointData = dataMap.get(`${gridX},${gridY}`);
@@ -268,53 +313,33 @@ export function TwoDeeHeatmapTab() {
   
   const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
     e.preventDefault();
-    if (!containerRef.current) return;
-
+    const rect = e.currentTarget.getBoundingClientRect();
+    
     const scaleAmount = 1.1;
     const newScale = e.deltaY < 0 ? transform.scale * scaleAmount : transform.scale / scaleAmount;
-    const clampedScale = Math.max(0.2, Math.min(newScale, 20)); // Zoom limits
-    
-    const rect = containerRef.current.getBoundingClientRect();
-    const mouseX = e.clientX - rect.left;
-    const mouseY = e.clientY - rect.top;
+    const clampedScale = Math.max(0.2, Math.min(newScale, 20));
 
-    const scrollLeft = containerRef.current.scrollLeft;
-    const scrollTop = containerRef.current.scrollTop;
-    
-    const worldX = (scrollLeft + mouseX) / transform.scale;
-    const worldY = (scrollTop + mouseY) / transform.scale;
+    const mouseX = e.clientX - rect.left - AXIS_SIZE;
+    const mouseY = e.clientY - rect.top - AXIS_SIZE;
 
-    const newScrollLeft = worldX * clampedScale - mouseX;
-    const newScrollTop = worldY * clampedScale - mouseY;
+    const newOffsetX = transform.offsetX + (mouseX / transform.scale) - (mouseX / clampedScale);
+    const newOffsetY = transform.offsetY + (mouseY / transform.scale) - (mouseY / clampedScale);
 
-    setTransform({ ...transform, scale: clampedScale });
-
-    // Apply new scroll positions after state has updated
-    requestAnimationFrame(() => {
-        if(containerRef.current){
-            containerRef.current.scrollLeft = newScrollLeft;
-            containerRef.current.scrollTop = newScrollTop;
-        }
-    });
+    setTransform({ scale: clampedScale, offsetX: newOffsetX, offsetY: newOffsetY });
   };
 
   const handleDoubleClick = () => {
     setTransform({ scale: 1, offsetX: 0, offsetY: 0 });
-    if(containerRef.current){
-        containerRef.current.scrollLeft = 0;
-        containerRef.current.scrollTop = 0;
-    }
   };
 
   const handleClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!gridSize || !containerRef.current || !canvasRef.current) return;
-    
-    const rect = canvasRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    if (!gridSize) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left - AXIS_SIZE;
+    const mouseY = e.clientY - rect.top - AXIS_SIZE;
 
-    const gridX = Math.floor(x / (CELL_SIZE * transform.scale));
-    const gridY = Math.floor(y / (CELL_SIZE * transform.scale));
+    const gridX = Math.floor((mouseX + transform.offsetX) / (CELL_SIZE * transform.scale));
+    const gridY = Math.floor((mouseY + transform.offsetY) / (CELL_SIZE * transform.scale));
 
     if (gridX >= 0 && gridX < gridSize.width && gridY >= 0 && gridY < gridSize.height) {
         setSelectedPoint({ x: gridX, y: gridY });
@@ -332,7 +357,7 @@ export function TwoDeeHeatmapTab() {
         </CardHeader>
         <CardContent 
             ref={containerRef}
-            className="flex-grow relative p-0 overflow-auto bg-muted/20 cursor-grab"
+            className="flex-grow relative p-0 overflow-hidden bg-muted/20 cursor-grab"
             onMouseMove={handleMouseMove}
             onMouseDown={handleMouseDown}
             onMouseUp={handleMouseUp}
@@ -342,15 +367,15 @@ export function TwoDeeHeatmapTab() {
             onClick={handleClick}
             onContextMenu={(e) => e.preventDefault()}
         >
-            <div style={{ position: 'relative', width: `${gridSize!.width * CELL_SIZE}px`, height: `${gridSize!.height * CELL_SIZE}px`}}>
+            <canvas ref={yAxisRef} className="absolute left-0 top-[--axis-size]" style={{ '--axis-size': `${AXIS_SIZE}px` } as React.CSSProperties} />
+            <canvas ref={xAxisRef} className="absolute left-[--axis-size] top-0" style={{ '--axis-size': `${AXIS_SIZE}px` } as React.CSSProperties} />
+            
+            <div className="absolute overflow-hidden" style={{ top: AXIS_SIZE, left: AXIS_SIZE }}>
                 <canvas
                     ref={canvasRef}
                     style={{
-                        position: 'absolute',
-                        top: 0,
-                        left: 0,
                         transformOrigin: 'top left',
-                        transform: `scale(${transform.scale})`,
+                        transform: `scale(${transform.scale}) translate(-${transform.offsetX / transform.scale}px, -${transform.offsetY / transform.scale}px)`,
                     }}
                 />
             </div>
