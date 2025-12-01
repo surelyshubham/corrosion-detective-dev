@@ -142,12 +142,12 @@ export function ThreeDeeViewTab() {
             
             let color: THREE.Color;
             if (colorMode === '%') {
-                 const normalizedPercent = (thickness !== null && thickness !== undefined && thicknessRange > 0)
-                    ? (thickness - minThickness) / thicknessRange
+                 const normalizedPercent = (pointData && pointData.thickness !== null && pointData.thickness !== undefined && thicknessRange > 0)
+                    ? (pointData.thickness - minThickness) / thicknessRange
                     : null;
                 color = getNormalizedColor(normalizedPercent);
             } else {
-                color = getAbsColor(pointData?.percentage ?? 100);
+                color = getAbsColor(pointData?.percentage ?? null);
             }
             colors.push(color.r, color.g, color.b);
         }
@@ -160,7 +160,7 @@ export function ThreeDeeViewTab() {
     
     meshRef.current.geometry = geometry;
 
-  }, [geometry, zScale, colorMode, nominalThickness, stats, processedData]);
+  }, [geometry, zScale, colorMode, nominalThickness, stats, processedData, processedData.length]);
 
 
   useEffect(() => {
@@ -277,7 +277,7 @@ export function ThreeDeeViewTab() {
           selectedMarker.visible = false;
       }
       
-      const planeRotationInverse = mesh.rotation.clone().invert();
+      const planeRotationInverse = mesh.quaternion.clone().invert();
       minMaxGroup.quaternion.copy(planeRotationInverse);
       selectedMarker.quaternion.copy(planeRotationInverse);
       
