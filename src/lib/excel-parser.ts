@@ -1,84 +1,48 @@
-import * as XLSX from "xlsx";
 
-export interface ThicknessPoint {
-  x: number;       // column index
-  y: number;       // row index
-  thickness: number | null;
-}
+import * as XLSX from 'xlsx';
+import type { InspectionDataPoint } from './types';
 
 export interface ParsedExcelResult {
-  meta: string[];
-  data: ThicknessPoint[];
-  xCount: number;
-  yCount: number;
+  metadata: any[][];
+  data: InspectionDataPoint[];
 }
 
-export function parseThicknessExcel(file: ArrayBuffer): ParsedExcelResult {
-  const workbook = XLSX.read(file, { type: "array" });
+export function parseExcel(file: ArrayBuffer): ParsedExcelResult {
+  const workbook = XLSX.read(file, { type: 'array' });
 
-  const sheetName = workbook.SheetNames[0];
-  const sheet = workbook.Sheets[sheetName];
-
-  const json = XLSX.utils.sheet_to_json(sheet, { header: 1 });
-
-  // -------------------------
-  // METADATA = rows 1–18
-  // -------------------------
-  const metadataRows = json.slice(0, 18);
-  const meta = metadataRows.map(row => row.join(" "));
-
-  // -------------------------
-  // GRID STARTS FROM ROW 20 (index 19)
-  // -------------------------
-  const headerRowIndex = 18; // row 19 in Excel, index 18 zero-based
-  const firstDataRowIndex = 19; // row 20 in Excel, index 19
-
-  const headerRow = json[headerRowIndex];
-
-  // Extract X labels (columns B onward)
-  const xLabels = headerRow.slice(1).map(Number); // skip column A
-
-  const data: ThicknessPoint[] = [];
-
-  // Process all rows below row 20
-  for (let r = firstDataRowIndex; r < json.length; r++) {
-    const row = json[r];
-    if (!row || row.length === 0) continue;
-
-    const yValue = Number(row[0]); // column A
-
-    for (let c = 1; c < row.length; c++) {
-      const cell = row[c];
-
-      if (cell === "" || cell === null || cell === undefined) {
-        data.push({
-          x: xLabels[c - 1],
-          y: yValue,
-          thickness: null,
-        });
-        continue;
-      }
-
-      const thickness = parseFloat(cell);
-
-      data.push({
-        x: xLabels[c - 1],
-        y: yValue,
-        thickness: isNaN(thickness) ? null : thickness,
-      });
-    }
+  // 1. Parse Metadata
+  const metadataSheetName = workbook.SheetNames[0]; // Assuming first sheet is 'Metadata'
+  if (!metadataSheetName) {
+    throw new Error("Could not find 'Metadata' sheet in the Excel file.");
   }
+  const metadataSheet = workbook.Sheets[metadataSheetName];
+  const metadata = XLSX.utils.sheet_to_json<any[]>(metadataSheet, { header: 1 });
 
-  if (data.length === 0) {
-    throw new Error(
-      "No valid data points found. Check the C-scan sheet formatting."
-    );
+  // 2. Parse Thickness Data
+  const dataSheetName = workbook.SheetNames[1]; // Assuming second sheet is 'Thickness Data'
+  if (!dataSheetName) {
+    throw new Error("Could not find 'Thickness Data' sheet in the Excel file.");
   }
+  const dataSheet = workbook.Sheets[dataSheetName];
+  const rawData = XLSX.utils.sheet_to_json<{ x: number; y: number; thickness: number | string }>(dataSheet);
+  
+  const data: InspectionDataPoint[] = rawData.map(row => {
+    const thickness = typeof row.thickness === 'string' 
+      ? parseFloat(row.thickness) 
+      : row.thickness;
+      
+    return {
+      x: row.x,
+      y: row.y,
+      thickness: (row.thickness === null || row.thickness === '' || isNaN(thickness)) ? null : thickness,
+      deviation: null,
+      percentage: null,
+      wallLoss: null,
+    };
+  });
 
   return {
-    meta,
+    metadata,
     data,
-    xCount: xLabels.length,
-    yCount: json.length - firstDataRowIndex,
   };
 }
