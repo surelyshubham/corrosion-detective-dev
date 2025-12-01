@@ -131,6 +131,7 @@ export function ThreeDeeViewTab() {
     if (gridSize.width <= 1 || gridSize.height <= 1) return null;
     const aspect = gridSize.height / gridSize.width;
     const geom = new THREE.PlaneGeometry(VISUAL_WIDTH, VISUAL_WIDTH * aspect, gridSize.width - 1, gridSize.height - 1);
+    geom.rotateX(-Math.PI / 2); // Rotate to lie flat on XZ plane
     return geom;
   }, [stats, mergedGrid]);
 
@@ -155,12 +156,12 @@ export function ThreeDeeViewTab() {
         for (let x = 0; x < gridSize.width; x++, i++) {
             const cellData = mergedGrid[y]?.[x];
             
-            // Z-position from RAW thickness
+            // Y-position from RAW thickness
             if (cellData && cellData.rawThickness !== null) {
                 const normRaw = rawTRange > 0 ? (cellData.rawThickness - minRawT) / rawTRange : 0;
-                positions.setZ(i, normRaw * zScale);
+                positions.setY(i, normRaw * zScale);
             } else {
-                positions.setZ(i, 0); 
+                positions.setY(i, 0); 
             }
             
             // Color from EFFECTIVE thickness
@@ -253,10 +254,10 @@ export function ThreeDeeViewTab() {
         xTickLabel.position.set(xPos, 0, -visualHeight / 2 - tickLength - 5);
         axisLabels.add(xTickLabel);
 
-        // Y-axis ticks
-        const yPos = (frac - 0.5) * visualHeight;
+        // Y-axis ticks (now Z in scene space)
+        const zPos = (frac - 0.5) * visualHeight;
         const yTickLabel = createTextSprite(`${Math.round(frac * gridSize.height)}`, { fontsize: 18 });
-        yTickLabel.position.set(-VISUAL_WIDTH / 2 - tickLength - 10, 0, yPos);
+        yTickLabel.position.set(-VISUAL_WIDTH / 2 - tickLength - 10, 0, zPos);
         axisLabels.add(yTickLabel);
     }
     
@@ -270,6 +271,7 @@ export function ThreeDeeViewTab() {
     meshRef.current = mesh;
 
     const refPlaneGeom = new THREE.PlaneGeometry(VISUAL_WIDTH * 1.1, visualHeight * 1.1);
+    refPlaneGeom.rotateX(-Math.PI / 2);
     const refPlaneMat = new THREE.MeshStandardMaterial({ color: 0x1e90ff, transparent: true, opacity: 0.3, side: THREE.DoubleSide });
     const refPlane = new THREE.Mesh(refPlaneGeom, refPlaneMat);
     refPlane.visible = showReference;
@@ -327,21 +329,21 @@ export function ThreeDeeViewTab() {
       if(minMarker && stats.worstLocation){ 
           const pointData = mergedGrid[stats.worstLocation.y]?.[stats.worstLocation.x];
           if (pointData && pointData.rawThickness !== null) {
-            const normMinZ = rawTRange > 0 ? (pointData.rawThickness - minRawT) / rawTRange : 0;
-            minMarker.position.set( (stats.worstLocation.x / gridSize.width - 0.5) * VISUAL_WIDTH, normMinZ * zScale, (stats.worstLocation.y / gridSize.height - 0.5) * visualHeight);
+            const normMinY = rawTRange > 0 ? (pointData.rawThickness - minRawT) / rawTRange : 0;
+            minMarker.position.set( (stats.worstLocation.x / gridSize.width - 0.5) * VISUAL_WIDTH, normMinY * zScale, (stats.worstLocation.y / gridSize.height - 0.5) * visualHeight);
           }
       }
       if(maxMarker && maxPoint && maxPoint.rawThickness !== null){ 
-          const normMaxZ = rawTRange > 0 ? (maxPoint.rawThickness - minRawT) / rawTRange : 0;
-          maxMarker.position.set( (maxPointCoords.x / gridSize.width - 0.5) * VISUAL_WIDTH, normMaxZ * zScale, (maxPointCoords.y / gridSize.height - 0.5) * visualHeight);
+          const normMaxY = rawTRange > 0 ? (maxPoint.rawThickness - minRawT) / rawTRange : 0;
+          maxMarker.position.set( (maxPointCoords.x / gridSize.width - 0.5) * VISUAL_WIDTH, normMaxY * zScale, (maxPointCoords.y / gridSize.height - 0.5) * visualHeight);
        }
       minMaxGroup.visible = showMinMax;
 
       if (selectedPoint) {
           const pointData = mergedGrid[selectedPoint.y]?.[selectedPoint.x];
           if (pointData && pointData.rawThickness !== null) {
-              const normZ = rawTRange > 0 ? (pointData.rawThickness - minRawT) / rawTRange : 0;
-              selectedMarker.position.set( (selectedPoint.x / gridSize.width - 0.5) * VISUAL_WIDTH, normZ * zScale, (selectedPoint.y / gridSize.height - 0.5) * visualHeight );
+              const normY = rawTRange > 0 ? (pointData.rawThickness - minRawT) / rawTRange : 0;
+              selectedMarker.position.set( (selectedPoint.x / gridSize.width - 0.5) * VISUAL_WIDTH, normY * zScale, (selectedPoint.y / gridSize.height - 0.5) * visualHeight );
               selectedMarker.visible = true;
           } else {
               selectedMarker.visible = false;
@@ -379,15 +381,14 @@ export function ThreeDeeViewTab() {
             const intersect = intersects[0];
             if (!intersect.face) return;
 
-            const a = intersect.face.a;
+            const vertIndex = intersect.face.a;
+            const x = vertIndex % gridSize.width;
+            const y = Math.floor(vertIndex / gridSize.width);
             
-            const gridX = a % gridSize.width;
-            const gridY = Math.floor(a / gridSize.width);
-            
-            const cellData = mergedGrid[gridY]?.[gridX];
+            const cellData = mergedGrid[y]?.[x];
 
             if (cellData) {
-                 setHoveredPoint({ x: gridX, y: gridY, ...cellData, clientX: event.clientX, clientY: event.clientY });
+                 setHoveredPoint({ x: x, y: y, ...cellData, clientX: event.clientX, clientY: event.clientY });
             } else {
                  setHoveredPoint(null);
             }
