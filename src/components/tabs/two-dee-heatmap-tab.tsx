@@ -88,7 +88,7 @@ export function TwoDeeHeatmapTab() {
     ctx.stroke();
     for (let i = 0; i <= 10; i++) {
         const y = MARGIN.top + (i / 10) * plotHeight;
-        const yValue = gridSize.height - Math.round((i / 10) * gridSize.height);
+        const yValue = Math.round((i / 10) * gridSize.height);
         ctx.moveTo(MARGIN.left - 5, y);
         ctx.lineTo(MARGIN.left, y);
         ctx.stroke();
