@@ -2,6 +2,8 @@ import { create } from 'zustand';
 import { persist, createJSONStorage, type PersistOptions } from 'zustand/middleware';
 import type { InspectionResult, AIInsight, InspectionDataPoint } from '@/lib/types';
 
+export type ColorMode = 'mm' | '%';
+
 interface InspectionState {
   inspectionResult: InspectionResult | null;
   setInspectionResult: (result: InspectionResult | null) => void;
@@ -10,34 +12,32 @@ interface InspectionState {
   selectedPoint: { x: number; y: number } | null;
   setSelectedPoint: (point: { x: number; y: number } | null) => void;
   updateAIInsight: (insight: InspectionResult['aiInsight']) => void;
+  colorMode: ColorMode;
+  setColorMode: (mode: ColorMode) => void;
 }
 
-type PersistedState = Omit<InspectionState, 'setInspectionResult' | 'setIsLoading' | 'setSelectedPoint' | 'updateAIInsight'> & {
-  // We only persist the summary, not the full data
+type PersistedState = Omit<InspectionState, 'setInspectionResult' | 'setIsLoading' | 'setSelectedPoint' | 'updateAIInsight' | 'setColorMode'> & {
   inspectionResult: Omit<InspectionResult, 'processedData'> | null;
 };
 
 const persistOptions: PersistOptions<InspectionState, PersistedState> = {
   name: 'sigma-corrosion-detective-storage',
   storage: createJSONStorage(() => localStorage),
-  // We only want to persist a subset of the state
   partialize: (state): PersistedState => {
-    // Don't persist the large processedData array
     const { processedData, ...restOfResult } = state.inspectionResult || {};
     
     return {
       inspectionResult: state.inspectionResult ? restOfResult as Omit<InspectionResult, 'processedData'> : null,
-      isLoading: false, // Don't persist loading state
+      isLoading: false,
       selectedPoint: state.selectedPoint,
+      colorMode: state.colorMode,
     };
   },
-  // On rehydration, we need to merge the persisted state with the non-persisted initial state
   merge: (persistedState, currentState) => {
     const pState = persistedState as PersistedState;
     return {
       ...currentState,
       ...pState,
-      // Re-hydrate with an empty processedData array, it will be populated on file load.
       inspectionResult: pState.inspectionResult
         ? { ...pState.inspectionResult, processedData: [] } as InspectionResult
         : null,
@@ -52,9 +52,11 @@ export const useInspectionStore = create<InspectionState>()(
       inspectionResult: null,
       isLoading: false,
       selectedPoint: null,
+      colorMode: 'mm',
       setInspectionResult: (result) => set({ inspectionResult: result }),
       setIsLoading: (isLoading) => set({ isLoading }),
       setSelectedPoint: (point) => set({ selectedPoint: point }),
+      setColorMode: (mode) => set({ colorMode: mode }),
       updateAIInsight: (aiInsight) => {
         const currentResult = get().inspectionResult;
         if (currentResult) {

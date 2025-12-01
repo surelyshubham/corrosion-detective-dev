@@ -1,18 +1,19 @@
 
 "use client"
 
-import React, { useRef, useEffect, useState } from 'react'
+import React, { useRef, useEffect, useState, useMemo } from 'react'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
-import { useInspectionStore } from '@/store/use-inspection-store'
+import { useInspectionStore, type ColorMode } from '@/store/use-inspection-store'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Slider } from '@/components/ui/slider'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
-import { Camera, Expand, Minimize, Pin, Redo, RefreshCw } from 'lucide-react'
+import { Camera, Expand, Minimize, Pin, Redo, RefreshCw, Percent, Ruler } from 'lucide-react'
+import { RadioGroup, RadioGroupItem } from '../ui/radio-group'
 
-const getColor = (percentage: number | null, forShader = false): THREE.Color => {
+const getAbsColor = (percentage: number | null): THREE.Color => {
     const color = new THREE.Color();
     if (percentage === null) color.set(0x888888); // Grey for ND
     else if (percentage <= 20) color.set(0xff0000); // Red
@@ -23,8 +24,69 @@ const getColor = (percentage: number | null, forShader = false): THREE.Color => 
     return color;
 };
 
+const getNormalizedColor = (normalizedPercent: number | null): THREE.Color => {
+    const color = new THREE.Color();
+    if (normalizedPercent === null) color.set(0x888888); // Grey for ND
+    else color.setHSL(0.7 * (1 - normalizedPercent), 1, 0.5); // Blue to Red
+    return color;
+};
+
+const ColorLegend = ({ mode, stats, nominalThickness }: { mode: ColorMode, stats: any, nominalThickness: number}) => {
+    const renderMmLegend = () => {
+        const levels = [
+            { pct: 100, label: `> 80%`, color: '#006400' },
+            { pct: 80, label: `61-80%`, color: '#90ee90' },
+            { pct: 60, label: `41-60%`, color: '#ffff00' },
+            { pct: 40, label: `21-40%`, color: '#ffa500' },
+            { pct: 20, label: `< 20%`, color: '#ff0000' },
+        ];
+        return (
+            <>
+                <div className="font-medium text-xs mb-1">Thickness (% of {nominalThickness}mm)</div>
+                {levels.map(l => (
+                    <div key={l.pct} className="flex items-center gap-2 text-xs">
+                        <div className="w-3 h-3 rounded-sm border" style={{ backgroundColor: l.color }} />
+                        <span>{l.label}</span>
+                    </div>
+                ))}
+            </>
+        )
+    }
+
+    const renderPercentLegend = () => {
+        const min = stats.minThickness;
+        const max = stats.maxThickness;
+        const levels = [
+            { pct: 1, label: `${max.toFixed(2)}mm (Max)`, color: getNormalizedColor(1).getStyle() },
+            { pct: 0.75, label: '', color: getNormalizedColor(0.75).getStyle() },
+            { pct: 0.5, label: `${((max + min) / 2).toFixed(2)}mm`, color: getNormalizedColor(0.5).getStyle() },
+            { pct: 0.25, label: '', color: getNormalizedColor(0.25).getStyle() },
+            { pct: 0, label: `${min.toFixed(2)}mm (Min)`, color: getNormalizedColor(0).getStyle() },
+        ];
+        return (
+             <>
+                <div className="font-medium text-xs mb-1">Thickness (Normalized)</div>
+                <div className="flex flex-col-reverse">
+                {levels.map(l => (
+                    <div key={l.pct} className="flex items-center gap-2 text-xs">
+                        <div className="w-3 h-3 rounded-sm border" style={{ backgroundColor: l.color }} />
+                        <span>{l.label}</span>
+                    </div>
+                ))}
+                </div>
+            </>
+        )
+    }
+
+    return (
+        <div className="absolute bottom-2 left-2 bg-card/80 p-2 rounded-md text-card-foreground border text-xs">
+            {mode === 'mm' ? renderMmLegend() : renderPercentLegend()}
+        </div>
+    )
+}
+
 export function ThreeDeeViewTab() {
-  const { inspectionResult, selectedPoint, setSelectedPoint } = useInspectionStore()
+  const { inspectionResult, selectedPoint, setSelectedPoint, colorMode, setColorMode } = useInspectionStore()
   const mountRef = useRef<HTMLDivElement>(null)
   const [zScale, setZScale] = useState(5)
   const [showReference, setShowReference] = useState(true)
@@ -37,8 +99,59 @@ export function ThreeDeeViewTab() {
   const meshRef = useRef<THREE.Mesh | null>(null);
   const dataMapRef = useRef(new Map());
 
+  const { processedData, stats, nominalThickness } = inspectionResult || {};
+
+  const geometry = useMemo(() => {
+    if (!stats) return null;
+    const { gridSize } = stats;
+    const geom = new THREE.PlaneGeometry(gridSize.width, gridSize.height, gridSize.width - 1, gridSize.height - 1);
+    geom.computeVertexNormals();
+    return geom;
+  }, [stats]);
+
+
   useEffect(() => {
-    if (!mountRef.current || !inspectionResult) return
+    if (!geometry || !meshRef.current || !stats || !nominalThickness) return;
+
+    const { minThickness, maxThickness } = stats;
+    const thicknessRange = maxThickness - minThickness;
+
+    const colors: number[] = [];
+    const positions = geometry.attributes.position;
+
+    for (let i = 0; i < positions.count; i++) {
+        const x = positions.getX(i) + stats.gridSize.width / 2;
+        const z_plane = positions.getZ(i) + stats.gridSize.height / 2;
+        
+        const point = dataMapRef.current.get(`${Math.round(x)},${Math.round(z_plane)}`);
+        
+        const thickness = point?.thickness ?? nominalThickness;
+        const y_pos = thickness * zScale; 
+        positions.setY(i, y_pos);
+
+        let color: THREE.Color;
+        if (colorMode === '%') {
+            const normalized = point?.thickness !== null && thicknessRange > 0
+                ? (point.thickness - minThickness) / thicknessRange
+                : null;
+            color = getNormalizedColor(normalized);
+        } else {
+            color = getAbsColor(point?.percentage ?? 100);
+        }
+        colors.push(color.r, color.g, color.b);
+    }
+    geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    geometry.attributes.position.needsUpdate = true;
+    geometry.attributes.color.needsUpdate = true;
+    geometry.computeVertexNormals();
+    
+    meshRef.current.geometry = geometry;
+
+  }, [geometry, zScale, colorMode, nominalThickness, stats]);
+
+
+  useEffect(() => {
+    if (!mountRef.current || !inspectionResult || !geometry) return
 
     const { processedData, stats, nominalThickness } = inspectionResult
     const { gridSize, minThickness, maxThickness } = stats
@@ -72,69 +185,12 @@ export function ThreeDeeViewTab() {
     dirLight.position.set(gridSize.width, gridSize.height * 2, gridSize.width)
     scene.add(dirLight)
 
-    // Data texture for contour plot
-    const canvas = document.createElement('canvas')
-    canvas.width = gridSize.width;
-    canvas.height = gridSize.height;
-    const ctx = canvas.getContext('2d')!;
-    
-    const imgData = ctx.createImageData(gridSize.width, gridSize.height);
-    for (let y = 0; y < gridSize.height; y++) {
-      for (let x = 0; x < gridSize.width; x++) {
-        const point = dataMapRef.current.get(`${x},${y}`);
-        const color = getColor(point?.percentage ?? null);
-        const i = (y * gridSize.width + x) * 4;
-        imgData.data[i] = color.r * 255;
-        imgData.data[i+1] = color.g * 255;
-        imgData.data[i+2] = color.b * 255;
-        imgData.data[i+3] = 255;
-      }
-    }
-    ctx.putImageData(imgData, 0, 0);
-    const dataTexture = new THREE.CanvasTexture(canvas);
-    dataTexture.needsUpdate = true;
-
-
-    // Bounding Box / Chart Axes
-    const boxGeom = new THREE.BoxGeometry(gridSize.width, maxThickness * zScale, gridSize.height)
-    const boxEdges = new THREE.EdgesGeometry(boxGeom)
-    const boxLines = new THREE.LineSegments(boxEdges, new THREE.LineBasicMaterial({ color: 0xaaaaaa }))
-    boxLines.position.set(gridSize.width/2, (maxThickness * zScale)/2, gridSize.height/2)
-    scene.add(boxLines);
-
+    // Grid
     const gridHelper = new THREE.GridHelper(Math.max(gridSize.width, gridSize.height), 10, 0x888888, 0x888888)
     gridHelper.position.set(gridSize.width / 2, 0, gridSize.height / 2)
     scene.add(gridHelper);
 
-    // Contour plot on the floor
-    const floorGeom = new THREE.PlaneGeometry(gridSize.width, gridSize.height)
-    const floorMat = new THREE.MeshBasicMaterial({ map: dataTexture, side: THREE.DoubleSide })
-    const floorPlane = new THREE.Mesh(floorGeom, floorMat);
-    floorPlane.rotation.x = -Math.PI/2;
-    floorPlane.position.set(gridSize.width/2, 0.1, gridSize.height/2);
-    scene.add(floorPlane);
-
-
     // Main Asset Surface Geometry
-    const geometry = new THREE.PlaneGeometry(gridSize.width, gridSize.height, gridSize.width - 1, gridSize.height - 1);
-    const colors: number[] = [];
-
-    const positions = geometry.attributes.position;
-    for (let i = 0; i < positions.count; i++) {
-        const x = positions.getX(i) + gridSize.width / 2;
-        const z_plane = positions.getZ(i) + gridSize.height / 2; // In plane geom, z is our y
-        const point = dataMapRef.current.get(`${Math.round(x)},${Math.round(z_plane)}`);
-        
-        const thickness = point?.thickness ?? nominalThickness;
-        const y_pos = thickness * zScale; // Height based on thickness
-        positions.setY(i, y_pos);
-
-        const color = getColor(point?.percentage ?? 100);
-        colors.push(color.r, color.g, color.b);
-    }
-    geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-    geometry.computeVertexNormals();
-
     const material = new THREE.MeshStandardMaterial({ vertexColors: true, side: THREE.DoubleSide });
     const mesh = new THREE.Mesh(geometry, material);
     mesh.position.set(gridSize.width / 2, 0, gridSize.height / 2);
@@ -142,19 +198,11 @@ export function ThreeDeeViewTab() {
     scene.add(mesh);
     meshRef.current = mesh;
 
-    // Wireframe Overlay
-    const wireframeMat = new THREE.LineBasicMaterial({ color: 0x000000, linewidth: 1, transparent: true, opacity: 0.2 });
-    const wireframe = new THREE.LineSegments(new THREE.WireframeGeometry(geometry), wireframeMat);
-    wireframe.rotation.x = -Math.PI / 2;
-    wireframe.position.set(gridSize.width / 2, 0, gridSize.height / 2);
-    scene.add(wireframe);
-
     // Reference Plane
     const refPlaneGeom = new THREE.PlaneGeometry(gridSize.width * 1.1, gridSize.height * 1.1);
     const refPlaneMat = new THREE.MeshStandardMaterial({ color: 0x1e90ff, transparent: true, opacity: 0.3, side: THREE.DoubleSide });
     const refPlane = new THREE.Mesh(refPlaneGeom, refPlaneMat);
     refPlane.rotation.x = -Math.PI / 2;
-    refPlane.position.set(gridSize.width / 2, nominalThickness * zScale, gridSize.height / 2);
     refPlane.visible = showReference;
     scene.add(refPlane);
     
@@ -163,13 +211,11 @@ export function ThreeDeeViewTab() {
     const minPoint = processedData.find(p => p.thickness === minThickness)
     if(minPoint){
         const minMarker = new THREE.Mesh(new THREE.SphereGeometry(gridSize.width/100, 16, 16), new THREE.MeshBasicMaterial({color: 0xff0000}));
-        minMarker.position.set(minPoint.x, minPoint.thickness * zScale, minPoint.y);
         minMaxGroup.add(minMarker);
     }
     const maxPoint = processedData.find(p => p.thickness === maxThickness)
     if(maxPoint){
         const maxMarker = new THREE.Mesh(new THREE.SphereGeometry(gridSize.width/100, 16, 16), new THREE.MeshBasicMaterial({color: 0x0000ff}));
-        maxMarker.position.set(maxPoint.x, maxPoint.thickness * zScale, maxPoint.y);
         minMaxGroup.add(maxMarker);
     }
     minMaxGroup.visible = showMinMax;
@@ -185,6 +231,13 @@ export function ThreeDeeViewTab() {
       requestAnimationFrame(animate)
       controls.update()
       
+      refPlane.position.y = nominalThickness * zScale;
+      refPlane.visible = showReference;
+
+      if(minPoint && minMarker){ minMarker.position.set(minPoint.x, minPoint.thickness * zScale, minPoint.y); }
+      if(maxPoint && maxMarker){ maxMarker.position.set(maxPoint.x, maxPoint.thickness * zScale, maxPoint.y); }
+      minMaxGroup.visible = showMinMax;
+
       if (selectedPoint) {
           const pointData = dataMapRef.current.get(`${selectedPoint.x},${selectedPoint.y}`);
           if (pointData) {
@@ -211,6 +264,7 @@ export function ThreeDeeViewTab() {
 
     const raycaster = new THREE.Raycaster();
     const mouse = new THREE.Vector2();
+    let minMarker: any, maxMarker: any; // define these to satisfy the compiler
 
     const onMouseMove = (event: MouseEvent) => {
         if (!mountRef.current) return;
@@ -258,7 +312,7 @@ export function ThreeDeeViewTab() {
         mountRef.current.innerHTML = ''
       }
     }
-  }, [inspectionResult, zScale, showReference, showMinMax, selectedPoint, setSelectedPoint])
+  }, [inspectionResult, geometry, setSelectedPoint]) // only re-init scene when data or geometry changes
   
   const resetCamera = () => {
     if (cameraRef.current && controlsRef.current && inspectionResult) {
@@ -280,6 +334,9 @@ export function ThreeDeeViewTab() {
             <div ref={mountRef} className="w-full h-full" />
           </CardContent>
         </Card>
+        {stats && nominalThickness && (
+          <ColorLegend mode={colorMode} stats={stats} nominalThickness={nominalThickness} />
+        )}
         {hoveredPoint && (
           <div
             className="absolute p-2 text-xs rounded-md shadow-lg pointer-events-none bg-popover text-popover-foreground border"
@@ -301,6 +358,19 @@ export function ThreeDeeViewTab() {
             <CardTitle className="text-lg font-headline">Controls</CardTitle>
           </CardHeader>
           <CardContent className="space-y-6">
+            <div className="space-y-2">
+                <Label>Color Scale</Label>
+                <RadioGroup value={colorMode} onValueChange={(val) => setColorMode(val as ColorMode)}>
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="mm" id="mm" />
+                    <Label htmlFor="mm" className="flex items-center gap-2 font-normal"><Ruler className="h-4 w-4"/> Absolute (mm)</Label>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="%" id="%" />
+                    <Label htmlFor="%" className="flex items-center gap-2 font-normal"><Percent className="h-4 w-4"/>Normalized (%)</Label>
+                  </div>
+                </RadioGroup>
+            </div>
             <div className="space-y-3">
               <Label>Z-Axis Scale: {zScale.toFixed(1)}x</Label>
               <Slider value={[zScale]} onValueChange={([val]) => setZScale(val)} min={0.1} max={25} step={0.1} />
@@ -329,5 +399,3 @@ export function ThreeDeeViewTab() {
     </div>
   )
 }
-
-    
