@@ -23,6 +23,7 @@ export const processData = (
       totalPoints: 0,
       worstLocation: { x: 0, y: 0 },
       gridSize: { width: 0, height: 0 },
+      scannedArea: 0,
     };
     return { processedData: [], stats: emptyStats, condition: 'N/A' };
   }
@@ -82,6 +83,8 @@ export const processData = (
   const avgThickness = validPointsCount > 0 ? sumThickness / validPointsCount : 0;
   const minPercentage = (minThickness / nominalThickness) * 100;
   const totalPoints = data.length;
+  const gridSize = { width: maxX + 1, height: maxY + 1 };
+  const scannedArea = (gridSize.width * gridSize.height) / 1000000; // Convert mm^2 to m^2
 
   const stats: InspectionStats = {
     minThickness: minThickness === Infinity ? 0 : minThickness,
@@ -94,7 +97,8 @@ export const processData = (
     countND,
     totalPoints,
     worstLocation,
-    gridSize: { width: maxX + 1, height: maxY + 1 },
+    gridSize,
+    scannedArea,
   };
 
   // Condition evaluation

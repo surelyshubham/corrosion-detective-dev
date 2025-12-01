@@ -20,6 +20,7 @@ export function InfoTab() {
     { label: 'Asset Type', value: assetType },
     { label: 'Nominal Thickness', value: `${nominalThickness.toFixed(2)} mm` },
     { label: 'Condition', value: condition, className: getConditionClass(condition) },
+    { label: 'Scanned Area', value: `${stats.scannedArea.toFixed(2)} m²` },
     { label: 'Total Points Scanned', value: stats.totalPoints.toLocaleString() },
     { label: 'Not Scanned (ND) Points', value: stats.countND.toLocaleString() },
   ]

@@ -38,6 +38,7 @@ export interface InspectionStats {
   totalPoints: number;
   worstLocation: { x: number; y: number };
   gridSize: { width: number; height: number };
+  scannedArea: number;
 }
 
 export type Condition = 'Healthy' | 'Moderate' | 'Localized' | 'Severe' | 'N/A';

@@ -28,21 +28,25 @@ const getColor = (percentage: number | null) => {
 
 
 export function ThreeDeeViewTab() {
-  const { inspectionResult, selectedPoint } = useInspectionStore()
+  const { inspectionResult, selectedPoint, setSelectedPoint } = useInspectionStore()
   const mountRef = useRef<HTMLDivElement>(null)
   const [zScale, setZScale] = useState(5) // Increased default scale
   const [showReference, setShowReference] = useState(true)
   const [showMinMax, setShowMinMax] = useState(true)
+  const [hoveredPoint, setHoveredPoint] = useState<any>(null)
   
   const sceneRef = useRef<THREE.Scene | null>(null)
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null)
   const controlsRef = useRef<OrbitControls | null>(null)
+  const meshRef = useRef<THREE.Mesh | null>(null);
+  const dataMapRef = useRef(new Map());
 
   useEffect(() => {
     if (!mountRef.current || !inspectionResult) return
 
     const { processedData, stats, nominalThickness } = inspectionResult
     const { gridSize, minThickness, maxThickness } = stats
+    dataMapRef.current = new Map(processedData.map(p => [`${p.x},${p.y}`, p]))
     
     // Renderer
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
@@ -79,7 +83,7 @@ export function ThreeDeeViewTab() {
     // Main Asset Geometry
     const boxDepth = nominalThickness * 2; // Give it some visual thickness
     const geometry = new THREE.BoxGeometry(gridSize.width, boxDepth, gridSize.height, gridSize.width - 1, 1, gridSize.height - 1);
-    const dataMap = new Map(processedData.map(p => [`${p.x},${p.y}`, p]))
+    const dataMap = dataMapRef.current;
     
     const positions = geometry.attributes.position;
     const colors: number[] = [];
@@ -115,6 +119,7 @@ export function ThreeDeeViewTab() {
     const mesh = new THREE.Mesh(geometry, material)
     mesh.position.set(gridSize.width / 2, 0, gridSize.height / 2)
     scene.add(mesh)
+    meshRef.current = mesh;
     
     // Wireframe for the mesh
     const wireframeGeom = new THREE.WireframeGeometry(geometry);
@@ -199,13 +204,65 @@ export function ThreeDeeViewTab() {
     }
     window.addEventListener('resize', handleResize)
 
+    // Hover logic
+    const raycaster = new THREE.Raycaster();
+    const mouse = new THREE.Vector2();
+
+    const onMouseMove = (event: MouseEvent) => {
+        if (!mountRef.current) return;
+        const rect = mountRef.current.getBoundingClientRect();
+        mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+        mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+        
+        raycaster.setFromCamera(mouse, camera);
+        const intersects = raycaster.intersectObject(meshRef.current!);
+        
+        if (intersects.length > 0) {
+            const intersect = intersects[0];
+            const face = intersect.face;
+            if (!face) {
+                setHoveredPoint(null);
+                return;
+            }
+            
+            // Get coordinates from the intersection point on the mesh
+            const worldPoint = intersect.point;
+            meshRef.current?.worldToLocal(worldPoint);
+            
+            const gridX = Math.round(worldPoint.x + gridSize.width / 2);
+            const gridY = Math.round(worldPoint.z + gridSize.height / 2);
+            
+            const pointData = dataMapRef.current.get(`${gridX},${gridY}`);
+
+            if (pointData) {
+                 setHoveredPoint({ ...pointData, clientX: event.clientX, clientY: event.clientY });
+            } else {
+                 setHoveredPoint(null);
+            }
+        } else {
+            setHoveredPoint(null);
+        }
+    };
+    
+    const onClick = (event: MouseEvent) => {
+        if(hoveredPoint){
+            setSelectedPoint({ x: hoveredPoint.x, y: hoveredPoint.y });
+        }
+    };
+
+    mountRef.current.addEventListener('mousemove', onMouseMove);
+    mountRef.current.addEventListener('click', onClick);
+
+
     return () => {
       window.removeEventListener('resize', handleResize)
       if (mountRef.current) {
+        mountRef.current.removeEventListener('mousemove', onMouseMove);
+        mountRef.current.removeEventListener('click', onClick);
         mountRef.current.innerHTML = ''
       }
     }
-  }, [inspectionResult, zScale, showReference, showMinMax, selectedPoint])
+  }, [inspectionResult, zScale, showReference, showMinMax, selectedPoint, setSelectedPoint])
   
   const resetCamera = () => {
     if (cameraRef.current && controlsRef.current && inspectionResult) {
@@ -218,7 +275,7 @@ export function ThreeDeeViewTab() {
 
   return (
     <div className="grid md:grid-cols-4 gap-6 h-full">
-      <div className="md:col-span-3 h-full">
+      <div className="md:col-span-3 h-full relative">
         <Card className="h-full flex flex-col">
           <CardHeader>
             <CardTitle className="font-headline">3D Heightmap View</CardTitle>
@@ -227,6 +284,20 @@ export function ThreeDeeViewTab() {
             <div ref={mountRef} className="w-full h-full" />
           </CardContent>
         </Card>
+        {hoveredPoint && (
+          <div
+            className="absolute p-2 text-xs rounded-md shadow-lg pointer-events-none bg-popover text-popover-foreground border"
+            style={{
+              left: `${hoveredPoint.clientX}px`,
+              top: `${hoveredPoint.clientY}px`,
+              transform: `translate(15px, -100%)`
+            }}
+          >
+            <div className="font-bold">X: {hoveredPoint.x}, Y: {hoveredPoint.y}</div>
+            <div>Thickness: {hoveredPoint.thickness?.toFixed(2) ?? 'ND'} mm</div>
+            <div>Percentage: {hoveredPoint.percentage?.toFixed(1) ?? 'N/A'}%</div>
+          </div>
+        )}
       </div>
       <div className="md:col-span-1 space-y-4">
         <Card>
