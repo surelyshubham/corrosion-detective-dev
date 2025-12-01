@@ -196,5 +196,3 @@ export function TwoDeeHeatmapTab() {
     </Card>
   )
 }
-
-    
