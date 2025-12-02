@@ -86,7 +86,7 @@ export function SetupTab({ onFileProcess, isLoading }: SetupTabProps) {
           return;
       }
       const data = getValues();
-      onFileProcess(file, data.assetType, data.nominalThickness, mergeDirection);
+      onFileProcess(file, data.assetType, Number(data.nominalThickness), mergeDirection);
       setFile(null); // Clear file after processing
   };
 
