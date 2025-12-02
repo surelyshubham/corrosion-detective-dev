@@ -422,8 +422,7 @@ export function TwoDeeHeatmapTab() {
                     </div>
                     <div className="flex items-center space-x-2">
                       <RadioGroupItem value="%" id="pct-2d" />
-                      <Label htmlFor="pct-2d" className="flex items-center gap-2 font-normal"><Percent className="h-4 w-4"/>Normalized (%)</Label>
-                    </div>
+                      <Label htmlFor="pct-2d" className="flex items-center gap-2 font-normal"><Percent className="h-4 w-4"/>Normalized (%)</Label>                    </div>
                 </RadioGroup>
                 <div className="space-y-2">
                    <Label>Zoom</Label>
