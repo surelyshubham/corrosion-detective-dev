@@ -139,14 +139,8 @@ export function ThreeDeeViewTab() {
   useEffect(() => {
     if (!geometry || !meshRef.current || !stats || !nominalThickness || !mergedGrid) return;
 
-    const { gridSize } = stats;
-    const allRawThicknesses = mergedGrid.flat().map(c => c.rawThickness).filter(t => t !== null) as number[];
-    const minRawT = Math.min(...allRawThicknesses);
-    const rawTRange = Math.max(...allRawThicknesses) - minRawT;
-
-    const allEffThicknesses = mergedGrid.flat().map(c => c.effectiveThickness).filter(t => t !== null) as number[];
-    const minEffT = Math.min(...allEffThicknesses);
-    const effTRange = Math.max(...allEffThicknesses) - minEffT;
+    const { gridSize, minThickness, maxThickness } = stats;
+    const effTRange = maxThickness - minThickness;
     
     const colors: number[] = [];
     const positions = geometry.attributes.position;
@@ -156,10 +150,10 @@ export function ThreeDeeViewTab() {
         for (let x = 0; x < gridSize.width; x++, i++) {
             const cellData = mergedGrid[y]?.[x];
             
-            // Y-position from RAW thickness
-            if (cellData && cellData.rawThickness !== null) {
-                const normRaw = rawTRange > 0 ? (cellData.rawThickness - minRawT) / rawTRange : 0;
-                positions.setY(i, normRaw * zScale);
+            // Y-position from EFFECTIVE thickness
+            if (cellData && cellData.effectiveThickness !== null) {
+                const normEff = effTRange > 0 ? (cellData.effectiveThickness - minThickness) / effTRange : 0;
+                positions.setY(i, normEff * zScale);
             } else {
                 positions.setY(i, 0); 
             }
@@ -168,7 +162,7 @@ export function ThreeDeeViewTab() {
             let color: THREE.Color;
             if (colorMode === '%') {
                  const normalizedPercent = (cellData && cellData.effectiveThickness !== null && effTRange > 0)
-                    ? (cellData.effectiveThickness - minEffT) / effTRange
+                    ? (cellData.effectiveThickness - minThickness) / effTRange
                     : null;
                 color = getNormalizedColor(normalizedPercent);
             } else {
@@ -277,9 +271,7 @@ export function ThreeDeeViewTab() {
     refPlane.visible = showReference;
     scene.add(refPlane);
     
-    const allRawThicknesses = mergedGrid.flat().map(c => c.rawThickness).filter(t => t !== null) as number[];
-    const minRawT = Math.min(...allRawThicknesses);
-    const rawTRange = Math.max(...allRawThicknesses) - minRawT;
+    const effTRange = stats.maxThickness - stats.minThickness;
 
     const minMaxGroup = new THREE.Group();
     
@@ -289,10 +281,10 @@ export function ThreeDeeViewTab() {
         minMaxGroup.add(minMarker);
     }
     
-    const allPoints = mergedGrid.flat().filter(p => p.rawThickness !== null);
+    const allPoints = mergedGrid.flat().filter(p => p.effectiveThickness !== null);
     const maxPoint = allPoints.reduce((prev, current) => {
-      if (current.rawThickness === null || prev.rawThickness === null) return prev;
-      return (prev.rawThickness > current.rawThickness) ? prev : current
+      if (current.effectiveThickness === null || prev.effectiveThickness === null) return prev;
+      return (prev.effectiveThickness > current.effectiveThickness) ? prev : current
     }, allPoints[0])
     
     let maxMarker: THREE.Mesh | null = null;
@@ -301,7 +293,7 @@ export function ThreeDeeViewTab() {
     // Find coordinates of maxPoint
     if(maxPoint) {
         for (let y = 0; y < gridSize.height; y++) {
-            const x = mergedGrid[y].findIndex(p => p.rawThickness === maxPoint.rawThickness);
+            const x = mergedGrid[y].findIndex(p => p && p.effectiveThickness === maxPoint.effectiveThickness);
             if(x !== -1) {
                 maxPointCoords = { x, y };
                 break;
@@ -322,27 +314,27 @@ export function ThreeDeeViewTab() {
       requestAnimationFrame(animate)
       controls.update()
       
-      const normNominal = rawTRange > 0 ? (nominalThickness - minRawT) / rawTRange : 0;
+      const normNominal = effTRange > 0 ? (nominalThickness - stats.minThickness) / effTRange : 0;
       refPlane.position.y = normNominal * zScale;
       refPlane.visible = showReference;
 
       if(minMarker && stats.worstLocation){ 
           const pointData = mergedGrid[stats.worstLocation.y]?.[stats.worstLocation.x];
-          if (pointData && pointData.rawThickness !== null) {
-            const normMinY = rawTRange > 0 ? (pointData.rawThickness - minRawT) / rawTRange : 0;
+          if (pointData && pointData.effectiveThickness !== null) {
+            const normMinY = effTRange > 0 ? (pointData.effectiveThickness - stats.minThickness) / effTRange : 0;
             minMarker.position.set( (stats.worstLocation.x / gridSize.width - 0.5) * VISUAL_WIDTH, normMinY * zScale, (stats.worstLocation.y / gridSize.height - 0.5) * visualHeight);
           }
       }
-      if(maxMarker && maxPoint && maxPoint.rawThickness !== null){ 
-          const normMaxY = rawTRange > 0 ? (maxPoint.rawThickness - minRawT) / rawTRange : 0;
+      if(maxMarker && maxPoint && maxPoint.effectiveThickness !== null){ 
+          const normMaxY = effTRange > 0 ? (maxPoint.effectiveThickness - stats.minThickness) / effTRange : 0;
           maxMarker.position.set( (maxPointCoords.x / gridSize.width - 0.5) * VISUAL_WIDTH, normMaxY * zScale, (maxPointCoords.y / gridSize.height - 0.5) * visualHeight);
        }
       minMaxGroup.visible = showMinMax;
 
       if (selectedPoint) {
           const pointData = mergedGrid[selectedPoint.y]?.[selectedPoint.x];
-          if (pointData && pointData.rawThickness !== null) {
-              const normY = rawTRange > 0 ? (pointData.rawThickness - minRawT) / rawTRange : 0;
+          if (pointData && pointData.effectiveThickness !== null) {
+              const normY = effTRange > 0 ? (pointData.effectiveThickness - stats.minThickness) / effTRange : 0;
               selectedMarker.position.set( (selectedPoint.x / gridSize.width - 0.5) * VISUAL_WIDTH, normY * zScale, (selectedPoint.y / gridSize.height - 0.5) * visualHeight );
               selectedMarker.visible = true;
           } else {
@@ -485,7 +477,6 @@ export function ThreeDeeViewTab() {
           >
             <div className="font-bold">X: {hoveredPoint.x}, Y: {hoveredPoint.y}</div>
             {hoveredPoint.plateId && <div className="text-muted-foreground">{hoveredPoint.plateId}</div>}
-            <div>Raw Thick: {hoveredPoint.rawThickness?.toFixed(2) ?? 'ND'} mm</div>
             <div>Eff. Thick: {hoveredPoint.effectiveThickness?.toFixed(2) ?? 'ND'} mm</div>
             <div>Percentage: {hoveredPoint.percentage?.toFixed(1) ?? 'N/A'}%</div>
           </div>
@@ -502,7 +493,7 @@ export function ThreeDeeViewTab() {
                 <RadioGroup value={colorMode} onValueChange={(val) => setColorMode(val as ColorMode)}>
                   <div className="flex items-center space-x-2">
                     <RadioGroupItem value="mm" id="mm" />
-                    <Label htmlFor="mm" className="flex items-center gap-2 font-normal"><Ruler className="h-4 w-4"/> Condition (mm)</Label>
+                    <Label htmlFor="mm" className="flex items-center gap-2 font-normal"><Ruler className="h-4 w-4"/>Condition (mm)</Label>
                   </div>
                   <div className="flex items-center space-x-2">
                     <RadioGroupItem value="%" id="%" />

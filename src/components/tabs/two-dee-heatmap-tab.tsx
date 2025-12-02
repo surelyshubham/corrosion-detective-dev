@@ -8,7 +8,7 @@ import { Label } from '../ui/label'
 import { RadioGroup, RadioGroupItem } from '../ui/radio-group'
 import { Percent, Ruler, ZoomIn, Search, MousePointer, ZoomOut, RefreshCw } from 'lucide-react'
 import { Button } from '../ui/button'
-import { ScrollArea } from '../ui/scroll-area'
+import { ScrollArea, ScrollBar } from '../ui/scroll-area'
 
 // --- Color Helper Functions ---
 const getAbsColor = (percentage: number | null): string => {
@@ -100,9 +100,6 @@ const getNiceInterval = (range: number, maxTicks: number): number => {
 export function TwoDeeHeatmapTab() {
   const { inspectionResult, selectedPoint, setSelectedPoint, colorMode, setColorMode } = useInspectionStore()
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const scrollContainerRef = useRef<HTMLDivElement>(null)
-  const xAxisRef = useRef<HTMLCanvasElement>(null)
-  const yAxisRef = useRef<HTMLCanvasElement>(null)
   
   const [zoom, setZoom] = useState(1);
   const [hoveredPoint, setHoveredPoint] = useState<any>(null);
@@ -110,7 +107,6 @@ export function TwoDeeHeatmapTab() {
   const { mergedGrid, stats, nominalThickness, plates } = inspectionResult || {};
   const { gridSize, minThickness: minEffT, maxThickness: maxEffT } = stats || {};
   
-  const AXIS_SIZE = 40;
   const BASE_CELL_SIZE = 6;
   const scaledCellSize = BASE_CELL_SIZE * zoom;
 
@@ -231,77 +227,10 @@ export function TwoDeeHeatmapTab() {
     
   }, [gridSize, colorMode, mergedGrid, zoom, scaledCellSize, selectedPoint, plateBoundaries]);
 
-  const drawAxes = useCallback((scrollLeft = 0, scrollTop = 0) => {
-    if (!gridSize || !xAxisRef.current || !yAxisRef.current || !scrollContainerRef.current) return;
-    
-    const dpr = window.devicePixelRatio || 1;
-    const xAxis = xAxisRef.current;
-    const yAxis = yAxisRef.current;
-    const xCtx = xAxis.getContext('2d')!;
-    const yCtx = yAxis.getContext('2d')!;
-
-    const xAxisWidth = scrollContainerRef.current!.clientWidth;
-    const yAxisHeight = scrollContainerRef.current!.clientHeight;
-
-    xAxis.width = xAxisWidth * dpr;
-    xAxis.height = AXIS_SIZE * dpr;
-    xAxis.style.width = `${xAxisWidth}px`;
-    xAxis.style.height = `${AXIS_SIZE}px`;
-    
-    yAxis.width = AXIS_SIZE * dpr;
-    yAxis.height = yAxisHeight * dpr;
-    yAxis.style.width = `${AXIS_SIZE}px`;
-    yAxis.style.height = `${yAxisHeight}px`;
-
-    xCtx.scale(dpr, dpr);
-    yCtx.scale(dpr, dpr);
-
-    xCtx.clearRect(0, 0, xAxis.width, xAxis.height);
-    yCtx.clearRect(0, 0, yAxis.width, yAxis.height);
-    
-    const foregroundColor = getComputedStyle(document.documentElement).getPropertyValue('--foreground').trim();
-    xCtx.fillStyle = `hsl(${foregroundColor})`;
-    yCtx.fillStyle = `hsl(${foregroundColor})`;
-    xCtx.font = '10px sans-serif';
-    yCtx.font = '10px sans-serif';
-    yCtx.textAlign = "right";
-    
-    const xInterval = getNiceInterval((xAxisWidth / scaledCellSize), 10);
-    const yInterval = getNiceInterval((yAxisHeight / scaledCellSize), 10);
-    
-    // Draw X-Axis Ticks
-    for (let i = 0; ; i++) {
-        const xVal = i * xInterval;
-        if (xVal > gridSize.width) break;
-        const xPos = xVal * scaledCellSize - scrollLeft + AXIS_SIZE;
-        if (xPos > AXIS_SIZE && xPos < xAxisWidth) {
-            xCtx.fillText(String(xVal), xPos, 20);
-            xCtx.fillRect(xPos, 0, 1, 5);
-        }
-    }
-
-    // Draw Y-Axis Ticks
-    for (let i = 0; ; i++) {
-        const yVal = i * yInterval;
-        if (yVal > gridSize.height) break;
-        const yPos = yVal * scaledCellSize - scrollTop + AXIS_SIZE;
-        if (yPos > AXIS_SIZE && yPos < yAxisHeight) {
-            yCtx.fillText(String(yVal), AXIS_SIZE - 10, yPos + 3);
-            yCtx.fillRect(AXIS_SIZE - 5, yPos, 5, 1);
-        }
-    }
-  }, [gridSize, scaledCellSize, AXIS_SIZE]);
-
   useEffect(() => {
     draw();
-    drawAxes();
-  }, [draw, drawAxes]);
+  }, [draw]);
   
-  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
-    const { scrollLeft, scrollTop } = e.currentTarget;
-    drawAxes(scrollLeft, scrollTop);
-  }
-
   // --- Interaction Handlers ---
 
   const adjustZoom = (factor: number) => {
@@ -312,9 +241,6 @@ export function TwoDeeHeatmapTab() {
   
   const resetView = () => {
     setZoom(1);
-    if(scrollContainerRef.current) {
-        scrollContainerRef.current.scrollTo(0,0);
-    }
   };
 
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -361,36 +287,22 @@ export function TwoDeeHeatmapTab() {
         <CardHeader>
           <CardTitle className="font-headline">2D Heatmap</CardTitle>
         </CardHeader>
-        <CardContent className="flex-grow relative p-0 border-t"
-            onContextMenu={(e) => e.preventDefault()}
-        >
-            <canvas ref={yAxisRef} className="absolute left-0 top-0 bg-card z-10" />
-            <canvas ref={xAxisRef} className="absolute left-0 top-0 bg-card z-10" />
-            
-            <ScrollArea
-                ref={scrollContainerRef}
-                className="w-full h-full"
-                onScroll={handleScroll}
-            >
-                <div 
-                    className="relative" 
-                    style={{
-                        width: gridSize ? gridSize.width * scaledCellSize : '100%',
-                        height: gridSize ? gridSize.height * scaledCellSize : '100%',
-                        paddingTop: AXIS_SIZE,
-                        paddingLeft: AXIS_SIZE
-                    }}
-                >
+        <CardContent className="flex-grow relative p-0 border-t">
+            <ScrollArea className="w-full h-full">
+                 <div 
+                    className="relative"
+                 >
                     <canvas 
                         ref={canvasRef}
-                        className="absolute top-0 left-0"
                         onMouseMove={handleMouseMove}
                         onMouseLeave={() => setHoveredPoint(null)}
                         onClick={handleClick}
+                        style={{ width: gridSize ? gridSize.width * scaledCellSize : '100%', height: gridSize ? gridSize.height * scaledCellSize : '100%' }}
                     />
                 </div>
+                <ScrollBar orientation="horizontal" />
+                <ScrollBar orientation="vertical" />
             </ScrollArea>
-
             {hoveredPoint && (
               <div
                 className="fixed p-2 text-xs rounded-md shadow-lg pointer-events-none bg-popover text-popover-foreground border z-20"
@@ -401,7 +313,6 @@ export function TwoDeeHeatmapTab() {
               >
                 <div className="font-bold">X: {hoveredPoint.x}, Y: {hoveredPoint.y}</div>
                 {hoveredPoint.plateId && <div className="text-muted-foreground">{hoveredPoint.plateId}</div>}
-                <div>Raw Thick: {hoveredPoint.rawThickness?.toFixed(2) ?? 'ND'} mm</div>
                 <div>Eff. Thick: {hoveredPoint.effectiveThickness?.toFixed(2) ?? 'ND'} mm</div>
                 <div>Percentage: {hoveredPoint.percentage?.toFixed(1) ?? 'N/A'}%</div>
               </div>
