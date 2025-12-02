@@ -12,10 +12,10 @@ import { Button } from '../ui/button'
 // --- Color Helper Functions ---
 const getAbsColor = (percentage: number | null): string => {
     if (percentage === null) return 'transparent'; // ND
-    if (percentage <= 60) return '#ff0000'; // Red
-    if (percentage <= 80) return '#ffa500'; // Orange
-    if (percentage <= 95) return '#ffff00'; // Yellow
-    return '#00ff00'; // Green
+    if (percentage < 70) return '#ff0000'; // Red
+    if (percentage < 80) return '#ffff00'; // Yellow
+    if (percentage < 90) return '#00ff00'; // Green
+    return '#0000ff'; // Blue
 };
 
 const getNormalizedColor = (normalizedPercent: number | null): string => {
@@ -30,10 +30,10 @@ const getNormalizedColor = (normalizedPercent: number | null): string => {
 const ColorLegend = ({ mode, min, max, nominal }: { mode: ColorMode, min: number, max: number, nominal: number}) => {
     const renderMmLegend = () => {
         const levels = [
-            { label: `> 95%`, color: '#00ff00' },
-            { label: `80-95%`, color: '#ffff00' },
-            { label: `60-80%`, color: '#ffa500' },
-            { label: `< 60%`, color: '#ff0000' },
+            { label: `90-100%`, color: '#0000ff' },
+            { label: `80-90%`, color: '#00ff00' },
+            { label: `70-80%`, color: '#ffff00' },
+            { label: `< 70%`, color: '#ff0000' },
         ];
         return (
             <>

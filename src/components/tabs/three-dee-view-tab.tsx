@@ -15,10 +15,10 @@ import { RadioGroup, RadioGroupItem } from '../ui/radio-group'
 const getAbsColor = (percentage: number | null): THREE.Color => {
     const color = new THREE.Color();
     if (percentage === null) color.set(0x888888); // Grey for ND
-    else if (percentage <= 60) color.set(0xff0000); // Red
-    else if (percentage <= 80) color.set(0xffa500); // Orange
-    else if (percentage <= 95) color.set(0xffff00); // Yellow
-    else color.set(0x00ff00); // Green
+    else if (percentage < 70) color.set(0xff0000); // Red
+    else if (percentage < 80) color.set(0xffff00); // Yellow
+    else if (percentage < 90) color.set(0x00ff00); // Green
+    else color.set(0x0000ff); // Blue
     return color;
 };
 
@@ -32,16 +32,16 @@ const getNormalizedColor = (normalizedPercent: number | null): THREE.Color => {
 const ColorLegend = ({ mode, stats, nominalThickness }: { mode: ColorMode, stats: any, nominalThickness: number}) => {
     const renderMmLegend = () => {
         const levels = [
-            { pct: 100, label: `> 95%`, color: '#00ff00' },
-            { pct: 95, label: `80-95%`, color: '#ffff00' },
-            { pct: 80, label: `60-80%`, color: '#ffa500' },
-            { pct: 60, label: `< 60%`, color: '#ff0000' },
+            { label: `90-100%`, color: '#0000ff' },
+            { label: `80-90%`, color: '#00ff00' },
+            { label: `70-80%`, color: '#ffff00' },
+            { label: `< 70%`, color: '#ff0000' },
         ];
         return (
             <>
                 <div className="font-medium text-xs mb-1">Eff. Thickness (% of {nominalThickness}mm)</div>
                 {levels.map(l => (
-                    <div key={l.pct} className="flex items-center gap-2 text-xs">
+                    <div key={l.label} className="flex items-center gap-2 text-xs">
                         <div className="w-3 h-3 rounded-sm border" style={{ backgroundColor: l.color }} />
                         <span>{l.label}</span>
                     </div>
