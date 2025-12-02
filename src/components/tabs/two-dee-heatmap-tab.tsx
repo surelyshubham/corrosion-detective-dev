@@ -344,7 +344,7 @@ export function TwoDeeHeatmapTab() {
 
                 <div className="flex-grow flex flex-col overflow-hidden">
                     {/* X Axis */}
-                    <div className="flex-shrink-0 overflow-hidden" style={{ height: AXIS_SIZE }}>
+                    <div className="flex-shrink-0" style={{ height: AXIS_SIZE }}>
                        <div ref={xAxisRef} className="relative h-full">
                           {renderXAxis()}
                        </div>
