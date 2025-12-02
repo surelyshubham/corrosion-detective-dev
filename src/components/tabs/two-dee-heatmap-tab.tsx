@@ -8,7 +8,6 @@ import { Label } from '../ui/label'
 import { RadioGroup, RadioGroupItem } from '../ui/radio-group'
 import { Percent, Ruler, ZoomIn, ZoomOut, RefreshCw } from 'lucide-react'
 import { Button } from '../ui/button'
-import { cn } from '@/lib/utils'
 
 // --- Color Helper Functions ---
 const getAbsColor = (percentage: number | null): string => {
@@ -38,7 +37,7 @@ const ColorLegend = ({ mode, stats, nominalThickness }: { mode: ColorMode, stats
         ];
         return (
             <>
-                <div className="font-medium text-xs mb-1">Eff. Thickness (% of {nominalThickness}mm)</div>
+                <div className="font-medium text-xs mb-1">Condition (mm)</div>
                 {levels.map(l => (
                     <div key={l.label} className="flex items-center gap-2 text-xs">
                         <div className="w-3 h-3 rounded-sm border" style={{ backgroundColor: l.color }} />
@@ -61,7 +60,7 @@ const ColorLegend = ({ mode, stats, nominalThickness }: { mode: ColorMode, stats
         ];
         return (
              <>
-                <div className="font-medium text-xs mb-1">Eff. Thickness (Normalized)</div>
+                <div className="font-medium text-xs mb-1">Normalized (%)</div>
                 <div className="flex flex-col-reverse">
                 {levels.map(l => (
                     <div key={l.pct} className="flex items-center gap-2 text-xs">
@@ -115,7 +114,7 @@ export function TwoDeeHeatmapTab() {
   const AXIS_SIZE = 35; // Space for axis labels
 
   const plateBoundaries = useMemo(() => {
-    if (!mergedGrid || plates.length <= 1) return [];
+    if (!mergedGrid || !plates || plates.length <= 1) return [];
 
     const boundaries: { x: number; y: number; width: number; height: number, plateId: string }[] = [];
     const height = mergedGrid.length;
@@ -154,7 +153,7 @@ export function TwoDeeHeatmapTab() {
   // --- Drawing Logic ---
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
-    if (!canvas || !gridSize || !mergedGrid) return;
+    if (!gridSize || !mergedGrid) return;
     
     const canvasWidth = gridSize.width * scaledCellSize;
     const canvasHeight = gridSize.height * scaledCellSize;
@@ -417,3 +416,5 @@ export function TwoDeeHeatmapTab() {
     </div>
   )
 }
+
+    
