@@ -68,11 +68,7 @@ const PlateStatsCard = ({ plate, index }: { plate: Plate; index: number }) => {
   );
 };
 
-interface InfoTabProps {
-  setActiveTab: (tab: string) => void;
-}
-
-export function InfoTab({ setActiveTab }: InfoTabProps) {
+export function InfoTab() {
   const { inspectionResult } = useInspectionStore();
   const { toast } = useToast();
   
@@ -86,10 +82,10 @@ export function InfoTab({ setActiveTab }: InfoTabProps) {
     setScreenshotData,
     resetReportState,
     setReportMetadata,
-    overviewScreenshot,
-    patchScreenshots,
-    patches,
     reportMetadata,
+    patches,
+    overviewScreenshot,
+    patchScreenshots
   } = useReportStore();
   
   const [isReportDialogOpen, setIsReportDialogOpen] = React.useState(false);
@@ -114,46 +110,48 @@ export function InfoTab({ setActiveTab }: InfoTabProps) {
     }
     
     setIsGeneratingScreenshots(true);
-    setActiveTab("3d-view");
-    await new Promise(resolve => setTimeout(resolve, 600)); // Wait for tab switch and render
 
     try {
+      // Small delay to ensure the hidden 3D scene is fully rendered
+      await new Promise(resolve => setTimeout(resolve, 500));
+
       // 1. Identify defect patches
       const identifiedPatches = identifyPatches(inspectionResult.mergedGrid, 20); // 20% threshold
       
       // 2. Capture overview screenshot
       if (captureFunctions.resetCamera) captureFunctions.resetCamera();
-      await new Promise(resolve => setTimeout(resolve, 500)); // wait for camera
-      const overviewScreenshot = captureFunctions.capture();
+      // Wait for camera to move and scene to re-render in the hidden canvas
+      await new Promise(resolve => setTimeout(resolve, 500));
+      const overviewScreenshotData = captureFunctions.capture();
 
-      if (!overviewScreenshot) {
+      if (!overviewScreenshotData) {
          toast({
             variant: "destructive",
             title: "Screenshot Capture Failed",
             description: "Failed to capture the main overview screenshot. Please try again.",
          });
          setIsGeneratingScreenshots(false);
-         setActiveTab("info");
          return;
       }
 
       // 3. Capture patch screenshots
-      const patchScreenshots: Record<string, string> = {};
+      const capturedPatchScreenshots: Record<string, string> = {};
       for (const patch of identifiedPatches) {
         if (captureFunctions.focus) {
           captureFunctions.focus(patch.center.x, patch.center.y);
-          await new Promise(resolve => setTimeout(resolve, 500)); // Wait for camera to move
+          // Wait for camera to move and scene to re-render
+          await new Promise(resolve => setTimeout(resolve, 500));
         }
         const screenshot = captureFunctions.capture();
         if (screenshot) {
-          patchScreenshots[patch.id] = screenshot;
+          capturedPatchScreenshots[patch.id] = screenshot;
         }
       }
-
+      
       // 4. Store results in state
       setScreenshotData({
-        overview: overviewScreenshot,
-        patches: patchScreenshots,
+        overview: overviewScreenshotData,
+        patches: capturedPatchScreenshots,
         patchData: identifiedPatches,
       });
 
@@ -171,7 +169,6 @@ export function InfoTab({ setActiveTab }: InfoTabProps) {
       });
     } finally {
         setIsGeneratingScreenshots(false);
-        setActiveTab("info");
     }
   };
   
@@ -187,13 +184,18 @@ export function InfoTab({ setActiveTab }: InfoTabProps) {
       setIsGeneratingFinalReport(true);
       try {
         // 1. Generate AI summaries
-        const overallSummary = patches.length === 0
-            ? "No critical corrosion areas detected below 20% remaining wall thickness."
-            : await generateReportSummary(inspectionResult, patches);
+        const overallSummary = await generateReportSummary(inspectionResult, patches);
 
         const patchSummaries: Record<string, string> = {};
         for (const patch of patches) {
-             patchSummaries[patch.id] = await generatePatchSummary(patch, inspectionResult.nominalThickness, inspectionResult.assetType);
+            patchSummaries[patch.id] = await generatePatchSummary(patch, inspectionResult.nominalThickness, inspectionResult.assetType);
+        }
+        
+        if (patches.length === 0 && !overallSummary) {
+          toast({
+            title: "No Critical Defects Found",
+            description: "Generating a report indicating no major issues.",
+          });
         }
 
         // 2. Assemble report data
@@ -206,7 +208,7 @@ export function InfoTab({ setActiveTab }: InfoTabProps) {
                 patches: patchScreenshots,
             },
             summaries: {
-                overall: overallSummary,
+                overall: overallSummary || "No critical corrosion areas detected below 20% remaining wall thickness.",
                 patches: patchSummaries,
             }
         };

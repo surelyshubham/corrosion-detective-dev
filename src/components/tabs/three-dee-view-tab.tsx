@@ -1,7 +1,7 @@
 
 "use client"
 
-import React, { useRef, useCallback } from 'react';
+import React, { useRef, useCallback, useEffect } from 'react';
 import { useInspectionStore } from '@/store/use-inspection-store';
 import { PlateView3D, type PlateView3DRef } from '@/components/visualizations/PlateView3D';
 import { PipeView3D, type PipeView3DRef } from '@/components/visualizations/PipeView3D';
@@ -10,7 +10,7 @@ import { useReportStore } from '@/store/use-report-store';
 
 export function ThreeDeeViewTab() {
   const { inspectionResult } = useInspectionStore();
-  const setCaptureFunctions = useReportStore(state => state.setCaptureFunctions);
+  const { setCaptureFunctions, is3dViewReady } = useReportStore();
 
   const plateRef = useRef<PlateView3DRef>(null);
   const pipeRef = useRef<PipeView3DRef>(null);
@@ -18,7 +18,7 @@ export function ThreeDeeViewTab() {
 
   const handleReady = useCallback(() => {
     let functions;
-    if (!inspectionResult) return;
+    if (!inspectionResult || is3dViewReady) return; // Don't set if already ready
     
     switch (inspectionResult.assetType) {
       case 'Pipe':
@@ -46,11 +46,12 @@ export function ThreeDeeViewTab() {
         break;
     }
     setCaptureFunctions({ ...functions, isReady: true });
-  }, [setCaptureFunctions, inspectionResult]);
+  }, [setCaptureFunctions, inspectionResult, is3dViewReady]);
 
 
-  React.useEffect(() => {
-    // When the inspection result changes (e.g., cleared), reset the ready state.
+  useEffect(() => {
+    // When the inspection result changes (e.g., cleared or reloaded), reset the ready state.
+    // This ensures that the new 3D model correctly registers its functions.
     if (!inspectionResult) {
       setCaptureFunctions({ capture: () => '', focus: () => {}, resetCamera: () => {}, isReady: false });
     }

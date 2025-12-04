@@ -123,38 +123,57 @@ export function MainApp() {
   const isDataLoaded = !!inspectionResult;
 
   return (
-    <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-grow flex flex-col p-4 md:p-6 gap-6">
-      <TabsList className="grid w-full grid-cols-3 sm:grid-cols-5 h-auto">
-        {TABS.map(tab => (
-           <TabsTrigger key={tab.value} value={tab.value} disabled={!isDataLoaded && tab.value !== 'setup'} className="flex-col sm:flex-row gap-2 h-14 sm:h-10">
-            <tab.icon className="w-4 h-4"/>
-            <span>{tab.label}</span>
-          </TabsTrigger>
-        ))}
-      </TabsList>
-      
-      <div className="flex-grow min-h-0">
-        <TabsContent value="setup" className="h-full">
-          <SetupTab 
-            onFileProcess={handleFileProcess} 
-            isLoading={isLoading} 
-            onNominalThicknessChange={reprocessPlates}
-          />
-        </TabsContent>
-        <TabsContent value="info" className="h-full">
-          {isDataLoaded ? <InfoTab setActiveTab={setActiveTab} /> : <DataPlaceholder />}
-        </TabsContent>
-        <TabsContent value="3d-view" className="h-full">
-          {isDataLoaded ? <ThreeDeeViewTab /> : <DataPlaceholder />}
-        </TabsContent>
-        <TabsContent value="2d-heatmap" className="h-full">
-          {isDataLoaded ? <TwoDeeHeatmapTab /> : <DataPlaceholder />}
-        </TabsContent>
-        <TabsContent value="data-table" className="h-full">
-          {isDataLoaded ? <DataTableTab /> : <DataPlaceholder />}
-        </TabsContent>
-      </div>
-    </Tabs>
+    <>
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-grow flex flex-col p-4 md:p-6 gap-6">
+        <TabsList className="grid w-full grid-cols-3 sm:grid-cols-5 h-auto">
+          {TABS.map(tab => (
+            <TabsTrigger key={tab.value} value={tab.value} disabled={!isDataLoaded && tab.value !== 'setup'} className="flex-col sm:flex-row gap-2 h-14 sm:h-10">
+              <tab.icon className="w-4 h-4"/>
+              <span>{tab.label}</span>
+            </TabsTrigger>
+          ))}
+        </TabsList>
+        
+        <div className="flex-grow min-h-0">
+          <TabsContent value="setup" className="h-full">
+            <SetupTab 
+              onFileProcess={handleFileProcess} 
+              isLoading={isLoading} 
+              onNominalThicknessChange={reprocessPlates}
+            />
+          </TabsContent>
+          <TabsContent value="info" className="h-full">
+            {isDataLoaded ? <InfoTab /> : <DataPlaceholder />}
+          </TabsContent>
+          <TabsContent value="3d-view" className="h-full">
+            {/* The 3D view is now rendered in the hidden container below */}
+            {isDataLoaded ? <div className="text-muted-foreground text-center pt-10">3D view is active in hidden canvas for reporting.</div> : <DataPlaceholder />}
+          </TabsContent>
+          <TabsContent value="2d-heatmap" className="h-full">
+            {isDataLoaded ? <TwoDeeHeatmapTab /> : <DataPlaceholder />}
+          </TabsContent>
+          <TabsContent value="data-table" className="h-full">
+            {isDataLoaded ? <DataTableTab /> : <DataPlaceholder />}
+          </TabsContent>
+        </div>
+      </Tabs>
+
+      {/* Hidden container for the always-mounted 3D view */}
+      {isDataLoaded && (
+        <div style={{
+            position: 'fixed',
+            left: '0px', // Use 0px instead of -9999px
+            top: '0px',
+            width: '800px',
+            height: '600px',
+            opacity: 0,
+            pointerEvents: 'none',
+            zIndex: -1,
+        }}>
+            <ThreeDeeViewTab />
+        </div>
+      )}
+    </>
   )
 }
 

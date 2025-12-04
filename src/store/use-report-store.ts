@@ -11,7 +11,7 @@ type CaptureFunctions = {
 interface ReportState {
   // 3D View readiness
   captureFunctions: CaptureFunctions | null;
-  isReady: boolean;
+  is3dViewReady: boolean;
   setCaptureFunctions: (functions: { capture: () => string; focus: (x: number, y: number) => void; resetCamera: () => void; isReady: boolean }) => void;
 
   // Step 1: Screenshot Generation
@@ -34,7 +34,7 @@ interface ReportState {
 
 const initialState = {
   captureFunctions: null,
-  isReady: false,
+  is3dViewReady: false,
   isGeneratingScreenshots: false,
   screenshotsReady: false,
   overviewScreenshot: null,
@@ -49,7 +49,7 @@ export const useReportStore = create<ReportState>()(
     ...initialState,
     setCaptureFunctions: (functions) => set({ 
       captureFunctions: { capture: functions.capture, focus: functions.focus, resetCamera: functions.resetCamera },
-      isReady: functions.isReady 
+      is3dViewReady: functions.isReady 
     }),
     setIsGeneratingScreenshots: (isGenerating) => set({ isGeneratingScreenshots: isGenerating }),
     setScreenshotData: (data) => set({
