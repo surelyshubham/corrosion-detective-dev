@@ -1,13 +1,13 @@
 
 "use client"
 
-import React, { useEffect, useMemo } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { useInspectionStore } from '@/store/use-inspection-store'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableRow } from '@/components/ui/table'
 import { Separator } from '@/components/ui/separator'
 import { getConditionClass } from '@/lib/utils'
-import { BrainCircuit, Loader2, Layers, FileText, Camera, Pencil, Download, CheckCircle, Info } from 'lucide-react'
+import { BrainCircuit, Loader2, Layers, FileText, Camera, Pencil, Download, CheckCircle, Info, Lock, Edit } from 'lucide-react'
 import { ScrollArea } from '../ui/scroll-area'
 import type { Plate } from '@/lib/types'
 import { Button } from '../ui/button'
@@ -98,10 +98,12 @@ export function InfoTab({ viewRef }: InfoTabProps) {
     setCaptureProgress,
     defectThreshold,
     setDefectThreshold,
+    isThresholdLocked,
+    setIsThresholdLocked,
   } = useReportStore();
   
-  const [isReportDialogOpen, setIsReportDialogOpen] = React.useState(false);
-  const [isGeneratingFinalReport, setIsGeneratingFinalReport] = React.useState(false);
+  const [isReportDialogOpen, setIsReportDialogOpen] = useState(false);
+  const [isGeneratingFinalReport, setIsGeneratingFinalReport] = useState(false);
   const captureFunctions = viewRef.current;
   const is3dViewReady = !!captureFunctions?.capture;
 
@@ -120,7 +122,7 @@ export function InfoTab({ viewRef }: InfoTabProps) {
 
 
   const handleGenerateScreenshots = async () => {
-    if (!inspectionResult || !captureFunctions || !is3dViewReady) {
+    if (!is3dViewReady) {
       toast({
         variant: "destructive",
         title: "3D Engine Not Ready",
@@ -194,15 +196,14 @@ export function InfoTab({ viewRef }: InfoTabProps) {
         title: "Screenshot Generation Failed",
         description: error instanceof Error ? error.message : "An unknown error occurred.",
       });
-      resetReportState();
-    } finally {
-        setIsGeneratingScreenshots(false);
-        setCaptureProgress(null);
+      // Do not reset the entire state, just the capturing part
+      setIsGeneratingScreenshots(false);
+      setCaptureProgress(null);
     }
   };
   
   const handleGenerateFinalReport = async () => {
-      if (!inspectionResult || !screenshotsReady || !reportMetadata) {
+      if (!screenshotsReady || !reportMetadata) {
         toast({
             variant: "destructive",
             title: "Cannot Generate Report",
@@ -212,7 +213,7 @@ export function InfoTab({ viewRef }: InfoTabProps) {
       }
       setIsGeneratingFinalReport(true);
       try {
-        const overallSummary = await generateReportSummary(inspectionResult, patches, defectThreshold);
+        const overallSummary = await generateReportSummary(inspectionResult!, patches, defectThreshold);
 
         let patchSummaries: Record<string, string> = {};
         if (patches.length > 0) {
@@ -226,8 +227,8 @@ export function InfoTab({ viewRef }: InfoTabProps) {
                     yMin: p.coordinates.yMin,
                     yMax: p.coordinates.yMax,
                 })),
-                assetType: inspectionResult.assetType,
-                nominalThickness: inspectionResult.nominalThickness,
+                assetType: inspectionResult!.assetType,
+                nominalThickness: inspectionResult!.nominalThickness,
                 defectThreshold: defectThreshold,
             };
             const allSummariesResult = await generateAllPatchSummaries(allPatchesInput);
@@ -245,7 +246,7 @@ export function InfoTab({ viewRef }: InfoTabProps) {
 
         const reportData: AIReportData = {
             metadata: { ...reportMetadata, defectThreshold },
-            inspection: inspectionResult,
+            inspection: inspectionResult!,
             patches,
             screenshots: {
                 global: globalScreenshots!,
@@ -400,10 +401,10 @@ export function InfoTab({ viewRef }: InfoTabProps) {
               </CardHeader>
               <CardContent className="flex flex-col gap-4">
 
-                {/* --- DEFECT THRESHOLD SLIDER --- */}
+                {/* --- STEP 1: THRESHOLD --- */}
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
-                     <Label htmlFor="defectThreshold">Defect Threshold: {defectThreshold}%</Label>
+                     <Label htmlFor="defectThreshold">1. Defect Threshold: {defectThreshold}%</Label>
                      <TooltipProvider>
                         <Tooltip>
                             <TooltipTrigger asChild>
@@ -422,20 +423,28 @@ export function InfoTab({ viewRef }: InfoTabProps) {
                     step={5}
                     value={[defectThreshold]}
                     onValueChange={(value) => setDefectThreshold(value[0])}
-                    disabled={isGeneratingScreenshots || screenshotsReady}
+                    disabled={isThresholdLocked}
                   />
-                  <p className="text-xs text-center text-muted-foreground pt-1">
+                   <p className="text-xs text-center text-muted-foreground pt-1">
                     Detected Patches: <span className="font-bold text-foreground">{patches.length}</span>
                   </p>
+                  <Button 
+                    className="w-full"
+                    variant={isThresholdLocked ? "secondary" : "default"}
+                    onClick={() => setIsThresholdLocked(!isThresholdLocked)}
+                    disabled={isGeneratingScreenshots || screenshotsReady}
+                  >
+                    {isThresholdLocked ? <Edit className="mr-2" /> : <Lock className="mr-2" />}
+                    {isThresholdLocked ? `Edit Threshold (${defectThreshold}%)` : 'Confirm Threshold'}
+                  </Button>
                 </div>
-
                 <Separator />
 
 
-                {/* --- STEP 1 --- */}
+                {/* --- STEP 2: GENERATE SCREENSHOTS --- */}
                 <div className="flex items-center gap-3">
                   <span className={`flex items-center justify-center w-6 h-6 rounded-full font-bold ${screenshotsReady ? 'bg-green-500' : 'bg-primary'} text-primary-foreground`}>
-                    {screenshotsReady ? <CheckCircle size={16}/> : '1'}
+                    {screenshotsReady ? <CheckCircle size={16}/> : '2'}
                   </span>
                   <p className="text-sm font-medium">Generate Visual Assets</p>
                 </div>
@@ -448,18 +457,17 @@ export function InfoTab({ viewRef }: InfoTabProps) {
                 <Button 
                   className="w-full" 
                   onClick={handleGenerateScreenshots}
-                  disabled={!is3dViewReady || isGeneratingScreenshots || screenshotsReady}
+                  disabled={!isThresholdLocked || isGeneratingScreenshots || screenshotsReady}
                 >
                   {isGeneratingScreenshots ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Camera className="mr-2" />}
                   {isGeneratingScreenshots ? 'Generating...' : (screenshotsReady ? 'Screenshots Ready' : 'Generate Screenshots')}
                 </Button>
-
                 <Separator />
                 
-                 {/* --- STEP 2 --- */}
+                 {/* --- STEP 3: ADD DETAILS --- */}
                 <div className="flex items-center gap-3">
                    <span className={`flex items-center justify-center w-6 h-6 rounded-full font-bold ${detailsSubmitted ? 'bg-green-500' : 'bg-primary'} text-primary-foreground`}>
-                    {detailsSubmitted ? <CheckCircle size={16}/> : '2'}
+                    {detailsSubmitted ? <CheckCircle size={16}/> : '3'}
                   </span>
                   <p className="text-sm font-medium">Fill In Report Details</p>
                 </div>
@@ -475,10 +483,10 @@ export function InfoTab({ viewRef }: InfoTabProps) {
 
                 <Separator />
                 
-                {/* --- STEP 3 --- */}
+                {/* --- STEP 4: DOWNLOAD --- */}
                 <div className="flex items-center gap-3">
                    <span className={`flex items-center justify-center w-6 h-6 rounded-full font-bold bg-primary text-primary-foreground`}>
-                    3
+                    4
                   </span>
                   <p className="text-sm font-medium">Create and Download PDF</p>
                 </div>

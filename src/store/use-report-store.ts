@@ -4,11 +4,13 @@ import type { IdentifiedPatch } from '@/reporting/patch-detector';
 import type { ReportMetadata } from '@/lib/types';
 
 interface ReportState {
-  // Step 0: Configuration
+  // Step 1: Configuration
   defectThreshold: number;
   setDefectThreshold: (threshold: number) => void;
+  isThresholdLocked: boolean;
+  setIsThresholdLocked: (isLocked: boolean) => void;
 
-  // Step 1: Screenshot Generation
+  // Step 2: Screenshot Generation
   isGeneratingScreenshots: boolean;
   setIsGeneratingScreenshots: (isGenerating: boolean) => void;
   screenshotsReady: boolean;
@@ -21,7 +23,7 @@ interface ReportState {
     patches: Record<string, { iso: string, top: string }>; 
   }) => void;
 
-  // Step 2: Metadata Submission
+  // Step 3: Metadata Submission
   reportMetadata: Omit<ReportMetadata, 'defectThreshold'> | null;
   detailsSubmitted: boolean;
   setReportMetadata: (metadata: Omit<ReportMetadata, 'defectThreshold'>) => void;
@@ -36,6 +38,7 @@ interface ReportState {
 
 const initialState = {
   defectThreshold: 50,
+  isThresholdLocked: false,
   isGeneratingScreenshots: false,
   screenshotsReady: false,
   globalScreenshots: null,
@@ -47,25 +50,39 @@ const initialState = {
 };
 
 export const useReportStore = create<ReportState>()(
-  (set) => ({
+  (set, get) => ({
     ...initialState,
     setDefectThreshold: (threshold) => set({ defectThreshold: threshold }),
+    setIsThresholdLocked: (isLocked) => {
+        set({ isThresholdLocked: isLocked });
+        // When unlocking, reset the subsequent steps
+        if (!isLocked) {
+            set({
+                screenshotsReady: false,
+                globalScreenshots: null,
+                patchScreenshots: {},
+                detailsSubmitted: false,
+                reportMetadata: null,
+            });
+        }
+    },
     setIsGeneratingScreenshots: (isGenerating) => set({ isGeneratingScreenshots: isGenerating }),
     setPatches: (patches) => set({ patches }),
     setScreenshotData: (data) => set({
       globalScreenshots: data.global,
       patchScreenshots: data.patches,
       screenshotsReady: !!data.global,
-      isGeneratingScreenshots: false,
+      isGeneratingScreenshots: false, // Ensure this is turned off on completion
     }),
     setReportMetadata: (metadata) => set({
         reportMetadata: metadata,
         detailsSubmitted: true,
     }),
     setCaptureProgress: (progress) => set({ captureProgress: progress }),
-    resetReportState: () => set((state) => ({ // Keep threshold on reset
+    resetReportState: () => set((state) => ({ 
       ...initialState,
-      defectThreshold: state.defectThreshold 
+      // Persist threshold across full resets if desired, or reset it:
+      defectThreshold: 50 // Resetting to default
     })),
   })
 );
