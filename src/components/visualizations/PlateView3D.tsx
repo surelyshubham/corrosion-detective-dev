@@ -158,12 +158,13 @@ export function PlateView3D() {
         for (let x = 0; x < gridSize.width; x++, i++) {
             const cellData = mergedGrid[y]?.[x];
             
-            // Y-position from EFFECTIVE thickness
+            // Y-position from wall LOSS, making it sink
             if (cellData && cellData.effectiveThickness !== null) {
-                const normEff = effTRange > 0 ? (cellData.effectiveThickness - minThickness) / effTRange : 0;
-                positions.setY(i, normEff * zScale);
+                const loss = nominalThickness - cellData.effectiveThickness;
+                const z = -loss * zScale; // Negative to go down
+                positions.setY(i, z);
             } else {
-                positions.setY(i, 0); 
+                positions.setY(i, 0); // ND points are at the flat surface level
             }
             
             // Color from EFFECTIVE thickness
@@ -196,14 +197,13 @@ export function PlateView3D() {
     controlsRef.current.update();
 
     const { mergedGrid, stats } = inspectionResult;
-    const { gridSize, minThickness } = stats;
-    const effTRange = stats.maxThickness - stats.minThickness;
+    const { gridSize } = stats;
     const visualHeight = VISUAL_WIDTH * (gridSize.height / gridSize.width);
 
 
     if (refPlaneRef.current) {
-      const normNominal = effTRange > 0 ? (nominalThickness! - stats.minThickness) / effTRange : 0;
-      refPlaneRef.current.position.y = normNominal * zScale;
+      // The reference plane is now at Z=0, representing the nominal thickness surface
+      refPlaneRef.current.position.y = 0;
       refPlaneRef.current.visible = showReference;
     }
 
@@ -213,8 +213,8 @@ export function PlateView3D() {
             const originData = mergedGrid[0]?.[0];
             let yPos = 0;
             if (originData && originData.effectiveThickness !== null) {
-                const normY = effTRange > 0 ? (originData.effectiveThickness - minThickness) / effTRange : 0;
-                yPos = normY * zScale;
+                const loss = nominalThickness! - originData.effectiveThickness;
+                yPos = -loss * zScale;
             }
             originMarkerRef.current.position.set(-VISUAL_WIDTH / 2, yPos + 1.5, -visualHeight / 2);
         }
@@ -229,8 +229,9 @@ export function PlateView3D() {
           if(minMarker && stats.worstLocation){ 
               const pointData = mergedGrid[stats.worstLocation.y]?.[stats.worstLocation.x];
               if (pointData && pointData.effectiveThickness !== null) {
-                const normMinY = effTRange > 0 ? (pointData.effectiveThickness - stats.minThickness) / effTRange : 0;
-                minMarker.position.set( (stats.worstLocation.x / gridSize.width - 0.5) * VISUAL_WIDTH, normMinY * zScale, (stats.worstLocation.y / gridSize.height - 0.5) * visualHeight);
+                const loss = nominalThickness! - pointData.effectiveThickness;
+                const yPos = -loss * zScale;
+                minMarker.position.set( (stats.worstLocation.x / gridSize.width - 0.5) * VISUAL_WIDTH, yPos, (stats.worstLocation.y / gridSize.height - 0.5) * visualHeight);
               }
           }
 
@@ -249,8 +250,9 @@ export function PlateView3D() {
                       break;
                   }
               }
-              const normMaxY = effTRange > 0 ? (maxPoint.effectiveThickness - stats.minThickness) / effTRange : 0;
-              maxMarker.position.set( (maxPointCoords.x / gridSize.width - 0.5) * VISUAL_WIDTH, normMaxY * zScale, (maxPointCoords.y / gridSize.height - 0.5) * visualHeight);
+              const loss = nominalThickness! - maxPoint.effectiveThickness;
+              const yPos = -loss * zScale;
+              maxMarker.position.set( (maxPointCoords.x / gridSize.width - 0.5) * VISUAL_WIDTH, yPos, (maxPointCoords.y / gridSize.height - 0.5) * visualHeight);
            }
       }
     }
@@ -259,8 +261,9 @@ export function PlateView3D() {
         if (selectedPoint) {
             const pointData = mergedGrid[selectedPoint.y]?.[selectedPoint.x];
             if (pointData && pointData.effectiveThickness !== null) {
-                const normY = effTRange > 0 ? (pointData.effectiveThickness - minThickness) / effTRange : 0;
-                selectedMarkerRef.current.position.set( (selectedPoint.x / gridSize.width - 0.5) * VISUAL_WIDTH, normY * zScale, (selectedPoint.y / gridSize.height - 0.5) * visualHeight );
+                const loss = nominalThickness! - pointData.effectiveThickness;
+                const yPos = -loss * zScale;
+                selectedMarkerRef.current.position.set( (selectedPoint.x / gridSize.width - 0.5) * VISUAL_WIDTH, yPos, (selectedPoint.y / gridSize.height - 0.5) * visualHeight );
                 selectedMarkerRef.current.visible = true;
             } else {
                 selectedMarkerRef.current.visible = false;
@@ -506,7 +509,7 @@ export function PlateView3D() {
                 </RadioGroup>
             </div>
             <div className="space-y-3">
-              <Label>Z-Axis Scale / Radial Exaggeration: {zScale.toFixed(1)}x</Label>
+              <Label>Z-Axis Scale / Depth Exaggeration: {zScale.toFixed(1)}x</Label>
               <Slider value={[zScale]} onValueChange={([val]) => setZScale(val)} min={1} max={50} step={0.5} />
             </div>
             <div className="flex items-center justify-between">

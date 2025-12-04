@@ -15,6 +15,8 @@ export function TwoDeeHeatmapTab() {
 
   switch (assetType) {
     case 'Pipe':
+    case 'Tank':
+    case 'Vessel':
       return <PipeView2D />;
     case 'Plate':
     default:

@@ -15,6 +15,8 @@ export function ThreeDeeViewTab() {
 
   switch (assetType) {
     case 'Pipe':
+    case 'Tank':
+    case 'Vessel':
       return <PipeView3D />;
     case 'Plate':
     default:
