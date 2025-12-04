@@ -71,7 +71,7 @@ export function ReportDialog({ open, onOpenChange }: ReportDialogProps) {
   })
 
   const onSubmit = async (data: ReportFormValues) => {
-    if (!inspectionResult || !captureFunctions) return
+    if (!inspectionResult || !captureFunctions || !captureFunctions.capture) return
     setIsGenerating(true)
 
     try {
@@ -216,7 +216,7 @@ export function ReportDialog({ open, onOpenChange }: ReportDialogProps) {
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isGenerating}>Cancel</Button>
-            <Button type="submit" disabled={isGenerating}>
+            <Button type="submit" disabled={isGenerating || !captureFunctions?.capture}>
               {isGenerating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               {isGenerating ? 'Generating...' : 'Generate & Download'}
             </Button>
