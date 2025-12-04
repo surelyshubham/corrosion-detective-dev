@@ -302,7 +302,6 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>(({ on
     
     const material = new THREE.MeshStandardMaterial({ vertexColors: true, side: THREE.DoubleSide });
     meshRef.current = new THREE.Mesh(geometry, material);
-    meshRef.current.rotation.z = -Math.PI / 2; // Make it horizontal
     sceneRef.current.add(meshRef.current);
 
     // --- Create Caps ---
@@ -317,7 +316,6 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>(({ on
     bottomCap.rotation.x = Math.PI / 2;
     capsGroupRef.current.add(topCap);
     capsGroupRef.current.add(bottomCap);
-    capsGroupRef.current.rotation.z = -Math.PI / 2; // Make it horizontal
     sceneRef.current.add(capsGroupRef.current);
     // --- End Caps ---
 
@@ -501,5 +499,7 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>(({ on
 TankView3D.displayName = "TankView3D";
     
 
+
+    
 
     
