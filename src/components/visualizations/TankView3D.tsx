@@ -106,7 +106,7 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>(({ on
   const mountRef = useRef<HTMLDivElement>(null)
   const [zScale, setZScale] = useState(15) // Represents radial exaggeration
   const [showOrigin, setShowOrigin] = useState(true)
-  const [hoveredPoint, setHoveredPoint = useState<any>(null)
+  const [hoveredPoint, setHoveredPoint] = useState<any>(null)
   
   const sceneRef = useRef<THREE.Scene | null>(null)
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null)
@@ -497,4 +497,7 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>(({ on
   )
 });
 TankView3D.displayName = "TankView3D";
+    
+
+
     
