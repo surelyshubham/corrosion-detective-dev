@@ -1,3 +1,4 @@
+
 "use client"
 
 import React, { useState } from 'react'
@@ -44,7 +45,14 @@ export function ReportDialog({ open, onOpenChange }: ReportDialogProps) {
   
   const defaultScanDate = React.useMemo(() => {
     const dateMeta = inspectionResult?.plates[0]?.metadata.find(m => String(m[0]).toLowerCase().includes('date'));
-    return dateMeta ? new Date(dateMeta[1]) : undefined;
+    if (dateMeta && dateMeta[1]) {
+      const parsedDate = new Date(dateMeta[1]);
+      // Check if the parsed date is valid
+      if (!isNaN(parsedDate.getTime())) {
+        return parsedDate;
+      }
+    }
+    return undefined;
   }, [inspectionResult]);
 
   const { control, handleSubmit, register } = useForm<ReportFormValues>({
