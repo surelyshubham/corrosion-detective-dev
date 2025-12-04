@@ -135,6 +135,14 @@ export async function generateInspectionReport(data: ReportData) {
             page = pdfDoc.addPage();
             await drawHeader(page, width, data);
             y = height - 120;
+            
+            // Redraw table headers on new page
+            x = 60;
+            tableHeaders.forEach((header, i) => {
+                page.drawText(header, { x, y, font: helveticaBoldFont, size: 10 });
+                x += colWidths[i];
+            });
+            y -= 15;
         }
         x = 60;
         const row = [
