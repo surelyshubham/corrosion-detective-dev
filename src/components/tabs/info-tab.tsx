@@ -66,7 +66,7 @@ const PlateStatsCard = ({ plate, index }: { plate: Plate; index: number }) => {
 
 
 export function InfoTab() {
-  const { inspectionResult, setInspectionResult: clearInspection } = useInspectionStore();
+  const { inspectionResult } = useInspectionStore();
   const { toast } = useToast();
   
   const {
@@ -107,7 +107,13 @@ export function InfoTab() {
       const overviewScreenshot = captureFunctions.capture();
 
       if (!overviewScreenshot) {
-         throw new Error("Failed to capture the main overview screenshot.");
+         toast({
+            variant: "destructive",
+            title: "Screenshot Capture Failed",
+            description: "Failed to capture the main overview screenshot. Please try again.",
+         });
+         setIsGeneratingScreenshots(false);
+         return;
       }
 
       // 3. Capture patch screenshots
