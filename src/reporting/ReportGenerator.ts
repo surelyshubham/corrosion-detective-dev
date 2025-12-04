@@ -13,7 +13,7 @@ export interface ReportData {
   };
 }
 
-const主题_PRIMARY = rgb(30 / 255, 144 / 255, 255 / 255); // dodgerblue
+const THEME_PRIMARY = rgb(30 / 255, 144 / 255, 255 / 255); // dodgerblue
 const THEME_TEXT = rgb(0.1, 0.1, 0.1);
 const THEME_MUTED = rgb(0.5, 0.5, 0.5);
 
@@ -126,7 +126,7 @@ export async function generateInspectionReport(data: ReportData) {
     });
     y -= 15;
     
-    data.defects.forEach(defect => {
+    for (const defect of data.defects) {
         if (y < 80) { // Add new page if space runs out
             page = pdfDoc.addPage();
             await drawHeader(page, width, data);
@@ -146,7 +146,7 @@ export async function generateInspectionReport(data: ReportData) {
             x += colWidths[i];
         });
         y -= 15;
-    });
+    };
   }
 
   // --- PAGE 4+: INDIVIDUAL DEFECTS ---
