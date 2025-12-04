@@ -221,7 +221,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
       }
       controlsRef.current.update();
     }
-  }, [inspectionResult, zScale]);
+  }, [inspectionResult]);
 
   const resetCamera = useCallback(() => {
     setView('iso');
@@ -482,7 +482,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
         rendererRef.current.dispose();
       }
     };
-  }, [inspectionResult, geometry, setSelectedPoint, nominalThickness, resetCamera]);
+  }, [inspectionResult, geometry, setSelectedPoint, nominalThickness]);
   
   useEffect(() => {
     const animationId = requestAnimationFrame(animate);
@@ -579,5 +579,8 @@ PlateView3D.displayName = "PlateView3D";
     
 
     
+
+    
+
 
     

@@ -19,10 +19,9 @@ export interface AIReportData {
   };
 }
 
-const THEME_PRIMARY = rgb(0.12, 0.56, 1.0); // dodgerblue
+const THEME_PRIMARY = rgb(34/255, 139/255, 230/255); // A slightly different blue
 const THEME_TEXT = rgb(0.1, 0.1, 0.1);
 const THEME_MUTED = rgb(0.4, 0.4, 0.4);
-const THEME_BG = rgb(0.95, 0.96, 0.98);
 
 let helveticaFont: PDFFont;
 let helveticaBoldFont: PDFFont;
@@ -92,6 +91,15 @@ function drawField(page: any, y: number, label: string, value: string) {
     return y - 20;
 }
 
+const embedPng = async (pdfDoc: PDFDocument, dataUri: string) => {
+    if (!dataUri.startsWith('data:image/png;base64,')) {
+        throw new Error('The input is not a PNG file!');
+    }
+    const base64 = dataUri.substring('data:image/png;base64,'.length);
+    const pngBytes = Buffer.from(base64, 'base64');
+    return await pdfDoc.embedPng(pngBytes);
+}
+
 
 export async function generateAIReport(data: AIReportData) {
   const pdfDoc = await PDFDocument.create();
@@ -145,7 +153,7 @@ export async function generateAIReport(data: AIReportData) {
             y = height - 100;
             y = drawSectionHeader(page, y, view.title);
             
-            const image = await pdfDoc.embedPng(view.imgData);
+            const image = await embedPng(pdfDoc, view.imgData);
             const dims = image.scaleToFit(width - 100, height - 200);
             
             page.drawImage(image, {
@@ -227,8 +235,8 @@ export async function generateAIReport(data: AIReportData) {
      
      const screenshotSet = data.screenshots.patches[patch.id];
      if (screenshotSet) {
-        const topImage = await pdfDoc.embedPng(screenshotSet.top);
-        const isoImage = await pdfDoc.embedPng(screenshotSet.iso);
+        const topImage = await embedPng(pdfDoc, screenshotSet.top);
+        const isoImage = await embedPng(pdfDoc, screenshotSet.iso);
         const imgWidth = (width - 150) / 2;
         const imgHeight = 200;
 

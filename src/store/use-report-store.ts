@@ -50,7 +50,7 @@ const initialState = {
 };
 
 export const useReportStore = create<ReportState>()(
-  (set, get) => ({
+  (set) => ({
     ...initialState,
     setDefectThreshold: (threshold) => set({ defectThreshold: threshold }),
     setIsThresholdLocked: (isLocked) => {
@@ -73,16 +73,15 @@ export const useReportStore = create<ReportState>()(
       patchScreenshots: data.patches,
       screenshotsReady: !!data.global,
       isGeneratingScreenshots: false, // Ensure this is turned off on completion
+      captureProgress: null,
     }),
     setReportMetadata: (metadata) => set({
         reportMetadata: metadata,
         detailsSubmitted: true,
     }),
     setCaptureProgress: (progress) => set({ captureProgress: progress }),
-    resetReportState: () => set((state) => ({ 
-      ...initialState,
-      // Persist threshold across full resets if desired, or reset it:
-      defectThreshold: 50 // Resetting to default
-    })),
+    resetReportState: () => set(initialState),
   })
 );
+
+    

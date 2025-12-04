@@ -1,7 +1,7 @@
 
 "use client"
 
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { useInspectionStore } from '@/store/use-inspection-store'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableRow } from '@/components/ui/table'
@@ -174,6 +174,8 @@ export function InfoTab({ viewRef }: InfoTabProps) {
 
         if (isoScreenshot && topScreenshot) {
           capturedPatchScreenshots[patch.id] = { iso: isoScreenshot, top: topScreenshot };
+        } else {
+            throw new Error(`Failed to capture patch ${patch.id} images.`);
         }
       }
       
@@ -510,3 +512,5 @@ export function InfoTab({ viewRef }: InfoTabProps) {
     </>
   )
 }
+
+    

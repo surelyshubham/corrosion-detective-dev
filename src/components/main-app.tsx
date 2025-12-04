@@ -16,7 +16,7 @@ import { InfoTab } from "./tabs/info-tab"
 import { DataTableTab } from "./tabs/data-table-tab"
 import { TwoDeeHeatmapTab } from "./tabs/two-dee-heatmap-tab"
 import { ThreeDeeViewTab } from "./tabs/three-dee-view-tab"
-import { FileUp, GanttChartSquare, Image, Info, Table, BrainCircuit } from "lucide-react"
+import { FileUp, GanttChartSquare, Image, Info, Table } from "lucide-react"
 import { Card, CardContent } from "./ui/card"
 
 
@@ -125,9 +125,13 @@ export function MainApp() {
 
   const isDataLoaded = !!inspectionResult;
 
+  const getTabContentClass = (tabValue: string) => {
+    return activeTab === tabValue ? 'block h-full' : 'hidden';
+  };
+  
   const threeDViewStyle: React.CSSProperties =
     activeTab === '3d-view'
-      ? { height: '100%', position: 'relative', visibility: 'visible' }
+      ? { height: '100%', position: 'relative', zIndex: 10 }
       : {
           position: 'fixed',
           left: '0px',
@@ -151,26 +155,27 @@ export function MainApp() {
           ))}
         </TabsList>
         
-        <div className="flex-grow min-h-0">
-          <TabsContent value="setup" className="h-full">
-            <SetupTab 
-              onFileProcess={handleFileProcess} 
-              isLoading={isLoading} 
-              onNominalThicknessChange={reprocessPlates}
-            />
-          </TabsContent>
-          <TabsContent value="info" className="h-full">
-            {isDataLoaded ? <InfoTab viewRef={threeDeeViewRef} /> : <DataPlaceholder />}
-          </TabsContent>
-          <div style={threeDViewStyle} role="tabpanel" hidden={activeTab !== '3d-view'}>
-              {isDataLoaded ? <ThreeDeeViewTab ref={threeDeeViewRef} /> : <DataPlaceholder />}
-          </div>
-          <TabsContent value="2d-heatmap" className="h-full">
-            {isDataLoaded ? <TwoDeeHeatmapTab /> : <DataPlaceholder />}
-          </TabsContent>
-          <TabsContent value="data-table" className="h-full">
-            {isDataLoaded ? <DataTableTab /> : <DataPlaceholder />}
-          </TabsContent>
+        <div className="flex-grow min-h-0 relative">
+            <div className={getTabContentClass('setup')}>
+              <SetupTab 
+                onFileProcess={handleFileProcess} 
+                isLoading={isLoading} 
+                onNominalThicknessChange={reprocessPlates}
+              />
+            </div>
+            <div className={getTabContentClass('info')}>
+              {isDataLoaded ? <InfoTab viewRef={threeDeeViewRef} /> : <DataPlaceholder />}
+            </div>
+            <div className={getTabContentClass('2d-heatmap')}>
+              {isDataLoaded ? <TwoDeeHeatmapTab /> : <DataPlaceholder />}
+            </div>
+            <div className={getTabContentClass('data-table')}>
+              {isDataLoaded ? <DataTableTab /> : <DataPlaceholder />}
+            </div>
+            {/* Always mount 3D view but control visibility */}
+            <div style={threeDViewStyle}>
+                {isDataLoaded ? <ThreeDeeViewTab ref={threeDeeViewRef} /> : <DataPlaceholder />}
+            </div>
         </div>
       </Tabs>
     </>
@@ -188,3 +193,5 @@ const DataPlaceholder = () => (
         </CardContent>
     </Card>
 )
+
+    
