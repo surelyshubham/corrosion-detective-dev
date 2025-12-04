@@ -1,3 +1,4 @@
+
 import { PDFDocument, rgb, StandardFonts, PageSizes, PDFFont } from 'pdf-lib';
 import { downloadFile } from '@/lib/utils';
 import type { MergedInspectionResult, ReportMetadata } from '@/lib/types';
@@ -114,6 +115,7 @@ export async function generateAIReport(data: AIReportData) {
   y -= 10;
   
   y = drawField(page, y, 'Nominal Thickness:', `${data.inspection.nominalThickness.toFixed(2)} mm`);
+  y = drawField(page, y, 'Defect Threshold:', `${data.metadata.defectThreshold}%`);
   y = drawField(page, y, 'Minimum Thickness:', `${data.inspection.stats.minThickness.toFixed(2)} mm (${data.inspection.stats.minPercentage.toFixed(1)}%)`);
   y = drawField(page, y, `Defect Patches (<${data.metadata.defectThreshold}%):`, `${data.patches.length}`);
   y -= 10;
