@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button'
 import { Slider } from '@/components/ui/slider'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
-import { Camera, Expand, Minimize, Pin, Redo, RefreshCw, Percent, Ruler, LocateFixed } from 'lucide-react'
+import { Expand, Pin, RefreshCw, Percent, Ruler, LocateFixed } from 'lucide-react'
 import { RadioGroup, RadioGroupItem } from '../ui/radio-group'
 import { useImperativeHandle } from 'react'
 
@@ -111,8 +111,9 @@ function createTextSprite(message: string, opts: { fontsize?: number, fontface?:
 
 export type PlateView3DRef = {
   captureScreenshot: () => string;
-  focusOnPoint: (x: number, y: number) => void;
+  focusOnPoint: (x: number, y: number, zoomIn: boolean) => void;
   resetCamera: () => void;
+  setView: (view: 'iso' | 'top' | 'side') => void;
 };
 
 interface PlateView3DProps {
@@ -201,16 +202,33 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>(({
 
   }, [geometry, zScale, colorMode, nominalThickness, stats, mergedGrid]);
 
-  const resetCamera = useCallback(() => {
+  const setView = useCallback((view: 'iso' | 'top' | 'side') => {
     if (cameraRef.current && controlsRef.current && inspectionResult) {
-        const { stats } = inspectionResult;
-        const { gridSize } = stats;
-        
-        cameraRef.current.position.set(VISUAL_WIDTH * 0.7, zScale * 4, VISUAL_WIDTH * (gridSize.height / gridSize.width) * 0.7 );
-        controlsRef.current.target.set(0, 0, 0);
-        controlsRef.current.update();
+      const { stats: { gridSize } } = inspectionResult;
+      const visualHeight = VISUAL_WIDTH * (gridSize.height / gridSize.width);
+      controlsRef.current.target.set(0, 0, 0);
+      const distance = Math.max(VISUAL_WIDTH, visualHeight) * 1.2;
+
+      switch (view) {
+        case 'top':
+          cameraRef.current.position.set(0, distance, 0.001); // slight offset to avoid gimbal lock
+          break;
+        case 'side':
+          cameraRef.current.position.set(distance, 0, 0);
+          break;
+        case 'iso':
+        default:
+          cameraRef.current.position.set(distance * 0.7, distance * 0.5, distance * 0.7);
+          break;
+      }
+      controlsRef.current.update();
     }
   }, [inspectionResult, zScale]);
+
+  const resetCamera = useCallback(() => {
+    setView('iso');
+  }, [setView]);
+
 
   const animate = useCallback(() => {
     if (!rendererRef.current || !sceneRef.current || !cameraRef.current || !controlsRef.current || !inspectionResult) return;
@@ -304,7 +322,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>(({
       rendererRef.current.render(sceneRef.current!, cameraRef.current!);
       return rendererRef.current.domElement.toDataURL('image/png');
     },
-    focusOnPoint: (x: number, y: number) => {
+    focusOnPoint: (x: number, y: number, zoomIn: boolean) => {
         if (!cameraRef.current || !controlsRef.current || !stats) return;
         const { gridSize } = stats;
         const visualHeight = VISUAL_WIDTH * (gridSize.height / gridSize.width);
@@ -313,10 +331,12 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>(({
         const targetZ = (y / gridSize.height - 0.5) * visualHeight;
         
         controlsRef.current.target.set(targetX, 0, targetZ);
-        cameraRef.current.position.set(targetX, 50, targetZ + 30);
+        const distance = zoomIn ? 30 : 80;
+        cameraRef.current.position.set(targetX, distance, targetZ + distance / 2);
         controlsRef.current.update();
     },
     resetCamera: resetCamera,
+    setView: setView,
   }));
 
   useEffect(() => {
@@ -341,14 +361,12 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>(({
     cameraRef.current = new THREE.PerspectiveCamera(60, currentMount.clientWidth / currentMount.clientHeight, 0.1, 2000);
     
     controlsRef.current = new OrbitControls(cameraRef.current, rendererRef.current.domElement);
-    controlsRef.current.update();
 
     sceneRef.current.add(new THREE.AmbientLight(0xffffff, 0.7));
     const dirLight = new THREE.DirectionalLight(0xffffff, 1.0);
     sceneRef.current.add(dirLight);
 
-    cameraRef.current.position.set(VISUAL_WIDTH * 0.7, VISUAL_WIDTH * 0.9, zScale * 2);
-    controlsRef.current.target.set(0, 0, 0);
+    resetCamera();
     dirLight.position.set(VISUAL_WIDTH, visualHeight*2, zScale * 3);
 
     const gridContainer = new THREE.Group();
@@ -470,32 +488,12 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>(({
         rendererRef.current.dispose();
       }
     };
-  }, [inspectionResult, geometry, setSelectedPoint, nominalThickness, onReady]);
+  }, [inspectionResult, geometry, setSelectedPoint, nominalThickness, onReady, resetCamera]);
   
   useEffect(() => {
     const animationId = requestAnimationFrame(animate);
     return () => cancelAnimationFrame(animationId);
   }, [animate]);
-
-  const setView = (view: 'top' | 'side' | 'front') => {
-    if (cameraRef.current && controlsRef.current) {
-        controlsRef.current.target.set(0, 0, 0);
-        const distance = VISUAL_WIDTH;
-        switch (view) {
-            case 'top':
-                cameraRef.current.position.set(0, distance, 0);
-                break;
-            case 'side':
-                cameraRef.current.position.set(distance, 0, 0);
-                break;
-            case 'front':
-                cameraRef.current.position.set(0, 0, distance);
-                break;
-        }
-        controlsRef.current.update();
-    }
-  };
-
 
   return (
     <div className="grid md:grid-cols-4 gap-6 h-full">
@@ -572,7 +570,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>(({
             </Button>
             <Button variant="outline" onClick={() => setView('top')}>Top</Button>
             <Button variant="outline" onClick={() => setView('side')}>Side</Button>
-            <Button variant="outline" onClick={() => setView('front')}>Front</Button>
+            <Button variant="outline" onClick={() => setView('iso')}>Isometric</Button>
           </CardContent>
         </Card>
         {stats && nominalThickness && (

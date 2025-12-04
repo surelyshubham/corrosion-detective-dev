@@ -1,6 +1,6 @@
 import { PDFDocument, rgb, StandardFonts, PageSizes, PDFFont } from 'pdf-lib';
 import { downloadFile } from '@/lib/utils';
-import type { MergedInspectionResult, ReportMetadata, MergedCell } from '@/lib/types';
+import type { MergedInspectionResult, ReportMetadata } from '@/lib/types';
 import { format } from 'date-fns';
 import { IdentifiedPatch } from './patch-detector';
 
@@ -9,8 +9,8 @@ export interface AIReportData {
   inspection: MergedInspectionResult;
   patches: IdentifiedPatch[];
   screenshots: {
-    overview: string;
-    patches: Record<string, string>;
+    global: { iso: string, top: string, side: string } | null;
+    patches: Record<string, { iso: string, top: string }>;
   };
   summaries: {
     overall: string;
@@ -91,11 +91,6 @@ function drawField(page: any, y: number, label: string, value: string) {
     return y - 20;
 }
 
-function getLoss(cell: MergedCell | null, nominal: number) {
-    if (cell?.effectiveThickness === null || cell?.effectiveThickness === undefined) return null;
-    return nominal - cell.effectiveThickness;
-}
-
 
 export async function generateAIReport(data: AIReportData) {
   const pdfDoc = await PDFDocument.create();
@@ -124,28 +119,36 @@ export async function generateAIReport(data: AIReportData) {
   y -= 10;
   
   // AI Summary
-  if (data.patches.length === 0) {
-      page.drawText("No critical corrosion areas detected below 20% remaining wall thickness.", { x: 50, y, font: helveticaFont, size: 11, color: THEME_TEXT });
-      y-=15;
-  } else {
-    const textLines = wrapText(data.summaries.overall, helveticaFont, 11, width - 100);
-    for (const line of textLines) {
-        page.drawText(line, { x: 50, y, font: helveticaFont, size: 11, color: THEME_TEXT });
-        y -= 15;
-    }
+  const summaryLines = wrapText(data.summaries.overall, helveticaFont, 11, width - 100);
+  for (const line of summaryLines) {
+      page.drawText(line, { x: 50, y, font: helveticaFont, size: 11, color: THEME_TEXT });
+      y -= 15;
   }
-
   y -= 15;
 
-  // Overview Screenshot
-  if (data.screenshots.overview) {
-    const overviewImage = await pdfDoc.embedPng(data.screenshots.overview);
-    const imgDims = overviewImage.scaleToFit(width - 100, y - 100);
-    page.drawImage(overviewImage, {
-        x: (width - imgDims.width) / 2,
-        y: y - imgDims.height,
-        width: imgDims.width,
-        height: imgDims.height,
+  // Global Screenshots
+  y = drawSectionHeader(page, y, 'Asset Views');
+  if (data.screenshots.global) {
+    const { iso, top, side } = data.screenshots.global;
+    const images = [
+        iso ? await pdfDoc.embedPng(iso) : null,
+        top ? await pdfDoc.embedPng(top) : null,
+        side ? await pdfDoc.embedPng(side) : null,
+    ].filter(img => img !== null);
+    
+    const imgWidth = (width - 120) / 3;
+    const imgY = y - 120;
+
+    images.forEach((img, index) => {
+        if(img) {
+            const dims = img.scaleToFit(imgWidth, 110);
+            page.drawImage(img, {
+                x: 50 + index * (imgWidth + 10),
+                y: imgY + (110 - dims.height) / 2,
+                width: dims.width,
+                height: dims.height,
+            });
+        }
     });
   }
 
@@ -158,8 +161,8 @@ export async function generateAIReport(data: AIReportData) {
     
     y = drawSectionHeader(page, y, `Critical Defect Patch Summary (<20% Remaining Wall)`);
 
-    const tableHeaders = ['Patch ID', 'Min Thk (mm)', 'Avg Thk (mm)', '%', 'Loss', 'X Range', 'Y Range', 'Size'];
-    const colWidths = [50, 70, 70, 40, 50, 80, 80, 70];
+    const tableHeaders = ['Patch ID', 'Min Thk (mm)', 'Avg Thk (mm)', '% Rem.', 'Loss', 'X Range', 'Y Range', 'Area'];
+    const colWidths = [50, 70, 70, 50, 50, 80, 80, 60];
     let currentX = 50;
     
     page.drawRectangle({
@@ -215,28 +218,46 @@ export async function generateAIReport(data: AIReportData) {
 
      y = drawSectionHeader(page, y, `Defect Patch #${patch.id} - ${patch.severity}`);
      
-     const screenshot = data.screenshots.patches[patch.id];
-     if (screenshot) {
-        const defectImage = await pdfDoc.embedPng(screenshot);
-        const imgDims = defectImage.scaleToFit(width / 2 - 75, 250);
-        page.drawImage(defectImage, {
+     const screenshotSet = data.screenshots.patches[patch.id];
+     if (screenshotSet) {
+        const topImage = await pdfDoc.embedPng(screenshotSet.top);
+        const isoImage = await pdfDoc.embedPng(screenshotSet.iso);
+        const imgWidth = (width - 150) / 2;
+        const imgHeight = 200;
+
+        const topDims = topImage.scaleToFit(imgWidth, imgHeight);
+        const isoDims = isoImage.scaleToFit(imgWidth, imgHeight);
+
+        page.drawImage(topImage, {
             x: 50,
-            y: y - imgDims.height,
-            width: imgDims.width,
-            height: imgDims.height,
+            y: y - imgHeight,
+            width: topDims.width,
+            height: topDims.height,
         });
+        page.drawText('Plan View (Location)', {x: 50, y: y - imgHeight - 15, size: 9, font: helveticaBoldFont});
 
-        const statsX = width / 2 + 25;
-        let statsY = y;
-        statsY = drawField(page, statsY, 'Min Thickness:', `${patch.minThickness.toFixed(2)} mm`);
-        statsY = drawField(page, statsY, 'Avg Thickness:', `${patch.avgThickness.toFixed(2)} mm`);
-        statsY = drawField(page, statsY, 'Point Count:', `${patch.pointCount}`);
-        statsY = drawField(page, statsY, 'Bounding Box:', `${patch.boundingBox.toFixed(0)} mm²`);
-        statsY = drawField(page, statsY, 'X-Coordinates:', `${patch.coordinates.xMin} - ${patch.coordinates.xMax}`);
-        statsY = drawField(page, statsY, 'Y-Coordinates:', `${patch.coordinates.yMin} - ${patch.coordinates.yMax}`);
+        page.drawImage(isoImage, {
+            x: width - 50 - isoDims.width,
+            y: y - imgHeight,
+            width: isoDims.width,
+            height: isoDims.height,
+        });
+         page.drawText('Depth View (Severity)', {x: width - 50 - isoDims.width, y: y - imgHeight - 15, size: 9, font: helveticaBoldFont});
 
-        y -= (imgDims.height + 20);
+
+        y -= (imgHeight + 40);
      }
+     
+     // Stats table for patch
+    let statsY = y;
+    statsY = drawField(page, statsY, 'Min Thickness:', `${patch.minThickness.toFixed(2)} mm`);
+    statsY = drawField(page, statsY, 'Avg Thickness:', `${patch.avgThickness.toFixed(2)} mm`);
+    statsY = drawField(page, statsY, 'Point Count:', `${patch.pointCount}`);
+    statsY = drawField(page, statsY, 'Bounding Box:', `${patch.boundingBox.toFixed(0)} mm²`);
+    statsY = drawField(page, statsY, 'X-Coordinates:', `${patch.coordinates.xMin} - ${patch.coordinates.xMax}`);
+    statsY = drawField(page, statsY, 'Y-Coordinates:', `${patch.coordinates.yMin} - ${patch.coordinates.yMax}`);
+    y = statsY - 20;
+
     
      y = drawSectionHeader(page, y, 'AI Analysis & Recommendation');
      const summary = data.summaries.patches[patch.id];
@@ -252,9 +273,9 @@ export async function generateAIReport(data: AIReportData) {
      y = drawSectionHeader(page, y, 'Notes');
      page.drawRectangle({
          x: 50,
-         y: y - 150,
+         y: y - 100,
          width: width - 100,
-         height: 150,
+         height: 100,
          borderColor: THEME_MUTED,
          borderWidth: 0.5,
      });

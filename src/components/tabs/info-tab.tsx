@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableRow } from '@/components/ui/table'
 import { Separator } from '@/components/ui/separator'
 import { getConditionClass } from '@/lib/utils'
-import { BrainCircuit, Loader2, Layers, FileText, Camera, Pencil, Download } from 'lucide-react'
+import { BrainCircuit, Loader2, Layers, FileText, Camera, Pencil, Download, CheckCircle, XCircle } from 'lucide-react'
 import { ScrollArea } from '../ui/scroll-area'
 import type { Plate } from '@/lib/types'
 import { Button } from '../ui/button'
@@ -18,6 +18,7 @@ import { identifyPatches } from '@/reporting/patch-detector'
 import { generateAIReport, AIReportData } from '@/reporting/AIReportGenerator'
 import { generateReportSummary } from '@/ai/flows/generate-report-summary'
 import { generatePatchSummary } from '@/ai/flows/generate-patch-summary'
+import { Progress } from '../ui/progress'
 
 
 const PlateStatsCard = ({ plate, index }: { plate: Plate; index: number }) => {
@@ -68,7 +69,7 @@ const PlateStatsCard = ({ plate, index }: { plate: Plate; index: number }) => {
   );
 };
 
-export function InfoTab() {
+export function InfoTab({ setActiveTab }: { setActiveTab: (tab: string) => void }) {
   const { inspectionResult } = useInspectionStore();
   const { toast } = useToast();
   
@@ -78,14 +79,16 @@ export function InfoTab() {
     isGeneratingScreenshots,
     setIsGeneratingScreenshots,
     screenshotsReady,
-    detailsSubmitted,
     setScreenshotData,
     resetReportState,
     setReportMetadata,
     reportMetadata,
+    detailsSubmitted,
     patches,
-    overviewScreenshot,
-    patchScreenshots
+    globalScreenshots,
+    patchScreenshots,
+    captureProgress,
+    setCaptureProgress,
   } = useReportStore();
   
   const [isReportDialogOpen, setIsReportDialogOpen] = React.useState(false);
@@ -98,9 +101,7 @@ export function InfoTab() {
   }, [inspectionResult, resetReportState]);
 
   const handleGenerateScreenshots = async () => {
-    if (!inspectionResult) return;
-
-    if (!is3dViewReady || !captureFunctions?.capture) {
+    if (!inspectionResult || !is3dViewReady || !captureFunctions?.capture || !captureFunctions.setView || !captureFunctions.focus) {
       toast({
         variant: "destructive",
         title: "3D Engine Not Ready",
@@ -112,52 +113,61 @@ export function InfoTab() {
     setIsGeneratingScreenshots(true);
 
     try {
+      // 1. Identify defect patches
+      const identifiedPatches = identifyPatches(inspectionResult.mergedGrid, 20); // 20% threshold
+      const totalImages = 3 + (identifiedPatches.length * 2);
+      setCaptureProgress({ current: 0, total: totalImages });
+      
+      const capturedGlobalScreenshots: any = {};
+      const capturedPatchScreenshots: Record<string, any> = {};
+      
       // Small delay to ensure the hidden 3D scene is fully rendered
       await new Promise(resolve => setTimeout(resolve, 500));
 
-      // 1. Identify defect patches
-      const identifiedPatches = identifyPatches(inspectionResult.mergedGrid, 20); // 20% threshold
-      
-      // 2. Capture overview screenshot
-      if (captureFunctions.resetCamera) captureFunctions.resetCamera();
-      // Wait for camera to move and scene to re-render in the hidden canvas
-      await new Promise(resolve => setTimeout(resolve, 500));
-      const overviewScreenshotData = captureFunctions.capture();
-
-      if (!overviewScreenshotData) {
-         toast({
-            variant: "destructive",
-            title: "Screenshot Capture Failed",
-            description: "Failed to capture the main overview screenshot. Please try again.",
-         });
-         setIsGeneratingScreenshots(false);
-         return;
+      // 2. Capture Global Views
+      const globalViews: ('iso' | 'top' | 'side')[] = ['iso', 'top', 'side'];
+      for (const view of globalViews) {
+        setCaptureProgress({ current: Object.keys(capturedGlobalScreenshots).length + 1, total: totalImages });
+        captureFunctions.setView(view);
+        await new Promise(resolve => setTimeout(resolve, 500)); // Wait for camera move and re-render
+        const screenshot = captureFunctions.capture();
+        if (screenshot) {
+          capturedGlobalScreenshots[view] = screenshot;
+        } else {
+            throw new Error(`Failed to capture global ${view} view.`);
+        }
       }
 
       // 3. Capture patch screenshots
-      const capturedPatchScreenshots: Record<string, string> = {};
       for (const patch of identifiedPatches) {
-        if (captureFunctions.focus) {
-          captureFunctions.focus(patch.center.x, patch.center.y);
-          // Wait for camera to move and scene to re-render
-          await new Promise(resolve => setTimeout(resolve, 500));
+        // Focus on the patch
+        captureFunctions.focus(patch.center.x, patch.center.y, true); // Zoom in
+        
+        // Capture Iso view of patch
+        await new Promise(resolve => setTimeout(resolve, 500));
+        const isoScreenshot = captureFunctions.capture();
+        
+        // Capture Top view of patch
+        captureFunctions.setView('top');
+        await new Promise(resolve => setTimeout(resolve, 500));
+        const topScreenshot = captureFunctions.capture();
+
+        if (isoScreenshot && topScreenshot) {
+          capturedPatchScreenshots[patch.id] = { iso: isoScreenshot, top: topScreenshot };
         }
-        const screenshot = captureFunctions.capture();
-        if (screenshot) {
-          capturedPatchScreenshots[patch.id] = screenshot;
-        }
+        setCaptureProgress({ current: 3 + (Object.keys(capturedPatchScreenshots).length * 2), total: totalImages });
       }
-      
+
       // 4. Store results in state
       setScreenshotData({
-        overview: overviewScreenshotData,
+        global: capturedGlobalScreenshots,
         patches: capturedPatchScreenshots,
         patchData: identifiedPatches,
       });
 
       toast({
-        title: "Screenshots Generated",
-        description: `Captured ${identifiedPatches.length + 1} images. You can now add report details.`,
+        title: "Screenshots Generated Successfully",
+        description: `Captured ${totalImages} images. You can now add report details.`,
       });
 
     } catch (error) {
@@ -167,13 +177,15 @@ export function InfoTab() {
         title: "Screenshot Generation Failed",
         description: error instanceof Error ? error.message : "An unknown error occurred.",
       });
+      resetReportState(); // Reset on failure
     } finally {
         setIsGeneratingScreenshots(false);
+        setCaptureProgress(null);
     }
   };
   
   const handleGenerateFinalReport = async () => {
-      if (!inspectionResult || !screenshotsReady || !reportMetadata) {
+      if (!inspectionResult || !screenshotsReady || !reportMetadata || !globalScreenshots) {
         toast({
             variant: "destructive",
             title: "Cannot Generate Report",
@@ -204,7 +216,7 @@ export function InfoTab() {
             inspection: inspectionResult,
             patches,
             screenshots: {
-                overview: overviewScreenshot!,
+                global: globalScreenshots,
                 patches: patchScreenshots,
             },
             summaries: {
@@ -356,10 +368,19 @@ export function InfoTab() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="flex flex-col gap-4">
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <span className="flex items-center justify-center w-6 h-6 rounded-full bg-primary text-primary-foreground font-bold">1</span>
-                  <p>Generate visual assets</p>
+                {/* --- STEP 1 --- */}
+                <div className="flex items-center gap-3">
+                  <span className={`flex items-center justify-center w-6 h-6 rounded-full font-bold ${screenshotsReady ? 'bg-green-500' : 'bg-primary'} text-primary-foreground`}>
+                    {screenshotsReady ? <CheckCircle size={16}/> : '1'}
+                  </span>
+                  <p className="text-sm font-medium">Generate Visual Assets</p>
                 </div>
+                 {captureProgress && (
+                  <div className="space-y-2">
+                    <Progress value={(captureProgress.current / captureProgress.total) * 100} />
+                    <p className="text-xs text-muted-foreground text-center">Capturing image {captureProgress.current} of {captureProgress.total}...</p>
+                  </div>
+                 )}
                 <Button 
                   className="w-full" 
                   onClick={handleGenerateScreenshots}
@@ -371,9 +392,12 @@ export function InfoTab() {
 
                 <Separator />
                 
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <span className="flex items-center justify-center w-6 h-6 rounded-full bg-primary text-primary-foreground font-bold">2</span>
-                  <p>Fill in report details</p>
+                 {/* --- STEP 2 --- */}
+                <div className="flex items-center gap-3">
+                   <span className={`flex items-center justify-center w-6 h-6 rounded-full font-bold ${detailsSubmitted ? 'bg-green-500' : 'bg-primary'} text-primary-foreground`}>
+                    {detailsSubmitted ? <CheckCircle size={16}/> : '2'}
+                  </span>
+                  <p className="text-sm font-medium">Fill In Report Details</p>
                 </div>
                  <Button 
                   className="w-full" 
@@ -386,10 +410,13 @@ export function InfoTab() {
                 </Button>
 
                 <Separator />
-
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <span className="flex items-center justify-center w-6 h-6 rounded-full bg-primary text-primary-foreground font-bold">3</span>
-                  <p>Create and download PDF</p>
+                
+                {/* --- STEP 3 --- */}
+                <div className="flex items-center gap-3">
+                   <span className={`flex items-center justify-center w-6 h-6 rounded-full font-bold bg-primary text-primary-foreground`}>
+                    3
+                  </span>
+                  <p className="text-sm font-medium">Create and Download PDF</p>
                 </div>
                 <Button 
                   className="w-full" 

@@ -143,11 +143,11 @@ export function MainApp() {
             />
           </TabsContent>
           <TabsContent value="info" className="h-full">
-            {isDataLoaded ? <InfoTab /> : <DataPlaceholder />}
+            {isDataLoaded ? <InfoTab setActiveTab={setActiveTab} /> : <DataPlaceholder />}
           </TabsContent>
           <TabsContent value="3d-view" className="h-full">
             {/* The 3D view is now rendered in the hidden container below */}
-            {isDataLoaded ? <div className="text-muted-foreground text-center pt-10">3D view is active in hidden canvas for reporting.</div> : <DataPlaceholder />}
+            {isDataLoaded ? <ThreeDeeViewTab /> : <DataPlaceholder />}
           </TabsContent>
           <TabsContent value="2d-heatmap" className="h-full">
             {isDataLoaded ? <TwoDeeHeatmapTab /> : <DataPlaceholder />}
@@ -162,7 +162,7 @@ export function MainApp() {
       {isDataLoaded && (
         <div style={{
             position: 'fixed',
-            left: '0px', // Use 0px instead of -9999px
+            left: '0px',
             top: '0px',
             width: '800px',
             height: '600px',

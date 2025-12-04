@@ -8,43 +8,24 @@ import { PipeView3D, type PipeView3DRef } from '@/components/visualizations/Pipe
 import { TankView3D, type TankView3DRef } from '@/components/visualizations/TankView3D';
 import { useReportStore } from '@/store/use-report-store';
 
+type ViewRef = PlateView3DRef | PipeView3DRef | TankView3DRef;
+
 export function ThreeDeeViewTab() {
   const { inspectionResult } = useInspectionStore();
   const { setCaptureFunctions, is3dViewReady } = useReportStore();
 
-  const plateRef = useRef<PlateView3DRef>(null);
-  const pipeRef = useRef<PipeView3DRef>(null);
-  const tankRef = useRef<TankView3DRef>(null);
+  const viewRef = useRef<ViewRef>(null);
 
   const handleReady = useCallback(() => {
-    let functions;
-    if (!inspectionResult || is3dViewReady) return; // Don't set if already ready
+    if (!inspectionResult || is3dViewReady || !viewRef.current) return;
     
-    switch (inspectionResult.assetType) {
-      case 'Pipe':
-        functions = {
-          capture: () => pipeRef.current?.captureScreenshot() || '',
-          focus: (x: number, y: number) => pipeRef.current?.focusOnPoint(x, y),
-          resetCamera: () => pipeRef.current?.resetCamera(),
-        };
-        break;
-      case 'Tank':
-      case 'Vessel':
-        functions = {
-          capture: () => tankRef.current?.captureScreenshot() || '',
-          focus: (x: number, y: number) => tankRef.current?.focusOnPoint(x, y),
-          resetCamera: () => tankRef.current?.resetCamera(),
-        };
-        break;
-      case 'Plate':
-      default:
-        functions = {
-          capture: () => plateRef.current?.captureScreenshot() || '',
-          focus: (x: number, y: number) => plateRef.current?.focusOnPoint(x, y),
-          resetCamera: () => plateRef.current?.resetCamera(),
-        };
-        break;
-    }
+    const functions = {
+      capture: () => viewRef.current?.captureScreenshot() || '',
+      focus: (x: number, y: number, zoomIn: boolean) => viewRef.current?.focusOnPoint(x, y, zoomIn),
+      resetCamera: () => viewRef.current?.resetCamera(),
+      setView: (view: 'iso' | 'top' | 'side') => viewRef.current?.setView(view),
+    };
+    
     setCaptureFunctions({ ...functions, isReady: true });
   }, [setCaptureFunctions, inspectionResult, is3dViewReady]);
 
@@ -53,7 +34,13 @@ export function ThreeDeeViewTab() {
     // When the inspection result changes (e.g., cleared or reloaded), reset the ready state.
     // This ensures that the new 3D model correctly registers its functions.
     if (!inspectionResult) {
-      setCaptureFunctions({ capture: () => '', focus: () => {}, resetCamera: () => {}, isReady: false });
+      setCaptureFunctions({ 
+          capture: () => '', 
+          focus: () => {}, 
+          resetCamera: () => {}, 
+          setView: () => {}, 
+          isReady: false 
+      });
     }
   }, [inspectionResult, setCaptureFunctions]);
 
@@ -64,12 +51,12 @@ export function ThreeDeeViewTab() {
 
   switch (assetType) {
     case 'Pipe':
-      return <PipeView3D ref={pipeRef} onReady={handleReady}/>;
+      return <PipeView3D ref={viewRef as React.Ref<PipeView3DRef>} onReady={handleReady}/>;
     case 'Tank':
     case 'Vessel':
-      return <TankView3D ref={tankRef} onReady={handleReady}/>;
+      return <TankView3D ref={viewRef as React.Ref<TankView3DRef>} onReady={handleReady}/>;
     case 'Plate':
     default:
-      return <PlateView3D ref={plateRef} onReady={handleReady}/>;
+      return <PlateView3D ref={viewRef as React.Ref<PlateView3DRef>} onReady={handleReady}/>;
   }
 }

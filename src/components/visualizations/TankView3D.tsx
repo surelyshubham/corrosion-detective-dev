@@ -93,8 +93,9 @@ const ColorLegend = ({ mode, stats, nominalThickness }: { mode: ColorMode, stats
 
 export type TankView3DRef = {
   captureScreenshot: () => string;
-  focusOnPoint: (x: number, y: number) => void;
+  focusOnPoint: (x: number, y: number, zoomIn: boolean) => void;
   resetCamera: () => void;
+  setView: (view: 'iso' | 'top' | 'side') => void;
 };
 
 interface TankView3DProps {
@@ -196,13 +197,30 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>(({ on
 
   }, [geometry, zScale, colorMode, nominalThickness, stats, mergedGrid, pipeOuterDiameter, pipeLength]);
 
-  const resetCamera = useCallback(() => {
-    if (cameraRef.current && controlsRef.current && inspectionResult && pipeOuterDiameter && pipeLength) {
-        cameraRef.current.position.set(pipeOuterDiameter * 0.7, 0, pipeOuterDiameter * 0.7);
+  const setView = useCallback((view: 'iso' | 'top' | 'side') => {
+    if (cameraRef.current && controlsRef.current && pipeOuterDiameter && pipeLength) {
         controlsRef.current.target.set(0, 0, 0);
+        const distance = Math.max(pipeOuterDiameter, pipeLength) * 1.5;
+        switch (view) {
+            case 'top':
+                cameraRef.current.position.set(0, distance, 0.001); // slight offset to avoid gimbal lock
+                break;
+            case 'side':
+                cameraRef.current.position.set(distance, 0, 0);
+                break;
+            case 'iso':
+            default:
+                 cameraRef.current.position.set(distance / 2, distance / 2, distance / 2);
+                break;
+        }
         controlsRef.current.update();
     }
-  }, [inspectionResult, pipeOuterDiameter, pipeLength]);
+  }, [pipeOuterDiameter, pipeLength]);
+
+
+  const resetCamera = useCallback(() => {
+    setView('iso');
+  }, [setView]);
 
 
   const animate = useCallback(() => {
@@ -258,7 +276,7 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>(({ on
       rendererRef.current.render(sceneRef.current!, cameraRef.current!);
       return rendererRef.current.domElement.toDataURL('image/png');
     },
-    focusOnPoint: (x: number, y: number) => {
+    focusOnPoint: (x: number, y: number, zoomIn: boolean) => {
         if (!cameraRef.current || !controlsRef.current || !stats || !pipeOuterDiameter || !pipeLength) return;
         const { gridSize } = stats;
         const pipeRadius = pipeOuterDiameter / 2;
@@ -268,10 +286,12 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>(({ on
         const targetZ = pipeRadius * Math.sin(angle);
         
         controlsRef.current.target.set(targetX, height, targetZ);
-        cameraRef.current.position.set(targetX * 2, height, targetZ * 2);
+        const distance = zoomIn ? pipeRadius / 2 : pipeRadius * 2;
+        cameraRef.current.position.set(targetX * (1 + distance/pipeRadius), height, targetZ * (1 + distance/pipeRadius));
         controlsRef.current.update();
       },
-      resetCamera: resetCamera
+      resetCamera: resetCamera,
+      setView: setView
   }));
 
   useEffect(() => {
@@ -287,7 +307,7 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>(({ on
 
     sceneRef.current = new THREE.Scene();
     
-    cameraRef.current = new THREE.PerspectiveCamera(60, currentMount.clientWidth / currentMount.clientHeight, 0.1, 2000);
+    cameraRef.current = new THREE.PerspectiveCamera(60, currentMount.clientWidth / currentMount.clientHeight, 0.1, 5000);
     
     controlsRef.current = new OrbitControls(cameraRef.current, rendererRef.current.domElement);
     
@@ -296,9 +316,7 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>(({ on
     dirLight.position.set(pipeOuterDiameter, pipeLength * 2, pipeOuterDiameter);
     sceneRef.current.add(dirLight);
 
-    cameraRef.current.position.set(pipeOuterDiameter * 0.7, 0, pipeOuterDiameter * 0.7);
-    controlsRef.current.target.set(0, 0, 0);
-    controlsRef.current.update();
+    resetCamera();
     
     const material = new THREE.MeshStandardMaterial({ vertexColors: true, side: THREE.DoubleSide });
     meshRef.current = new THREE.Mesh(geometry, material);
@@ -393,32 +411,12 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>(({ on
         rendererRef.current.dispose();
       }
     };
-  }, [inspectionResult, geometry, setSelectedPoint, pipeOuterDiameter, pipeLength, onReady]);
+  }, [inspectionResult, geometry, setSelectedPoint, pipeOuterDiameter, pipeLength, onReady, resetCamera]);
   
   useEffect(() => {
     const animationId = requestAnimationFrame(animate);
     return () => cancelAnimationFrame(animationId);
   }, [animate]);
-
-  const setView = (view: 'top' | 'side' | 'front') => {
-    if (cameraRef.current && controlsRef.current && pipeOuterDiameter) {
-        controlsRef.current.target.set(0, 0, 0);
-        const distance = pipeOuterDiameter * 1.5;
-        switch (view) {
-            case 'top':
-                cameraRef.current.position.set(0, distance, 0);
-                break;
-            case 'side':
-                cameraRef.current.position.set(distance, 0, 0);
-                break;
-            case 'front':
-                cameraRef.current.position.set(0, 0, distance);
-                break;
-        }
-        controlsRef.current.update();
-    }
-  };
-
 
   return (
     <div className="grid md:grid-cols-4 gap-6 h-full">
@@ -486,7 +484,7 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>(({ on
             </Button>
             <Button variant="outline" onClick={() => setView('top')}>Top</Button>
             <Button variant="outline" onClick={() => setView('side')}>Side</Button>
-            <Button variant="outline" onClick={() => setView('front')}>Front</Button>
+            <Button variant="outline" onClick={() => setView('iso')}>Isometric</Button>
           </CardContent>
         </Card>
         {stats && nominalThickness && (
