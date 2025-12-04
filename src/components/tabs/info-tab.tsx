@@ -17,7 +17,7 @@ import { useToast } from '@/hooks/use-toast'
 import { identifyPatches } from '@/reporting/patch-detector'
 import { generateAIReport, AIReportData } from '@/reporting/AIReportGenerator'
 import { generateReportSummary } from '@/ai/flows/generate-report-summary'
-import { generatePatchSummary } from '@/ai/flows/generate-patch-summary'
+import { generateAllPatchSummaries } from '@/ai/flows/generate-all-patch-summaries'
 import { Progress } from '../ui/progress'
 import { Slider } from '../ui/slider'
 import { Label } from '../ui/label'
@@ -115,7 +115,7 @@ export function InfoTab({ setActiveTab }: { setActiveTab: (tab: string) => void 
 
 
   const handleGenerateScreenshots = async () => {
-    if (!inspectionResult || !is3dViewReady || !captureFunctions?.capture || !captureFunctions.setView || !captureFunctions.focus) {
+    if (!inspectionResult || !captureFunctions?.isReady) {
       toast({
         variant: "destructive",
         title: "3D Engine Not Ready",
@@ -219,9 +219,26 @@ export function InfoTab({ setActiveTab }: { setActiveTab: (tab: string) => void 
         // 1. Generate AI summaries
         const overallSummary = await generateReportSummary(inspectionResult, patches, defectThreshold);
 
-        const patchSummaries: Record<string, string> = {};
-        for (const patch of patches) {
-            patchSummaries[patch.id] = await generatePatchSummary(patch, inspectionResult.nominalThickness, inspectionResult.assetType, defectThreshold);
+        let patchSummaries: Record<string, string> = {};
+        if (patches.length > 0) {
+            const allPatchesInput = {
+                patches: patches.map(p => ({
+                    patchId: p.id,
+                    minThickness: p.minThickness.toFixed(2),
+                    severity: p.severity,
+                    xMin: p.coordinates.xMin,
+                    xMax: p.coordinates.xMax,
+                    yMin: p.coordinates.yMin,
+                    yMax: p.coordinates.yMax,
+                })),
+                assetType: inspectionResult.assetType,
+                nominalThickness: inspectionResult.nominalThickness,
+                defectThreshold: defectThreshold,
+            };
+            const allSummariesResult = await generateAllPatchSummaries(allPatchesInput);
+            for (const summary of allSummariesResult.summaries) {
+                patchSummaries[summary.patchId] = summary.summary;
+            }
         }
         
         if (patches.length === 0 && !overallSummary) {
