@@ -40,7 +40,7 @@ interface ReportDialogProps {
 
 export function ReportDialog({ open, onOpenChange }: ReportDialogProps) {
   const { inspectionResult } = useInspectionStore()
-  const { captureFunctions } = useReportStore()
+  const { captureFunctions, isReady } = useReportStore()
   const [isGenerating, setIsGenerating] = useState(false)
   
   const defaultScanDate = React.useMemo(() => {
@@ -51,9 +51,9 @@ export function ReportDialog({ open, onOpenChange }: ReportDialogProps) {
         // Convert Excel serial date to JS Date
         return new Date(Date.UTC(1899, 11, 30 + dateMeta[1]));
       }
+      // Check if it's a valid date string
       const parsedDate = new Date(dateMeta[1]);
-      // Check if the parsed date is valid
-      if (!isNaN(parsedDate.getTime())) {
+      if (!isNaN(parsedDate.getTime()) && String(dateMeta[1]).length > 5) {
         return parsedDate;
       }
     }
@@ -71,7 +71,7 @@ export function ReportDialog({ open, onOpenChange }: ReportDialogProps) {
   })
 
   const onSubmit = async (data: ReportFormValues) => {
-    if (!inspectionResult || !captureFunctions || !captureFunctions.capture) return
+    if (!inspectionResult || !captureFunctions?.capture || !isReady) return;
     setIsGenerating(true)
 
     try {
@@ -103,7 +103,10 @@ export function ReportDialog({ open, onOpenChange }: ReportDialogProps) {
                 // Wait for camera to move
                 await new Promise(resolve => setTimeout(resolve, 500));
             }
-            defectScreenshots[`${defect.x},${defect.y}`] = captureFunctions.capture();
+            const screenshot = captureFunctions.capture();
+            if (screenshot) {
+                defectScreenshots[`${defect.x},${defect.y}`] = screenshot;
+            }
         }
 
 
@@ -216,9 +219,9 @@ export function ReportDialog({ open, onOpenChange }: ReportDialogProps) {
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isGenerating}>Cancel</Button>
-            <Button type="submit" disabled={isGenerating || !captureFunctions?.capture}>
+            <Button type="submit" disabled={isGenerating || !isReady}>
               {isGenerating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              {isGenerating ? 'Generating...' : 'Generate & Download'}
+              {isGenerating ? 'Generating...' : 'Generate &amp; Download'}
             </Button>
           </DialogFooter>
         </form>

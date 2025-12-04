@@ -17,32 +17,41 @@ export function ThreeDeeViewTab() {
   const tankRef = useRef<TankView3DRef>(null);
 
   React.useEffect(() => {
-    if (!inspectionResult) return;
+    if (!inspectionResult) {
+       setCaptureFunctions({ capture: () => '', focus: () => {}, isReady: false });
+       return;
+    }
 
     const { assetType } = inspectionResult;
+    let functions: { capture: () => string; focus: (x: number, y: number) => void; isReady: boolean };
+
     switch (assetType) {
       case 'Pipe':
-        setCaptureFunctions({
+        functions = {
           capture: () => pipeRef.current?.captureScreenshot() || '',
           focus: (x, y) => pipeRef.current?.focusOnPoint(x, y),
-        });
+          isReady: !!pipeRef.current,
+        };
         break;
       case 'Tank':
       case 'Vessel':
-        setCaptureFunctions({
+        functions = {
           capture: () => tankRef.current?.captureScreenshot() || '',
           focus: (x, y) => tankRef.current?.focusOnPoint(x, y),
-        });
+          isReady: !!tankRef.current,
+        };
         break;
       case 'Plate':
       default:
-        setCaptureFunctions({
+        functions = {
           capture: () => plateRef.current?.captureScreenshot() || '',
           focus: (x, y) => plateRef.current?.focusOnPoint(x, y),
-        });
+          isReady: !!plateRef.current,
+        };
         break;
     }
-  }, [inspectionResult, setCaptureFunctions]);
+    setCaptureFunctions(functions);
+  }, [inspectionResult, setCaptureFunctions, plateRef.current, pipeRef.current, tankRef.current]); // Add refs to dependency array
 
   if (!inspectionResult) return null;
 

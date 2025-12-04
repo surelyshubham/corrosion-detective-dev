@@ -7,12 +7,17 @@ type CaptureFunctions = {
 
 interface ReportState {
   captureFunctions: CaptureFunctions | null;
-  setCaptureFunctions: (functions: CaptureFunctions) => void;
+  isReady: boolean;
+  setCaptureFunctions: (functions: { capture: () => string; focus: (x: number, y: number) => void; isReady: boolean }) => void;
 }
 
 export const useReportStore = create<ReportState>()(
   (set) => ({
     captureFunctions: null,
-    setCaptureFunctions: (functions) => set({ captureFunctions: functions }),
+    isReady: false,
+    setCaptureFunctions: (functions) => set({ 
+      captureFunctions: { capture: functions.capture, focus: functions.focus },
+      isReady: functions.isReady 
+    }),
   })
 );
