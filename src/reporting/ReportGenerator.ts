@@ -95,15 +95,18 @@ export async function generateInspectionReport(data: ReportData) {
   page.drawText('3D Inspection Overview', { x: 50, y, font: helveticaBoldFont, size: 16 });
   y -= 30;
 
-  const overviewImage = await pdfDoc.embedPng(data.screenshots.overview);
-  const overviewDims = overviewImage.scale(0.4);
-  page.drawImage(overviewImage, {
-      x: (width - overviewDims.width) / 2,
-      y: y - overviewDims.height,
-      width: overviewDims.width,
-      height: overviewDims.height,
-  });
-  y -= (overviewDims.height + 20);
+  if (data.screenshots.overview) {
+    const overviewImage = await pdfDoc.embedPng(data.screenshots.overview);
+    const overviewDims = overviewImage.scale(0.4);
+    page.drawImage(overviewImage, {
+        x: (width - overviewDims.width) / 2,
+        y: y - overviewDims.height,
+        width: overviewDims.width,
+        height: overviewDims.height,
+    });
+    y -= (overviewDims.height + 20);
+  }
+
 
   const summaryParagraph = `The inspection produced ${data.inspection.stats.totalPoints.toLocaleString()} valid measurement points. ${data.defects.length} points were classified as a defect (<80% remaining wall).`;
   page.drawText(summaryParagraph, { x: 60, y, font: helveticaFont, size: 11, color: THEME_TEXT, maxWidth: width - 120, lineHeight: 15 });
@@ -114,7 +117,7 @@ export async function generateInspectionReport(data: ReportData) {
     await drawHeader(page, width, data);
     y = height - 120;
     
-    page.drawText('Defect Summary (Wall < 80%)', { x: 50, y, font: helveticaBoldFont, size: 16 });
+    page.drawText(`Defect Summary (Wall < 80%)`, { x: 50, y, font: helveticaBoldFont, size: 16 });
     y -= 30;
 
     const tableHeaders = ['X', 'Y', 'Raw (mm)', 'Eff (mm)', 'Loss (mm)', '% Rem.'];
@@ -151,7 +154,7 @@ export async function generateInspectionReport(data: ReportData) {
   }
 
   // --- PAGE 4+: INDIVIDUAL DEFECTS ---
-   for (const defect of data.defects) {
+   for (const defect of data.defects.slice(0,10)) { // Limit defects for now to prevent huge PDFs
      if (y < 400) {
         page = pdfDoc.addPage();
         await drawHeader(page, width, data);
