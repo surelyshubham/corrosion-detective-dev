@@ -46,6 +46,11 @@ export function ReportDialog({ open, onOpenChange }: ReportDialogProps) {
   const defaultScanDate = React.useMemo(() => {
     const dateMeta = inspectionResult?.plates[0]?.metadata.find(m => String(m[0]).toLowerCase().includes('date'));
     if (dateMeta && dateMeta[1]) {
+      // Check if it's a number, which could be an Excel date serial number
+      if (typeof dateMeta[1] === 'number') {
+        // Convert Excel serial date to JS Date
+        return new Date(Date.UTC(1899, 11, 30 + dateMeta[1]));
+      }
       const parsedDate = new Date(dateMeta[1]);
       // Check if the parsed date is valid
       if (!isNaN(parsedDate.getTime())) {
@@ -75,7 +80,7 @@ export function ReportDialog({ open, onOpenChange }: ReportDialogProps) {
         const defects: Defect[] = [];
         inspectionResult.mergedGrid.forEach((row, y) => {
             row.forEach((cell, x) => {
-                if (cell && cell.percentage !== null && cell.percentage < 20) {
+                if (cell && cell.percentage !== null && cell.percentage < 80) { // Adjusted threshold
                     defects.push({
                         x,
                         y,
@@ -93,9 +98,11 @@ export function ReportDialog({ open, onOpenChange }: ReportDialogProps) {
 
         const defectScreenshots: Record<string, string> = {};
         for (const defect of defects.slice(0, 5)) { // Limit to top 5 defects for now
-            captureFunctions.focus(defect.x, defect.y);
-            // Wait for camera to move
-            await new Promise(resolve => setTimeout(resolve, 500));
+            if (captureFunctions.focus) {
+                captureFunctions.focus(defect.x, defect.y);
+                // Wait for camera to move
+                await new Promise(resolve => setTimeout(resolve, 500));
+            }
             defectScreenshots[`${defect.x},${defect.y}`] = captureFunctions.capture();
         }
 
