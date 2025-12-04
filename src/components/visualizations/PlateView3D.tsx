@@ -110,18 +110,16 @@ function createTextSprite(message: string, opts: { fontsize?: number, fontface?:
 }
 
 export type PlateView3DRef = {
-  captureScreenshot: () => string;
-  focusOnPoint: (x: number, y: number, zoomIn: boolean) => void;
+  capture: () => string;
+  focus: (x: number, y: number, zoomIn: boolean) => void;
   resetCamera: () => void;
   setView: (view: 'iso' | 'top' | 'side') => void;
 };
 
-interface PlateView3DProps {
-  onReady?: () => void;
-}
+interface PlateView3DProps {}
 
 
-export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>(({ onReady }, ref) => {
+export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((props, ref) => {
   const { inspectionResult, selectedPoint, setSelectedPoint, colorMode, setColorMode } = useInspectionStore()
   const mountRef = useRef<HTMLDivElement>(null)
   const [zScale, setZScale] = useState(15)
@@ -317,12 +315,12 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>(({
   }, [inspectionResult, zScale, showReference, showMinMax, showOrigin, selectedPoint, nominalThickness]);
 
   useImperativeHandle(ref, () => ({
-    captureScreenshot: () => {
+    capture: () => {
       if (!rendererRef.current) return '';
       rendererRef.current.render(sceneRef.current!, cameraRef.current!);
       return rendererRef.current.domElement.toDataURL('image/png');
     },
-    focusOnPoint: (x: number, y: number, zoomIn: boolean) => {
+    focus: (x: number, y: number, zoomIn: boolean) => {
         if (!cameraRef.current || !controlsRef.current || !stats) return;
         const { gridSize } = stats;
         const visualHeight = VISUAL_WIDTH * (gridSize.height / gridSize.width);
@@ -476,10 +474,6 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>(({
     currentMount.addEventListener('mousemove', onMouseMove);
     currentMount.addEventListener('click', onClick);
 
-    if (onReady) {
-      onReady();
-    }
-
     return () => {
       window.removeEventListener('resize', handleResize);
       currentMount.removeEventListener('mousemove', onMouseMove);
@@ -488,7 +482,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>(({
         rendererRef.current.dispose();
       }
     };
-  }, [inspectionResult, geometry, setSelectedPoint, nominalThickness, onReady, resetCamera]);
+  }, [inspectionResult, geometry, setSelectedPoint, nominalThickness, resetCamera]);
   
   useEffect(() => {
     const animationId = requestAnimationFrame(animate);

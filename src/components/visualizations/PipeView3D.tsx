@@ -91,18 +91,16 @@ const ColorLegend = ({ mode, stats, nominalThickness }: { mode: ColorMode, stats
 }
 
 export type PipeView3DRef = {
-  captureScreenshot: () => string;
-  focusOnPoint: (x: number, y: number, zoomIn: boolean) => void;
+  capture: () => string;
+  focus: (x: number, y: number, zoomIn: boolean) => void;
   resetCamera: () => void;
   setView: (view: 'iso' | 'top' | 'side') => void;
 };
 
-interface PipeView3DProps {
-  onReady?: () => void;
-}
+interface PipeView3DProps {}
 
 
-export const PipeView3D = React.forwardRef<PipeView3DRef, PipeView3DProps>(({ onReady }, ref) => {
+export const PipeView3D = React.forwardRef<PipeView3DRef, PipeView3DProps>((props, ref) => {
   const { inspectionResult, selectedPoint, setSelectedPoint, colorMode, setColorMode } = useInspectionStore()
   const mountRef = useRef<HTMLDivElement>(null)
   const [zScale, setZScale] = useState(15) // Represents radial exaggeration
@@ -260,12 +258,12 @@ export const PipeView3D = React.forwardRef<PipeView3DRef, PipeView3DProps>(({ on
   }, [inspectionResult, zScale, showOrigin, selectedPoint, nominalThickness]);
 
    useImperativeHandle(ref, () => ({
-    captureScreenshot: () => {
+    capture: () => {
       if (!rendererRef.current) return '';
       rendererRef.current.render(sceneRef.current!, cameraRef.current!);
       return rendererRef.current.domElement.toDataURL('image/png');
     },
-    focusOnPoint: (x: number, y: number, zoomIn: boolean) => {
+    focus: (x: number, y: number, zoomIn: boolean) => {
       if (!cameraRef.current || !controlsRef.current || !stats || !pipeOuterDiameter || !pipeLength) return;
         const { gridSize } = stats;
         const pipeRadius = pipeOuterDiameter / 2;
@@ -373,10 +371,6 @@ export const PipeView3D = React.forwardRef<PipeView3DRef, PipeView3DProps>(({ on
     currentMount.addEventListener('mousemove', onMouseMove);
     currentMount.addEventListener('click', onClick);
 
-    if (onReady) {
-      onReady();
-    }
-
     return () => {
       window.removeEventListener('resize', handleResize);
       currentMount.removeEventListener('mousemove', onMouseMove);
@@ -385,7 +379,7 @@ export const PipeView3D = React.forwardRef<PipeView3DRef, PipeView3DProps>(({ on
         rendererRef.current.dispose();
       }
     };
-  }, [inspectionResult, geometry, setSelectedPoint, pipeOuterDiameter, pipeLength, onReady, resetCamera]);
+  }, [inspectionResult, geometry, setSelectedPoint, pipeOuterDiameter, pipeLength, resetCamera]);
   
   useEffect(() => {
     const animationId = requestAnimationFrame(animate);
@@ -474,3 +468,4 @@ PipeView3D.displayName = "PipeView3D";
     
 
     
+
