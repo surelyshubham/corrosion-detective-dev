@@ -43,8 +43,11 @@ export const PipeView3D = React.forwardRef<PipeView3DRef, PipeView3DProps>((prop
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null)
   const meshRef = useRef<THREE.Mesh | null>(null);
+  const raycasterRef = useRef<THREE.Raycaster | null>(null);
+  const pointerRef = useRef<THREE.Vector2 | null>(null);
   const colorTextureRef = useRef<THREE.DataTexture | null>(null);
   const displacementTextureRef = useRef<THREE.DataTexture | null>(null);
+  const originAxesRef = useRef<THREE.AxesHelper | null>(null);
 
   const { nominalThickness, pipeOuterDiameter, pipeLength } = inspectionResult || {};
   const stats = DataVault.stats;
@@ -159,6 +162,9 @@ export const PipeView3D = React.forwardRef<PipeView3DRef, PipeView3DProps>((prop
     currentMount.appendChild(rendererRef.current.domElement);
 
     sceneRef.current = new THREE.Scene();
+    raycasterRef.current = new THREE.Raycaster();
+    pointerRef.current = new THREE.Vector2();
+
     cameraRef.current = new THREE.PerspectiveCamera(60, currentMount.clientWidth / currentMount.clientHeight, 0.1, 5000);
     controlsRef.current = new OrbitControls(cameraRef.current, rendererRef.current.domElement);
     
@@ -169,6 +175,7 @@ export const PipeView3D = React.forwardRef<PipeView3DRef, PipeView3DProps>((prop
 
     const { width, height } = stats.gridSize;
     const geometry = new THREE.CylinderGeometry(pipeOuterDiameter / 2, pipeOuterDiameter / 2, pipeLength, width - 1, height - 1, true);
+    geometry.translate(0, 0, 0);
 
     const material = new THREE.ShaderMaterial({
         uniforms: {
@@ -214,6 +221,20 @@ export const PipeView3D = React.forwardRef<PipeView3DRef, PipeView3DProps>((prop
     meshRef.current = new THREE.Mesh(geometry, material);
     sceneRef.current.add(meshRef.current);
 
+    originAxesRef.current = new THREE.AxesHelper(Math.max(pipeOuterDiameter, pipeLength) * 0.1);
+    sceneRef.current.add(originAxesRef.current);
+    
+    const capMaterial = new THREE.MeshStandardMaterial({ color: 0x666666, side: THREE.DoubleSide, transparent: true, opacity: 0.5 });
+    const capGeometry = new THREE.CircleGeometry(pipeOuterDiameter / 2, width - 1);
+    const topCap = new THREE.Mesh(capGeometry, capMaterial);
+    topCap.position.y = pipeLength / 2;
+    topCap.rotation.x = -Math.PI / 2;
+    const bottomCap = new THREE.Mesh(capGeometry, capMaterial);
+    bottomCap.position.y = -pipeLength / 2;
+    bottomCap.rotation.x = Math.PI / 2;
+    sceneRef.current.add(topCap);
+    sceneRef.current.add(bottomCap);
+
     const handleResize = () => {
       if (rendererRef.current && cameraRef.current && currentMount) {
         cameraRef.current.aspect = currentMount.clientWidth / currentMount.clientHeight;
@@ -222,6 +243,42 @@ export const PipeView3D = React.forwardRef<PipeView3DRef, PipeView3DProps>((prop
       }
     };
     window.addEventListener('resize', handleResize);
+
+    const onPointerMove = ( event: PointerEvent ) => {
+      if (!pointerRef.current || !mountRef.current || !raycasterRef.current || !cameraRef.current || !meshRef.current || !DataVault.gridMatrix) {
+          setHoveredPoint(null);
+          return;
+      }
+      const rect = mountRef.current.getBoundingClientRect();
+      pointerRef.current.x = ( ( event.clientX - rect.left ) / rect.width ) * 2 - 1;
+      pointerRef.current.y = - ( ( event.clientY - rect.top ) / rect.height ) * 2 + 1;
+
+      raycasterRef.current.setFromCamera( pointerRef.current, cameraRef.current );
+      const intersects = raycasterRef.current.intersectObject( meshRef.current );
+
+      if ( intersects.length > 0 && intersects[0].uv) {
+          const uv = intersects[0].uv;
+          const { width, height } = stats!.gridSize;
+          const gridX = Math.floor(uv.x * width);
+          const gridY = Math.floor((1 - uv.y) * height);
+          
+          if (gridX >= 0 && gridX < width && gridY >= 0 && gridY < height) {
+              const pointData = DataVault.gridMatrix[gridY]?.[gridX];
+               if(pointData && pointData.plateId) {
+                  setHoveredPoint({ x: gridX, y: gridY, ...pointData, clientX: event.clientX, clientY: event.clientY });
+              } else {
+                  setHoveredPoint(null);
+              }
+          } else {
+              setHoveredPoint(null);
+          }
+      } else {
+          setHoveredPoint(null);
+      }
+    }
+    
+    currentMount.addEventListener('pointermove', onPointerMove);
+    currentMount.addEventListener('pointerleave', () => setHoveredPoint(null));
     
     handleResize();
     resetCamera();
@@ -230,10 +287,18 @@ export const PipeView3D = React.forwardRef<PipeView3DRef, PipeView3DProps>((prop
     return () => {
       window.removeEventListener('resize', handleResize);
       if (currentMount) {
+        currentMount.removeEventListener('pointermove', onPointerMove);
+        currentMount.removeEventListener('pointerleave', () => setHoveredPoint(null));
         currentMount.innerHTML = '';
       }
     };
   }, [inspectionResult, animate, resetCamera, pipeOuterDiameter, pipeLength, zScale, nominalThickness, stats]);
+  
+  useEffect(() => {
+    if (originAxesRef.current) {
+        originAxesRef.current.visible = showOrigin;
+    }
+  }, [showOrigin]);
   
   
   if (!inspectionResult) return null;
@@ -245,8 +310,23 @@ export const PipeView3D = React.forwardRef<PipeView3DRef, PipeView3DProps>((prop
           <CardHeader>
             <CardTitle className="font-headline">3D Pipe View</CardTitle>
           </CardHeader>
-          <CardContent className="flex-grow p-0">
+          <CardContent className="flex-grow p-0 relative">
             <div ref={mountRef} className="w-full h-full" />
+             {hoveredPoint && (
+              <div
+                className="fixed p-2 text-xs rounded-md shadow-lg pointer-events-none bg-popover text-popover-foreground border z-20"
+                style={{
+                  left: `${hoveredPoint.clientX + 15}px`,
+                  top: `${hoveredPoint.clientY - 30}px`,
+                }}
+              >
+                <div className="font-bold">X: {hoveredPoint.x}, Y: {hoveredPoint.y}</div>
+                {hoveredPoint.plateId && <div className="text-muted-foreground truncate max-w-[200px]">{hoveredPoint.plateId}</div>}
+                <div>Raw Thick: {hoveredPoint.rawThickness?.toFixed(2) ?? 'ND'} mm</div>
+                <div>Eff. Thick: {hoveredPoint.effectiveThickness?.toFixed(2) ?? 'ND'} mm</div>
+                <div>Percentage: {hoveredPoint.percentage?.toFixed(1) ?? 'N/A'}%</div>
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -301,3 +381,5 @@ export const PipeView3D = React.forwardRef<PipeView3DRef, PipeView3DProps>((prop
 });
 
 PipeView3D.displayName = "PipeView3D";
+
+    

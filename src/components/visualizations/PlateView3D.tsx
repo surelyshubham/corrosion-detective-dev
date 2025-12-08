@@ -45,6 +45,9 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null)
   const meshRef = useRef<THREE.Mesh | null>(null);
+  const raycasterRef = useRef<THREE.Raycaster | null>(null);
+  const pointerRef = useRef<THREE.Vector2 | null>(null);
+  const originAxesRef = useRef<THREE.AxesHelper | null>(null);
   const colorTextureRef = useRef<THREE.DataTexture | null>(null);
   const displacementTextureRef = useRef<THREE.DataTexture | null>(null);
 
@@ -112,19 +115,20 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
 
   const setView = useCallback((view: 'iso' | 'top' | 'side') => {
     if (cameraRef.current && controlsRef.current && stats) {
-        controlsRef.current.target.set(0, 0, 0);
-        const aspect = stats.gridSize.height / stats.gridSize.width;
+        const { width, height } = stats.gridSize;
+        const aspect = height / width;
+        controlsRef.current.target.set(VISUAL_WIDTH / 2, 0, (VISUAL_WIDTH * aspect) / 2);
         const distance = Math.max(VISUAL_WIDTH, VISUAL_WIDTH * aspect) * 1.5;
         switch (view) {
             case 'top':
-                cameraRef.current.position.set(0, distance, 0.001); // slight offset to avoid gimbal lock
+                cameraRef.current.position.set(VISUAL_WIDTH / 2, distance, (VISUAL_WIDTH * aspect) / 2 + 0.01); 
                 break;
             case 'side':
-                cameraRef.current.position.set(distance, 0, 0);
+                cameraRef.current.position.set(VISUAL_WIDTH / 2 + distance, 0, (VISUAL_WIDTH * aspect) / 2);
                 break;
             case 'iso':
             default:
-                 cameraRef.current.position.set(distance / 2, distance / 2, distance / 2);
+                 cameraRef.current.position.set(VISUAL_WIDTH / 2 + distance / 2, distance / 2, (VISUAL_WIDTH * aspect) / 2 + distance / 2);
                 break;
         }
         controlsRef.current.update();
@@ -144,8 +148,8 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
 
         const { width, height } = stats.gridSize;
         const aspect = height / width;
-        const targetX = (x / (width - 1)) * VISUAL_WIDTH - VISUAL_WIDTH / 2;
-        const targetZ = (y / (height - 1)) * (VISUAL_WIDTH * aspect) - (VISUAL_WIDTH * aspect) / 2;
+        const targetX = (x / (width - 1)) * VISUAL_WIDTH;
+        const targetZ = (y / (height - 1)) * (VISUAL_WIDTH * aspect);
         
         controlsRef.current.target.set(targetX, 0, targetZ);
         
@@ -174,6 +178,9 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     currentMount.appendChild(rendererRef.current.domElement);
     
     sceneRef.current = new THREE.Scene();
+    raycasterRef.current = new THREE.Raycaster();
+    pointerRef.current = new THREE.Vector2();
+
     cameraRef.current = new THREE.PerspectiveCamera(60, currentMount.clientWidth / currentMount.clientHeight, 0.1, 2000);
     controlsRef.current = new OrbitControls(cameraRef.current, rendererRef.current.domElement);
 
@@ -185,6 +192,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     const { width, height } = stats.gridSize;
     const aspect = height / width;
     const geometry = new THREE.PlaneGeometry(VISUAL_WIDTH, VISUAL_WIDTH * aspect, width - 1, height - 1);
+    geometry.translate(VISUAL_WIDTH/2, (VISUAL_WIDTH * aspect)/2, 0); // Move corner to origin
     geometry.rotateX(-Math.PI / 2);
 
     const material = new THREE.MeshStandardMaterial({
@@ -196,6 +204,10 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     meshRef.current = new THREE.Mesh(geometry, material);
     sceneRef.current.add(meshRef.current);
 
+    originAxesRef.current = new THREE.AxesHelper(Math.max(VISUAL_WIDTH, VISUAL_WIDTH * aspect) * 0.2);
+    sceneRef.current.add(originAxesRef.current);
+
+
     const handleResize = () => {
       if (rendererRef.current && cameraRef.current && currentMount) {
         cameraRef.current.aspect = currentMount.clientWidth / currentMount.clientHeight;
@@ -204,6 +216,42 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
       }
     };
     window.addEventListener('resize', handleResize);
+
+    const onPointerMove = ( event: PointerEvent ) => {
+      if (!pointerRef.current || !mountRef.current || !raycasterRef.current || !cameraRef.current || !meshRef.current || !DataVault.gridMatrix) {
+          setHoveredPoint(null);
+          return;
+      }
+      const rect = mountRef.current.getBoundingClientRect();
+      pointerRef.current.x = ( ( event.clientX - rect.left ) / rect.width ) * 2 - 1;
+      pointerRef.current.y = - ( ( event.clientY - rect.top ) / rect.height ) * 2 + 1;
+
+      raycasterRef.current.setFromCamera( pointerRef.current, cameraRef.current );
+      const intersects = raycasterRef.current.intersectObject( meshRef.current );
+
+      if ( intersects.length > 0 && intersects[0].uv) {
+          const uv = intersects[0].uv;
+          const { width, height } = stats!.gridSize;
+          const gridX = Math.floor(uv.x * width);
+          const gridY = Math.floor((1-uv.y) * height); // Flipped Y to match texture
+          
+          if (gridX >= 0 && gridX < width && gridY >= 0 && gridY < height) {
+              const pointData = DataVault.gridMatrix[gridY]?.[gridX];
+              if(pointData && pointData.plateId) {
+                  setHoveredPoint({ x: gridX, y: gridY, ...pointData, clientX: event.clientX, clientY: event.clientY });
+              } else {
+                  setHoveredPoint(null);
+              }
+          } else {
+              setHoveredPoint(null);
+          }
+      } else {
+          setHoveredPoint(null);
+      }
+    }
+    
+    currentMount.addEventListener('pointermove', onPointerMove);
+    currentMount.addEventListener('pointerleave', () => setHoveredPoint(null));
     
     handleResize();
     resetCamera();
@@ -211,7 +259,9 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
 
     return () => {
       window.removeEventListener('resize', handleResize);
-      if (currentMount) {
+       if (currentMount) {
+        currentMount.removeEventListener('pointermove', onPointerMove);
+        currentMount.removeEventListener('pointerleave', () => setHoveredPoint(null));
         currentMount.innerHTML = '';
       }
     };
@@ -224,6 +274,12 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
         material.needsUpdate = true;
     }
   }, [zScale]);
+
+  useEffect(() => {
+    if (originAxesRef.current) {
+        originAxesRef.current.visible = showOrigin;
+    }
+  }, [showOrigin]);
   
   if (!inspectionResult) return null;
 
@@ -247,8 +303,23 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
           <CardHeader>
             <CardTitle className="font-headline">3D Surface Plot</CardTitle>
           </CardHeader>
-          <CardContent className="flex-grow p-0">
+          <CardContent className="flex-grow p-0 relative">
             <div ref={mountRef} className="w-full h-full" />
+             {hoveredPoint && (
+              <div
+                className="fixed p-2 text-xs rounded-md shadow-lg pointer-events-none bg-popover text-popover-foreground border z-20"
+                style={{
+                  left: `${hoveredPoint.clientX + 15}px`,
+                  top: `${hoveredPoint.clientY - 30}px`,
+                }}
+              >
+                <div className="font-bold">X: {hoveredPoint.x}, Y: {hoveredPoint.y}</div>
+                 {hoveredPoint.plateId && <div className="text-muted-foreground truncate max-w-[200px]">{hoveredPoint.plateId}</div>}
+                <div>Raw Thick: {hoveredPoint.rawThickness?.toFixed(2) ?? 'ND'} mm</div>
+                <div>Eff. Thick: {hoveredPoint.effectiveThickness?.toFixed(2) ?? 'ND'} mm</div>
+                <div>Percentage: {hoveredPoint.percentage?.toFixed(1) ?? 'N/A'}%</div>
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -287,6 +358,19 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
               <Label htmlFor="origin-switch" className="flex items-center gap-2"><LocateFixed className="h-4 w-4" />Show Origin (0,0)</Label>
               <Switch id="origin-switch" checked={showOrigin} onCheckedChange={setShowOrigin} />
             </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg font-headline">Camera</CardTitle>
+          </CardHeader>
+          <CardContent className="grid grid-cols-2 gap-2">
+            <Button variant="outline" onClick={resetCamera} className="col-span-2">
+              <RefreshCw className="mr-2 h-4 w-4" /> Reset View
+            </Button>
+            <Button variant="outline" onClick={() => setView('top')}>Top</Button>
+            <Button variant="outline" onClick={() => setView('side')}>Side</Button>
+            <Button variant="outline" onClick={() => setView('iso')}>Isometric</Button>
           </CardContent>
         </Card>
       </div>

@@ -133,7 +133,8 @@ function createBuffers(grid: MergedGrid, nominal: number, min: number, max: numb
 
      for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
-            const index = y * width + x;
+            const flippedY = height - 1 - y; // Y-axis flip
+            const index = flippedY * width + x;
             const cell = grid[y][x];
             displacementBuffer[index] = cell.effectiveThickness !== null ? cell.effectiveThickness : nominal;
             let rgba: [number, number, number, number];
@@ -177,7 +178,7 @@ function universalParse(buffer: ArrayBuffer): any[][] {
     console.log("Worker: Attempting text/CSV parsing.");
     const decoder = new TextDecoder('utf-8');
     const text = decoder.decode(buffer);
-    const lines = text.split(/[\r\n]+/);
+    const lines = text.split(/[\\r\\n]+/);
     return lines.map(line => {
         // Robust CSV splitting
         const row = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
@@ -283,3 +284,5 @@ self.onmessage = async (event: MessageEvent<any>) => {
 };
 
 export {};
+
+    
