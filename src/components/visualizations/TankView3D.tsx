@@ -33,6 +33,7 @@ const getNormalizedColor = (normalizedPercent: number | null): THREE.Color => {
 };
 
 const ColorLegend = ({ mode, stats, nominalThickness }: { mode: ColorMode, stats: any, nominalThickness: number}) => {
+    if (!stats) return null;
     const renderMmLegend = () => {
         const levels = [
             { label: `> 90%`, color: '#0000ff' },
@@ -116,6 +117,7 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>((prop
   const capsGroupRef = useRef<THREE.Group | null>(null);
   const originMarkerRef = useRef<THREE.Mesh | null>(null);
   const selectedMarkerRef = useRef<THREE.Mesh | null>(null);
+  const dataTextureRef = useRef<THREE.DataTexture | null>(null);
 
   const { mergedGrid, stats, nominalThickness, pipeOuterDiameter, pipeLength } = inspectionResult || {};
 
@@ -140,18 +142,48 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>((prop
 
     const { gridSize, minThickness, maxThickness } = stats;
     const effTRange = maxThickness - minThickness;
-    
-    const colors: number[] = [];
-    const positions = geometry.attributes.position;
     const pipeRadius = pipeOuterDiameter / 2;
-    
+
+     // DataTexture for color
+    const colorData = new Uint8Array(gridSize.width * gridSize.height * 3);
+    let i = 0;
+     for (let y = 0; y < gridSize.height; y++) {
+        for (let x = 0; x < gridSize.width; x++) {
+            const cell = mergedGrid[y]?.[x];
+            let color: THREE.Color;
+             if (colorMode === '%') {
+                const normalized = (cell && cell.effectiveThickness !== null && effTRange > 0)
+                    ? (cell.effectiveThickness - minThickness) / effTRange
+                    : null;
+                color = getNormalizedColor(normalized);
+            } else {
+                color = getAbsColor(cell?.percentage ?? null);
+            }
+            const stride = i * 3;
+            colorData[stride] = color.r * 255;
+            colorData[stride + 1] = color.g * 255;
+            colorData[stride + 2] = color.b * 255;
+            i++;
+        }
+    }
+    if (dataTextureRef.current) {
+        dataTextureRef.current.image.data = colorData;
+        dataTextureRef.current.needsUpdate = true;
+    } else {
+        const texture = new THREE.DataTexture(colorData, gridSize.width, gridSize.height, THREE.RGBFormat);
+        texture.needsUpdate = true;
+        dataTextureRef.current = texture;
+        (meshRef.current.material as THREE.MeshStandardMaterial).map = texture;
+    }
+
+    // Update displacement
+    const positions = geometry.attributes.position;
     for (let i = 0; i < positions.count; i++) {
         const y_idx = Math.floor(i / gridSize.width);
         const x_idx = i % gridSize.width;
 
         const cellData = mergedGrid[y_idx]?.[x_idx];
         const effectiveThickness = cellData?.effectiveThickness;
-        const percentage = cellData?.percentage;
 
         const angle = (x_idx / (gridSize.width - 1)) * 2 * Math.PI;
         
@@ -163,27 +195,12 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>((prop
         }
 
         positions.setX(i, r * Math.cos(angle));
-        positions.setZ(i, r * Math.sin(angle)); // Map to XZ plane for radial
-
-        let color: THREE.Color;
-        if (colorMode === '%') {
-             const normalizedPercent = (effectiveThickness !== null && effectiveThickness !== undefined && effTRange > 0)
-                ? (effectiveThickness - minThickness) / effTRange
-                : null;
-            color = getNormalizedColor(normalizedPercent);
-        } else {
-            color = getAbsColor(percentage ?? null);
-        }
-        colors.push(color.r, color.g, color.b);
+        positions.setZ(i, r * Math.sin(angle));
     }
-
-    geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    
     positions.needsUpdate = true;
-    geometry.attributes.color.needsUpdate = true;
     geometry.computeVertexNormals();
     
-    meshRef.current.geometry = geometry;
-
     // Update caps position
     if (capsGroupRef.current) {
         const topCap = capsGroupRef.current.children[0] as THREE.Mesh;
@@ -228,7 +245,7 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>((prop
     controlsRef.current.update();
 
     const { mergedGrid, stats, nominalThickness, pipeOuterDiameter, pipeLength } = inspectionResult;
-    if (!pipeOuterDiameter || !pipeLength) return;
+    if (!pipeOuterDiameter || !pipeLength || !stats) return;
 
     const { gridSize } = stats;
 
@@ -316,7 +333,7 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>((prop
 
     resetCamera();
     
-    const material = new THREE.MeshStandardMaterial({ vertexColors: true, side: THREE.DoubleSide });
+    const material = new THREE.MeshStandardMaterial({ side: THREE.DoubleSide });
     meshRef.current = new THREE.Mesh(geometry, material);
     sceneRef.current.add(meshRef.current);
 
@@ -359,7 +376,7 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>((prop
     const mouse = new THREE.Vector2();
 
     const onMouseMove = (event: MouseEvent) => {
-        if (!currentMount || !meshRef.current || !cameraRef.current || !geometry) return;
+        if (!currentMount || !meshRef.current || !cameraRef.current || !geometry || !stats || !mergedGrid) return;
         const rect = currentMount.getBoundingClientRect();
         mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
         mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
@@ -369,7 +386,7 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>((prop
         
         if (intersects.length > 0) {
             const intersect = intersects[0];
-            if (intersect.uv && mergedGrid && stats) {
+            if (intersect.uv) {
                 const x = Math.round(intersect.uv.x * (stats.gridSize.width - 1));
                 const y = Math.round((1-intersect.uv.y) * (stats.gridSize.height - 1));
 
@@ -377,15 +394,11 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>((prop
 
                 if (cellData) {
                     setHoveredPoint({ x: x, y: y, ...cellData, clientX: event.clientX, clientY: event.clientY });
-                } else {
-                    setHoveredPoint(null);
+                    return;
                 }
-            } else {
-               setHoveredPoint(null);
             }
-        } else {
-            setHoveredPoint(null);
         }
+        setHoveredPoint(null);
     };
     
     const onClick = (event: MouseEvent) => {
@@ -411,6 +424,8 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>((prop
     const animationId = requestAnimationFrame(animate);
     return () => cancelAnimationFrame(animationId);
   }, [animate]);
+  
+  if (!inspectionResult) return null;
 
   return (
     <div className="grid md:grid-cols-4 gap-6 h-full">
@@ -489,11 +504,3 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>((prop
   )
 });
 TankView3D.displayName = "TankView3D";
-    
-
-
-    
-
-    
-
-    

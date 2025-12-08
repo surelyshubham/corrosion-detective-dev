@@ -1,15 +1,24 @@
 
+"use client"
+
 import { create } from 'zustand';
-import { persist, createJSONStorage, type PersistOptions } from 'zustand/middleware';
-import type { MergedInspectionResult, AIInsight, Plate, MergedCell, RawInspectionDataPoint } from '@/lib/types';
+import type { MergedInspectionResult, AIInsight, Plate, MergedCell } from '@/lib/types';
 import { processData, reprocessMergedData } from '@/lib/data-processor';
+
+// The worker's output message format
+export interface WorkerOutput {
+  mergedGrid: MergedGrid;
+  stats: any;
+  condition: any;
+  plates: Plate[];
+}
 
 export type ColorMode = 'mm' | '%';
 
 interface InspectionState {
   inspectionResult: MergedInspectionResult | null;
   setInspectionResult: (result: MergedInspectionResult | null) => void;
-  addPlate: (plate: Omit<Plate, 'processedData' | 'stats'> & { rawGridData: RawInspectionDataPoint[] }, options: {
+  addPlate: (plateData: Omit<Plate, 'processedData' | 'stats'>, options: {
     direction: 'left' | 'right' | 'top' | 'bottom';
     start: number;
   }) => void;

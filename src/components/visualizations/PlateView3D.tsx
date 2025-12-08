@@ -32,6 +32,7 @@ const getNormalizedColor = (normalizedPercent: number | null): THREE.Color => {
 };
 
 const ColorLegend = ({ mode, stats, nominalThickness }: { mode: ColorMode, stats: any, nominalThickness: number}) => {
+    if (!stats) return null;
     const renderMmLegend = () => {
         const levels = [
             { label: `> 90%`, color: '#0000ff' },
@@ -137,6 +138,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
   const originMarkerRef = useRef<THREE.Mesh | null>(null);
   const minMaxGroupRef = useRef<THREE.Group | null>(null);
   const selectedMarkerRef = useRef<THREE.Mesh | null>(null);
+  const dataTextureRef = useRef<THREE.DataTexture | null>(null);
 
   const { mergedGrid, stats, nominalThickness } = inspectionResult || {};
 
@@ -156,47 +158,62 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
 
   useEffect(() => {
     if (!geometry || !meshRef.current || !stats || !nominalThickness || !mergedGrid) return;
-
+    
     const { gridSize, minThickness, maxThickness } = stats;
     const effTRange = maxThickness - minThickness;
     
-    const colors: number[] = [];
-    const positions = geometry.attributes.position;
+    // Create DataTexture
+    const data = new Uint8Array(gridSize.width * gridSize.height * 3);
     
     let i = 0;
     for (let y = 0; y < gridSize.height; y++) {
-        for (let x = 0; x < gridSize.width; x++, i++) {
-            const cellData = mergedGrid[y]?.[x];
-            
-            // Y-position from wall LOSS, making it sink
-            if (cellData && cellData.effectiveThickness !== null) {
-                const loss = nominalThickness - cellData.effectiveThickness;
-                const z = -loss * zScale; // Negative to go down
-                positions.setY(i, z);
-            } else {
-                positions.setY(i, 0); // ND points are at the flat surface level
-            }
-            
-            // Color from EFFECTIVE thickness
+        for (let x = 0; x < gridSize.width; x++) {
+            const cell = mergedGrid[y]?.[x];
             let color: THREE.Color;
+            
             if (colorMode === '%') {
-                 const normalizedPercent = (cellData && cellData.effectiveThickness !== null && effTRange > 0)
-                    ? (cellData.effectiveThickness - minThickness) / effTRange
+                const normalized = (cell && cell.effectiveThickness !== null && effTRange > 0)
+                    ? (cell.effectiveThickness - minThickness) / effTRange
                     : null;
-                color = getNormalizedColor(normalizedPercent);
+                color = getNormalizedColor(normalized);
             } else {
-                color = getAbsColor(cellData?.percentage ?? null);
+                color = getAbsColor(cell?.percentage ?? null);
             }
-            colors.push(color.r, color.g, color.b);
+            
+            const stride = i * 3;
+            data[stride] = color.r * 255;
+            data[stride + 1] = color.g * 255;
+            data[stride + 2] = color.b * 255;
+            i++;
         }
     }
-
-    geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-    positions.needsUpdate = true;
-    geometry.attributes.color.needsUpdate = true;
-    geometry.computeVertexNormals();
     
-    meshRef.current.geometry = geometry;
+    if (dataTextureRef.current) {
+        dataTextureRef.current.image.data = data;
+        dataTextureRef.current.needsUpdate = true;
+    } else {
+        const texture = new THREE.DataTexture(data, gridSize.width, gridSize.height, THREE.RGBFormat);
+        texture.needsUpdate = true;
+        dataTextureRef.current = texture;
+        (meshRef.current.material as THREE.MeshStandardMaterial).map = texture;
+    }
+
+    // Update displacement
+    const positions = geometry.attributes.position;
+    i = 0;
+    for (let y = 0; y < gridSize.height; y++) {
+        for (let x = 0; x < gridSize.width; x++, i++) {
+            const cell = mergedGrid[y]?.[x];
+            if (cell && cell.effectiveThickness !== null) {
+                const loss = nominalThickness - cell.effectiveThickness;
+                positions.setY(i, -loss * zScale);
+            } else {
+                positions.setY(i, 0);
+            }
+        }
+    }
+    positions.needsUpdate = true;
+    geometry.computeVertexNormals();
 
   }, [geometry, zScale, colorMode, nominalThickness, stats, mergedGrid]);
 
@@ -235,12 +252,12 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     controlsRef.current.update();
 
     const { mergedGrid, stats } = inspectionResult;
+    if (!stats) return;
     const { gridSize } = stats;
     const visualHeight = VISUAL_WIDTH * (gridSize.height / gridSize.width);
 
 
     if (refPlaneRef.current) {
-      // The reference plane is now at Y=0, representing the nominal thickness surface
       refPlaneRef.current.position.y = 0;
       refPlaneRef.current.visible = showReference;
     }
@@ -352,6 +369,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     sceneRef.current = new THREE.Scene();
     
     const { stats } = inspectionResult;
+    if (!stats) return;
     const { gridSize } = stats;
     const aspect = gridSize.height / gridSize.width;
     const visualHeight = VISUAL_WIDTH * aspect;
@@ -380,7 +398,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     gridContainer.add(axisLabels);
     sceneRef.current.add(gridContainer);
     
-    const material = new THREE.MeshStandardMaterial({ vertexColors: true, side: THREE.DoubleSide });
+    const material = new THREE.MeshStandardMaterial({ side: THREE.DoubleSide });
     meshRef.current = new THREE.Mesh(geometry, material);
     sceneRef.current.add(meshRef.current);
 
@@ -419,7 +437,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     const mouse = new THREE.Vector2();
 
     const onMouseMove = (event: MouseEvent) => {
-        if (!currentMount || !meshRef.current || !cameraRef.current || !geometry || !mergedGrid) return;
+        if (!currentMount || !meshRef.current || !cameraRef.current || !geometry || !mergedGrid || !stats) return;
         
         const rect = currentMount.getBoundingClientRect();
         mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
@@ -430,39 +448,19 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
         
         if (intersects.length > 0) {
             const intersect = intersects[0];
-            if (!intersect.face) { setHoveredPoint(null); return; };
-
-            const indices = [intersect.face.a, intersect.face.b, intersect.face.c];
-            let closestVertexIndex = -1;
-            let minDistance = Infinity;
-
-            indices.forEach(index => {
-                const vertex = new THREE.Vector3().fromBufferAttribute(geometry.attributes.position, index);
-                const distance = intersect.point.distanceTo(vertex);
-                if (distance < minDistance) {
-                    minDistance = distance;
-                    closestVertexIndex = index;
-                }
-            });
-
-            if (closestVertexIndex !== -1) {
-                const cols = inspectionResult.stats.gridSize.width;
-                const row = Math.floor(closestVertexIndex / cols);
-                const col = closestVertexIndex % cols;
-
-                const cellData = mergedGrid[row]?.[col];
+            if (intersect.uv) {
+                const x = Math.floor(intersect.uv.x * stats.gridSize.width);
+                const y = Math.floor((1 - intersect.uv.y) * stats.gridSize.height);
+                
+                const cellData = mergedGrid[y]?.[x];
                 if (cellData) {
                     const wallLoss = cellData.effectiveThickness !== null ? nominalThickness! - cellData.effectiveThickness : null;
-                    setHoveredPoint({ x: col, y: row, ...cellData, wallLoss, clientX: event.clientX, clientY: event.clientY });
-                } else {
-                    setHoveredPoint(null);
+                    setHoveredPoint({ x, y, ...cellData, wallLoss, clientX: event.clientX, clientY: event.clientY });
+                    return;
                 }
-            } else {
-               setHoveredPoint(null);
             }
-        } else {
-            setHoveredPoint(null);
         }
+        setHoveredPoint(null);
     };
     
     const onClick = (event: MouseEvent) => {
@@ -488,6 +486,8 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     const animationId = requestAnimationFrame(animate);
     return () => cancelAnimationFrame(animationId);
   }, [animate]);
+
+  if (!inspectionResult) return null;
 
   return (
     <div className="grid md:grid-cols-4 gap-6 h-full">
@@ -575,12 +575,3 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
   )
 });
 PlateView3D.displayName = "PlateView3D";
-
-    
-
-    
-
-    
-
-
-    
