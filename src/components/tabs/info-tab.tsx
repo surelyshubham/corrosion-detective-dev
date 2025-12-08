@@ -3,6 +3,7 @@
 
 import React from 'react'
 import { useInspectionStore } from '@/store/use-inspection-store'
+import { DataVault } from '@/store/data-vault'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
 import { getConditionClass } from '@/lib/utils'
@@ -59,10 +60,11 @@ const PlateStatsCard = ({ plate, index }: { plate: Plate; index: number }) => {
 
 export function InfoTab() {
   const { inspectionResult } = useInspectionStore();
+  const stats = DataVault.stats;
 
-  if (!inspectionResult) return null
+  if (!inspectionResult || !stats) return null
 
-  const { plates, nominalThickness, stats, condition, aiInsight } = inspectionResult
+  const { plates, nominalThickness, condition, aiInsight } = inspectionResult
 
   const summaryData = [
     { label: 'Asset Type', value: inspectionResult.assetType },
