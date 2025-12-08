@@ -1,8 +1,10 @@
+
 "use client"
 
 import React, { useMemo, useState } from 'react'
 import * as XLSX from 'xlsx'
 import { useInspectionStore } from '@/store/use-inspection-store'
+import { DataVault } from '@/store/data-vault'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Button } from '@/components/ui/button'
 import { Download, ArrowUpDown, Search } from 'lucide-react'
@@ -27,11 +29,13 @@ export function DataTableTab() {
   const [sortConfig, setSortConfig] = useState<{ key: SortKey; direction: SortDirection } | null>(null)
 
   const data = useMemo(() => {
-      if (!inspectionResult) return [];
-      const { mergedGrid, nominalThickness } = inspectionResult;
+      const mergedGrid = DataVault.gridMatrix;
+      if (!inspectionResult || !mergedGrid) return [];
+      
+      const { nominalThickness } = inspectionResult;
       const tableData: TableDataPoint[] = [];
       for (let y = 0; y < mergedGrid.length; y++) {
-          for (let x = 0; x < mergedGrid[y].length; x++) {
+          for (let x = 0; x < (mergedGrid[y]?.length || 0); x++) {
               const cell = mergedGrid[y][x];
               if (cell && cell.plateId) {
                   tableData.push({
