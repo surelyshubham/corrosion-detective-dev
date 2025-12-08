@@ -5,7 +5,6 @@ import type { MergedGrid, MergedCell, InspectionStats, Condition } from '../lib/
 type ColorMode = 'mm' | '%';
 
 // --- Color Helper ---
-// Gets the absolute color based on a fixed percentage scale
 function getAbsoluteColor(percentage: number | null): [number, number, number] {
     if (percentage === null) return [128, 128, 128]; // Grey for ND
     if (percentage < 70) return [255, 0, 0];   // Red
@@ -14,15 +13,11 @@ function getAbsoluteColor(percentage: number | null): [number, number, number] {
     return [0, 0, 255];                       // Blue
 }
 
-// Gets a normalized color from blue (min) to red (max)
 function getNormalizedColor(normalizedPercent: number | null): [number, number, number] {
     if (normalizedPercent === null) return [128, 128, 128]; // Grey for ND
-    // Blue (240) to Red (0)
     const hue = 240 * (1 - normalizedPercent);
     const saturation = 1;
     const lightness = 0.5;
-
-    // HSL to RGB conversion
     const c = (1 - Math.abs(2 * lightness - 1)) * saturation;
     const x = c * (1 - Math.abs(((hue / 60) % 2) - 1));
     const m = lightness - c / 2;
@@ -36,6 +31,7 @@ function getNormalizedColor(normalizedPercent: number | null): [number, number, 
     return [(r + m) * 255, (g + m) * 255, (b + m) * 255];
 }
 
+// --- Main Logic ---
 
 function computeStats(grid: MergedGrid, nominal: number) {
     let minThickness = Infinity;
@@ -43,9 +39,7 @@ function computeStats(grid: MergedGrid, nominal: number) {
     let sumThickness = 0;
     let validPointsCount = 0;
     let countND = 0;
-    let areaBelow80 = 0;
-    let areaBelow70 = 0;
-    let areaBelow60 = 0;
+    let areaBelow80 = 0, areaBelow70 = 0, areaBelow60 = 0;
     let worstLocation = { x: 0, y: 0 };
     const height = grid.length;
     const width = grid[0]?.length || 0;
@@ -57,19 +51,14 @@ function computeStats(grid: MergedGrid, nominal: number) {
                 if (cell && cell.plateId) countND++;
                 continue;
             }
-            
             const value = cell.effectiveThickness;
-            
             validPointsCount++;
             sumThickness += value;
             if (value < minThickness) {
                 minThickness = value;
                 worstLocation = { x, y };
             }
-            if (value > maxThickness) {
-                maxThickness = value;
-            }
-
+            maxThickness = Math.max(maxThickness, value);
             const percentage = cell.percentage || 0;
             if (percentage < 80) areaBelow80++;
             if (percentage < 70) areaBelow70++;
@@ -82,45 +71,31 @@ function computeStats(grid: MergedGrid, nominal: number) {
     
     const avgThickness = validPointsCount > 0 ? sumThickness / validPointsCount : 0;
     const minPercentage = (minThickness / nominal) * 100;
-    const totalPoints = height * width;
     const totalScannedPoints = validPointsCount + countND;
 
-
     const stats: InspectionStats = {
-        minThickness,
-        maxThickness,
-        avgThickness,
+        minThickness, maxThickness, avgThickness,
         minPercentage: isFinite(minPercentage) ? minPercentage : 0,
         areaBelow80: totalScannedPoints > 0 ? (areaBelow80 / totalScannedPoints) * 100 : 0,
         areaBelow70: totalScannedPoints > 0 ? (areaBelow70 / totalScannedPoints) * 100 : 0,
         areaBelow60: totalScannedPoints > 0 ? (areaBelow60 / totalScannedPoints) * 100 : 0,
         countND,
-        totalPoints,
+        totalPoints: height * width,
         worstLocation: minThickness === 0 ? {x: 0, y: 0} : worstLocation,
         gridSize: { width, height },
         scannedArea: totalScannedPoints / 1_000_000,
     };
     
-    let condition: Condition;
-    const finalPercentage = stats.minPercentage;
-    if (!isFinite(finalPercentage) || validPointsCount === 0) {
-        condition = 'N/A';
-    } else if (finalPercentage >= 95) {
-        condition = 'Healthy';
-    } else if (finalPercentage >= 80) {
-        condition = 'Moderate';
-    } else if (finalPercentage >= 60) {
-        condition = 'Severe';
-    } else {
-        condition = 'Critical';
+    let condition: Condition = 'N/A';
+    if (isFinite(stats.minPercentage) && validPointsCount > 0) {
+        if (stats.minPercentage >= 95) condition = 'Healthy';
+        else if (stats.minPercentage >= 80) condition = 'Moderate';
+        else if (stats.minPercentage >= 60) condition = 'Severe';
+        else condition = 'Critical';
     }
 
-    return {
-        stats: { ...stats, nominalThickness: nominal },
-        condition,
-    };
+    return { stats: { ...stats, nominalThickness: nominal }, condition };
 }
-
 
 function createFinalGrid(rawMergedGrid: {plateId: string, rawThickness: number}[][], nominalThickness: number): MergedGrid {
     const height = rawMergedGrid.length;
@@ -160,21 +135,14 @@ function createBuffers(grid: MergedGrid, nominal: number, min: number, max: numb
         for (let x = 0; x < width; x++) {
             const index = y * width + x;
             const cell = grid[y][x];
-            
-            // Displacement: raw effective thickness values
             displacementBuffer[index] = cell.effectiveThickness !== null ? cell.effectiveThickness : nominal;
-
-            // Color
             let rgb: [number, number, number];
             if (colorMode === '%') {
-                 const normalized = cell.effectiveThickness !== null && range > 0
-                    ? (cell.effectiveThickness - min) / range
-                    : null;
+                 const normalized = cell.effectiveThickness !== null && range > 0 ? (cell.effectiveThickness - min) / range : null;
                  rgb = getNormalizedColor(normalized);
             } else {
                  rgb = getAbsoluteColor(cell.percentage);
             }
-
             colorBuffer[index * 3] = rgb[0];
             colorBuffer[index * 3 + 1] = rgb[1];
             colorBuffer[index * 3 + 2] = rgb[2];
@@ -183,9 +151,37 @@ function createBuffers(grid: MergedGrid, nominal: number, min: number, max: numb
     return { displacementBuffer, colorBuffer };
 }
 
+
+// --- Universal Parser ---
+function universalParse(buffer: ArrayBuffer): any[][] {
+    console.log("Worker: UniversalParse received buffer, size:", buffer.byteLength);
+    // 1. Try XLSX parsing first
+    try {
+        const workbook = XLSX.read(buffer, { type: 'array' });
+        const sheetName = workbook.SheetNames[0];
+        if (sheetName) {
+            const sheet = workbook.Sheets[sheetName];
+            const data = XLSX.utils.sheet_to_json(sheet, { header: 1 }) as any[][];
+            if (data && data.length > 1) {
+                console.log("Worker: Successfully parsed as XLSX.");
+                return data;
+            }
+        }
+    } catch (e) {
+        console.log("Worker: XLSX parsing failed, falling back to text parsing.", e);
+    }
+
+    // 2. Fallback to Text/CSV parsing
+    console.log("Worker: Attempting text/CSV parsing.");
+    const decoder = new TextDecoder('utf-8');
+    const text = decoder.decode(buffer);
+    const lines = text.split(/[\r\n]+/);
+    return lines.map(line => line.split(',').map(cell => cell.trim()));
+}
+
+
 self.onmessage = async (event: MessageEvent<any>) => {
     const { type } = event.data;
-
     try {
         if (type === 'PROCESS') {
             const { files, nominalThickness, colorMode } = event.data;
@@ -193,24 +189,42 @@ self.onmessage = async (event: MessageEvent<any>) => {
             self.postMessage({ type: 'PROGRESS', progress: 10, message: 'Parsing files...' });
             
             for (const file of files) {
-                const workbook = XLSX.read(file.buffer, { type: 'array' });
-                const sheet = workbook.Sheets[workbook.SheetNames[0]];
-                const rawData = XLSX.utils.sheet_to_json(sheet, { header: 1 }) as any[][];
+                const rawData = universalParse(file.buffer);
+                console.log(`Worker: UniversalParse returned ${rawData.length} rows for file ${file.name}.`);
 
-                const headerRow = rawData.findIndex(row => JSON.stringify(row).toLowerCase().includes('mm'));
-                if (headerRow === -1) continue;
+                // Robust Header Hunt
+                let headerRow = -1;
+                const headerKeywords = ['mm', 'thickness', 'scan', 'index'];
+                for(let i = 0; i < Math.min(100, rawData.length); i++) {
+                    const rowStr = JSON.stringify(rawData[i]).toLowerCase();
+                    if(headerKeywords.some(key => rowStr.includes(key))) {
+                        headerRow = i;
+                        console.log(`Worker: Found header for ${file.name} at row ${i} with content: ${rowStr}`);
+                        break;
+                    }
+                }
+                if (headerRow === -1) {
+                    console.warn(`Worker: Could not find a valid header in ${file.name}. Skipping file.`);
+                    continue;
+                }
 
                 const dataGrid: {plateId: string, rawThickness: number}[][] = [];
                 for (let r = headerRow + 1; r < rawData.length; r++) {
                     const row = rawData[r];
-                    if (!row) continue;
-                    const cleanRow = row.slice(1).map((val: any) => ({
-                        plateId: file.name,
-                        rawThickness: isNaN(parseFloat(val)) ? -1 : parseFloat(val)
-                    }));
-                    dataGrid.push(cleanRow);
+                    if (!row || row.length < 2) continue;
+                    const cleanRow = row.slice(1).map((val: any) => {
+                        const num = parseFloat(val);
+                        return isNaN(num) ? -1 : num;
+                    });
+                    if (cleanRow.some(v => v !== -1)) { // Only add rows with some valid data
+                        dataGrid.push(cleanRow.map(val => ({ plateId: file.name, rawThickness: val })));
+                    }
                 }
+                console.log(`Worker: Extracted ${dataGrid.length} data rows from ${file.name}.`);
                 
+                if (dataGrid.length === 0) continue;
+                
+                // Merge logic
                 if (rawMergedGrid.length === 0) {
                     rawMergedGrid = dataGrid;
                 } else {
@@ -219,16 +233,15 @@ self.onmessage = async (event: MessageEvent<any>) => {
                      while(rawMergedGrid.length < targetRows) rawMergedGrid.push(new Array(rawMergedGrid[0].length).fill(padCell));
                      while(dataGrid.length < targetRows) dataGrid.push(new Array(dataGrid[0].length).fill(padCell));
                      for(let i=0; i<targetRows; i++) {
-                        const len1 = rawMergedGrid[i]?.length || 0;
-                        const len2 = dataGrid[i]?.length || 0;
-                        const targetCols = Math.max(len1, len2);
-                        while (rawMergedGrid[i].length < targetCols) rawMergedGrid[i].push(padCell);
-                        while (dataGrid[i].length < targetCols) dataGrid[i].push(padCell);
-                        rawMergedGrid[i] = rawMergedGrid[i].concat(dataGrid[i]);
+                        rawMergedGrid[i] = (rawMergedGrid[i] || []).concat(dataGrid[i] || []);
                      }
                 }
             }
             
+            if (rawMergedGrid.length === 0 || rawMergedGrid[0].length === 0) {
+                throw new Error("Parsing resulted in empty data grid. Please check file format and content.");
+            }
+
             self.postMessage({ type: 'PROGRESS', progress: 50, message: 'Processing data...' });
             const finalGrid = createFinalGrid(rawMergedGrid, nominalThickness);
             const { stats, condition } = computeStats(finalGrid, nominalThickness);
@@ -239,17 +252,16 @@ self.onmessage = async (event: MessageEvent<any>) => {
             }, [displacementBuffer.buffer, colorBuffer.buffer]);
 
         } else if (type === 'REPROCESS' || type === 'RECOLOR') {
-            const { gridMatrix, nominalThickness, colorMode, stats: oldStats } = event.data;
-            
-            const finalGrid = type === 'REPROCESS' ? createFinalGrid(gridMatrix.map((row: MergedCell[]) => row.map(cell => ({ plateId: cell.plateId, rawThickness: cell.rawThickness || -1 }))), nominalThickness) : gridMatrix;
+            const { gridMatrix, nominalThickness, colorMode } = event.data;
+            const finalGrid = type === 'REPROCESS' ? createFinalGrid(gridMatrix.map((row: MergedCell[]) => row.map(cell => ({ plateId: cell.plateId || 'ND', rawThickness: cell.rawThickness || -1 }))), nominalThickness) : gridMatrix;
             const { stats, condition } = computeStats(finalGrid, nominalThickness);
             const { displacementBuffer, colorBuffer } = createBuffers(finalGrid, nominalThickness, stats.minThickness, stats.maxThickness, colorMode);
-            
-             self.postMessage({
+            self.postMessage({
                 type: 'DONE', displacementBuffer, colorBuffer, gridMatrix: finalGrid, stats, condition,
             }, [displacementBuffer.buffer, colorBuffer.buffer]);
         }
     } catch (error: any) {
+        console.error("Worker CRASH:", error);
         self.postMessage({ type: 'ERROR', message: error.message });
     }
 };

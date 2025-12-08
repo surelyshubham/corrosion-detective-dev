@@ -67,6 +67,13 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
 
     const { width, height } = stats.gridSize;
 
+    // Safety check for empty data
+    if (width === 0 || height === 0) {
+        if (meshRef.current) sceneRef.current?.remove(meshRef.current); // Remove old mesh if any
+        return;
+    }
+
+
     // Update or create displacement texture
     if (displacementTextureRef.current) {
       displacementTextureRef.current.image.data = displacementBuffer;
@@ -156,6 +163,10 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     if (!mountRef.current || !inspectionResult) return;
     const { stats } = inspectionResult;
     if (!stats) return;
+     // Safety check for empty data
+    if (!stats.gridSize || stats.gridSize.width === 0 || stats.gridSize.height === 0) {
+        return;
+    }
     
     const currentMount = mountRef.current;
 
@@ -215,6 +226,19 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
   }, [zScale]);
   
   if (!inspectionResult) return null;
+
+  // Data error placeholder
+  if (!stats || !stats.gridSize || stats.gridSize.width === 0 || stats.gridSize.height === 0) {
+    return (
+      <div className="w-full h-full flex items-center justify-center bg-destructive/10 border-2 border-dashed border-destructive rounded-lg">
+          <div className="text-center text-destructive">
+              <h3 className="text-lg font-bold">Data Error</h3>
+              <p>Received 0x0 dimensions. Cannot render view.</p>
+              <p className="text-xs">Please check the file and try again.</p>
+          </div>
+      </div>
+    );
+  }
 
   return (
     <div className="grid md:grid-cols-4 gap-6 h-full">

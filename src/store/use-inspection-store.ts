@@ -23,6 +23,7 @@ interface InspectionState {
   setInspectionResult: (result: Omit<MergedInspectionResult, 'mergedGrid'> | null) => void;
   isLoading: boolean;
   loadingProgress: number;
+  error: string | null; // Added for error handling
   processFiles: (files: File[], nominalThickness: number, assetType: AssetType, mergeConfig: any) => void;
   selectedPoint: { x: number; y: number } | null;
   setSelectedPoint: (point: { x: number; y: number } | null) => void;
@@ -45,13 +46,18 @@ export const useInspectionStore = create<InspectionState>()(
           const { type, message, progress, ...data } = event.data;
           
           if (type === 'PROGRESS') {
-            set({ isLoading: true, loadingProgress: progress || 0 });
+            set({ isLoading: true, loadingProgress: progress || 0, error: null });
           } else if (type === 'ERROR') {
             console.error("Worker Error:", message);
-            set({ isLoading: false });
-            // Optionally, show a toast notification here
+            set({ isLoading: false, error: message || "An unknown error occurred in the worker." });
           } else if (type === 'DONE') {
              if (data.displacementBuffer && data.colorBuffer && data.gridMatrix && data.stats && data.condition) {
+                
+                if (data.stats.totalPoints === 0) {
+                    set({ isLoading: false, error: "Parsing Failed: No data points found in the file." });
+                    return;
+                }
+
                 DataVault.displacementBuffer = data.displacementBuffer;
                 DataVault.colorBuffer = data.colorBuffer;
                 DataVault.gridMatrix = data.gridMatrix;
@@ -60,10 +66,9 @@ export const useInspectionStore = create<InspectionState>()(
                 
                 set(state => ({
                     inspectionResult: {
-                        // All lightweight data goes into state
-                        plates: [], // The worker now handles merging, so individual plates are abstracted
+                        plates: [],
                         nominalThickness: data.stats!.nominalThickness || currentState?.nominalThickness || 0,
-                        assetType: currentState?.assetType || 'Plate', // Persist asset type
+                        assetType: currentState?.assetType || 'Plate',
                         pipeOuterDiameter: currentState?.pipeOuterDiameter,
                         pipeLength: currentState?.pipeLength,
                         stats: data.stats,
@@ -71,8 +76,11 @@ export const useInspectionStore = create<InspectionState>()(
                         aiInsight: null,
                     },
                     isLoading: false,
-                    dataVersion: state.dataVersion + 1, // Trigger re-render
+                    error: null,
+                    dataVersion: state.dataVersion + 1,
                 }));
+            } else {
+                 set({ isLoading: false, error: "Worker returned incomplete data." });
             }
           }
         };
@@ -85,13 +93,14 @@ export const useInspectionStore = create<InspectionState>()(
         selectedPoint: null,
         colorMode: 'mm',
         dataVersion: 0,
+        error: null,
         
         setInspectionResult: (result) => {
           if (result === null) {
             DataVault.displacementBuffer = null;
             DataVault.colorBuffer = null;
             DataVault.gridMatrix = null;
-            set({ inspectionResult: null, selectedPoint: null, isLoading: false, dataVersion: 0 });
+            set({ inspectionResult: null, selectedPoint: null, isLoading: false, dataVersion: 0, error: null });
           } else {
             set({ inspectionResult: result });
           }
@@ -102,7 +111,7 @@ export const useInspectionStore = create<InspectionState>()(
         setColorMode: (mode) => {
             const currentResult = get().inspectionResult;
             if (!worker || !currentResult) return;
-            set({ colorMode: mode, isLoading: true, loadingProgress: 50 }); // Show loading while worker re-colors
+            set({ colorMode: mode, isLoading: true, loadingProgress: 50, error: null });
             
              worker.postMessage({
                 type: 'RECOLOR',
@@ -116,17 +125,16 @@ export const useInspectionStore = create<InspectionState>()(
         processFiles: (files, nominalThickness, assetType, mergeConfig) => {
             if (!worker) {
                 console.error("Worker not initialized!");
-                set({ isLoading: false });
+                set({ isLoading: false, error: "Data processing worker is not available." });
                 return;
             }
-            set({ isLoading: true, loadingProgress: 0 });
-            // The initial state for the result can be set here
+            set({ isLoading: true, loadingProgress: 0, error: null });
              set(state => ({ 
                 inspectionResult: {
                     ...(state.inspectionResult || {}),
                     nominalThickness,
                     assetType,
-                    ...mergeConfig, // for pipe/tank dimensions
+                    ...mergeConfig,
                 } as any,
              }));
 
@@ -140,7 +148,7 @@ export const useInspectionStore = create<InspectionState>()(
                     })),
                     nominalThickness: nominalThickness,
                     colorMode: get().colorMode,
-                }, buffers); // Pass buffers as transferable objects
+                }, buffers);
             });
         },
         
@@ -164,6 +172,7 @@ export const useInspectionStore = create<InspectionState>()(
              set(state => ({ 
                 isLoading: true,
                 loadingProgress: 0,
+                error: null,
                 inspectionResult: { ...state.inspectionResult!, nominalThickness: newNominalThickness }
             }));
             
