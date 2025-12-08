@@ -75,6 +75,14 @@ export function SetupTab({ isLoading, onNominalThicknessChange }: SetupTabProps)
       if(inspectionResult.pipeLength) {
         setValue('pipeLength', inspectionResult.pipeLength);
       }
+      // Keep existing files in state if they exist to allow merging
+      if (inspectionResult.plates && inspectionResult.plates.length > 0) {
+        // This part is tricky because we don't have the File object itself.
+        // We'll rely on the user adding a *new* file to trigger the merge.
+        // For the display, we can show the names.
+        setFiles(inspectionResult.plates.map(p => new File([], p.fileName)));
+      }
+
     }
   }, [inspectionResult, setValue]);
 
@@ -180,14 +188,15 @@ export function SetupTab({ isLoading, onNominalThicknessChange }: SetupTabProps)
   
   const watchedMergeDirection = mergeForm.watch('direction');
   useEffect(() => {
+    if (!isMergeAlertOpen) return;
     const { width, height } = DataVault.stats?.gridSize || { width: 0, height: 0 };
     let startValue = 0;
     if (watchedMergeDirection === 'right') startValue = width;
-    if (watchedMergeDirection === 'left') startValue = 0; // Will insert before, user might want negative
+    if (watchedMergeDirection === 'left') startValue = 0; 
     if (watchedMergeDirection === 'bottom') startValue = height;
-    if (watchedMergeDirection === 'top') startValue = 0; // Will insert before
+    if (watchedMergeDirection === 'top') startValue = 0; 
     mergeForm.setValue('start', startValue);
-  }, [watchedMergeDirection, mergeForm]);
+  }, [watchedMergeDirection, mergeForm, isMergeAlertOpen]);
 
 
   return (
@@ -258,15 +267,15 @@ export function SetupTab({ isLoading, onNominalThicknessChange }: SetupTabProps)
                         <Paperclip className="h-4 w-4" />
                         <span>{files.map(f => f.name).join(', ')}</span>
                       </div>
-                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setFiles([])} disabled={isLoading}>
+                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setFiles([])} disabled={isLoading || !!inspectionResult}>
                         <X className="h-4 w-4" />
                       </Button>
                     </div>
                      <label 
                         onDragOver={handleDragOver}
                         onDrop={handleDrop}
-                        className={`flex flex-col items-center justify-center p-3 border-2 border-dashed rounded-md cursor-pointer transition-colors ${!selectedAssetType ? 'cursor-not-allowed bg-muted/50' : 'hover:border-primary hover:bg-accent/20'}`}
-                        onClick={() => selectedAssetType && fileInputRef.current?.click()}
+                        className={`flex flex-col items-center justify-center p-3 border-2 border-dashed rounded-md cursor-pointer transition-colors ${!selectedAssetType || isLoading ? 'cursor-not-allowed bg-muted/50' : 'hover:border-primary hover:bg-accent/20'}`}
+                        onClick={() => selectedAssetType && !isLoading && fileInputRef.current?.click()}
                         >
                         <div className="flex items-center gap-2 text-sm font-medium">
                             <Merge className="h-4 w-4 text-muted-foreground" />
@@ -345,10 +354,10 @@ export function SetupTab({ isLoading, onNominalThicknessChange }: SetupTabProps)
                             control={mergeForm.control}
                             render={({field}) => (
                                  <RadioGroup onValueChange={field.onChange} defaultValue={field.value} className="grid grid-cols-2 gap-4">
-                                    <div><RadioGroupItem value="right" id="r-right" /><Label htmlFor="r-right" className="ml-2">Right</Label></div>
-                                    <div><RadioGroupItem value="left" id="r-left" /><Label htmlFor="r-left" className="ml-2">Left</Label></div>
-                                    <div><RadioGroupItem value="bottom" id="r-bottom" /><Label htmlFor="r-bottom" className="ml-2">Bottom</Label></div>
-                                    <div><RadioGroupItem value="top" id="r-top" /><Label htmlFor="r-top" className="ml-2">Top</Label></div>
+                                    <div><RadioGroupItem value="right" id="r-right" /><Label htmlFor="r-right" className="ml-2">Stitch to Right</Label></div>
+                                    <div><RadioGroupItem value="left" id="r-left" /><Label htmlFor="r-left" className="ml-2">Stitch to Left</Label></div>
+                                    <div><RadioGroupItem value="bottom" id="r-bottom" /><Label htmlFor="r-bottom" className="ml-2">Stitch to Bottom</Label></div>
+                                    <div><RadioGroupItem value="top" id="r-top" /><Label htmlFor="r-top" className="ml-2">Stitch to Top</Label></div>
                                 </RadioGroup>
                             )}
                         />

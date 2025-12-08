@@ -1,6 +1,6 @@
 
 import * as XLSX from 'xlsx';
-import type { MergedGrid, MergedCell, InspectionStats, Condition } from '../lib/types';
+import type { MergedGrid, MergedCell, InspectionStats, Condition, Plate, RawInspectionDataPoint } from '../lib/types';
 
 type ColorMode = 'mm' | '%';
 
@@ -191,31 +191,41 @@ function parseFileToGrid(file: {name: string, buffer: ArrayBuffer}) {
     const rawData = universalParse(file.buffer);
     let headerRow = -1;
     for (let i = 0; i < Math.min(100, rawData.length); i++) {
-        if (String(rawData[i][0]).toLowerCase().includes('y') || (String(rawData[i][1]).toLowerCase().includes('x') && String(rawData[i][0]).toLowerCase() === '')) {
+        // Check for common header patterns
+        if (String(rawData[i][0]).trim().toLowerCase() === 'y-pos' && String(rawData[i][1]).trim().toLowerCase() === 'x-pos') {
+            headerRow = i;
+            break;
+        }
+        if (String(rawData[i][0]).trim() === '' && !isNaN(parseFloat(rawData[i][1]))) {
              headerRow = i;
              break;
         }
-        if (i === 18) { // Standard format check
+        if (i === 18) { // Standard format check from original parser
              headerRow = 18;
              break;
         }
     }
 
     if (headerRow === -1) {
-        throw new Error(`Could not find a valid header row in ${file.name}.`);
+        throw new Error(`Could not find a valid header row in ${file.name}. Expected row 19 or a row with Y/X coordinate headers.`);
     }
 
     const dataGrid: {plateId: string, rawThickness: number}[][] = [];
+    const xCoords = rawData[headerRow].slice(1).map(x => parseFloat(String(x)));
+
     for (let r = headerRow + 1; r < rawData.length; r++) {
         const row = rawData[r];
-        if (!row || (row.length < 2 && row[0] === '')) continue;
+        if (!row || (row.length < 2 && (row[0] === '' || row[0] === undefined))) continue;
         
+        const yPos = parseFloat(String(row[0]));
+        if (isNaN(yPos)) continue;
+
         const cleanRow = row.slice(1).map((val: any) => {
             const num = parseFloat(val);
             return isNaN(num) ? -1 : num;
         });
 
-        if (cleanRow.length > 0 && cleanRow.some(v => v !== -1)) {
+        if (cleanRow.length > 0) {
             dataGrid.push(cleanRow.map(val => ({ plateId: file.name, rawThickness: val })));
         }
     }
@@ -230,45 +240,108 @@ function mergeGrids(
 ): {plateId: string, rawThickness: number}[][] {
     let result: {plateId: string, rawThickness: number}[][] = existingGrid.map(row => row.map(cell => ({
         plateId: cell.plateId || 'ND',
-        rawThickness: cell.rawThickness || -1
+        rawThickness: cell.rawThickness === null ? -1 : cell.rawThickness,
     })));
 
     const newHeight = newRawGrid.length;
     const newWidth = newRawGrid[0]?.length || 0;
+    const oldHeight = result.length;
+    const oldWidth = result[0]?.length || 0;
 
     if (direction === 'right') {
         const totalWidth = start + newWidth;
-        result = result.map(row => row.concat(Array(Math.max(0, totalWidth - row.length)).fill({ plateId: 'ND', rawThickness: -1 })));
-        for(let y = 0; y < newHeight; y++) {
-            if (!result[y]) result[y] = [];
-            for (let x = 0; x < newWidth; x++) {
-                result[y][start + x] = newRawGrid[y][x];
+        const totalHeight = Math.max(oldHeight, newHeight);
+        // Ensure all rows in result have the same length and correct height
+        const finalResult = Array(totalHeight).fill(null).map(() => Array(totalWidth).fill({plateId: 'ND', rawThickness: -1}));
+
+        for(let y=0; y < oldHeight; y++) {
+            for(let x=0; x < oldWidth; x++) {
+                finalResult[y][x] = result[y][x];
             }
         }
-    } else if (direction === 'bottom') {
-        for(let y=0; y < newHeight; y++) {
-            result[start + y] = newRawGrid[y];
+        for(let y = 0; y < newHeight; y++) {
+            for (let x = 0; x < newWidth; x++) {
+                finalResult[y][start + x] = newRawGrid[y][x];
+            }
         }
+        return finalResult;
+    } else if (direction === 'bottom') {
+        const totalHeight = start + newHeight;
+        const totalWidth = Math.max(oldWidth, newWidth);
+         const finalResult = Array(totalHeight).fill(null).map(() => Array(totalWidth).fill({plateId: 'ND', rawThickness: -1}));
+
+        for(let y=0; y < oldHeight; y++) {
+            for(let x=0; x < oldWidth; x++) {
+                finalResult[y][x] = result[y][x];
+            }
+        }
+         for(let y = 0; y < newHeight; y++) {
+            for (let x = 0; x < newWidth; x++) {
+                 if(!finalResult[start + y]) finalResult[start + y] = Array(totalWidth).fill({plateId: 'ND', rawThickness: -1});
+                finalResult[start + y][x] = newRawGrid[y][x];
+            }
+        }
+        return finalResult;
     }
-    // Implement Left and Top as needed, they require shifting existing data
+    // Implement Left and Top as needed
     return result;
 }
+
+const processFull = (rawMergedGrid: {plateId: string, rawThickness: number}[][], nominalThickness: number, colorMode: ColorMode, plates: Plate[]) => {
+    if (rawMergedGrid.length === 0 || rawMergedGrid[0].length === 0) {
+        throw new Error("Parsing resulted in empty data grid. Please check file format and content.");
+    }
+
+    const finalGrid = createFinalGrid(rawMergedGrid, nominalThickness);
+    const { stats, condition } = computeStats(finalGrid, nominalThickness);
+    const { displacementBuffer, colorBuffer } = createBuffers(finalGrid, nominalThickness, stats.minThickness, stats.maxThickness, colorMode);
+    
+    return {
+        displacementBuffer,
+        colorBuffer,
+        gridMatrix: finalGrid,
+        stats,
+        condition,
+        plates,
+    }
+}
+
 
 self.onmessage = async (event: MessageEvent<any>) => {
     const { type } = event.data;
     try {
         if (type === 'PROCESS') {
-            const { files, nominalThickness, colorMode, existingGrid, merge } = event.data;
+            const { files, nominalThickness, colorMode, existingGrid, merge, plates: existingPlates = [] } = event.data;
             let rawMergedGrid: {plateId: string, rawThickness: number}[][];
+            let allPlates: Plate[] = [...existingPlates];
+
             self.postMessage({ type: 'PROGRESS', progress: 10, message: 'Parsing files...' });
             
             if (merge && existingGrid) {
-                const newGrid = parseFileToGrid(merge.file);
-                rawMergedGrid = mergeGrids(existingGrid, newGrid, merge.direction, merge.start);
+                const newPlateRawGrid = parseFileToGrid(merge.file);
+                allPlates.push({
+                    id: merge.file.name,
+                    fileName: merge.file.name,
+                    rawGridData: newPlateRawGrid.flatMap(row => row.map((cell, x) => ({ x, y: 0, rawThickness: cell.rawThickness }))), // Simplified for now
+                    // These will be re-calculated after merge
+                    processedData: [], 
+                    stats: {} as InspectionStats,
+                    metadata: [],
+                    assetType: 'Plate', // Assuming same asset type
+                    nominalThickness: nominalThickness,
+                });
+                rawMergedGrid = mergeGrids(existingGrid, newPlateRawGrid, merge.direction, merge.start);
             } else {
                 rawMergedGrid = [];
                 for (const file of files) {
                     const dataGrid = parseFileToGrid(file);
+                     allPlates.push({
+                        id: file.name,
+                        fileName: file.name,
+                        rawGridData: dataGrid.flatMap(row => row.map((cell, x) => ({ x, y: 0, rawThickness: cell.rawThickness }))), // Simplified
+                        processedData: [], stats: {} as InspectionStats, metadata: [], assetType: 'Plate', nominalThickness: nominalThickness
+                    });
+
                     if (dataGrid.length === 0) continue;
                     
                     if (rawMergedGrid.length === 0) {
@@ -284,22 +357,14 @@ self.onmessage = async (event: MessageEvent<any>) => {
                     }
                 }
             }
-
-            if (rawMergedGrid.length === 0 || rawMergedGrid[0].length === 0) {
-                throw new Error("Parsing resulted in empty data grid. Please check file format and content.");
-            }
-
-            self.postMessage({ type: 'PROGRESS', progress: 50, message: 'Processing data...' });
-            const finalGrid = createFinalGrid(rawMergedGrid, nominalThickness);
-            const { stats, condition } = computeStats(finalGrid, nominalThickness);
-            const { displacementBuffer, colorBuffer } = createBuffers(finalGrid, nominalThickness, stats.minThickness, stats.maxThickness, colorMode);
             
-            self.postMessage({
-                type: 'DONE', displacementBuffer, colorBuffer, gridMatrix: finalGrid, stats, condition,
-            }, [displacementBuffer.buffer, colorBuffer.buffer]);
+            self.postMessage({ type: 'PROGRESS', progress: 50, message: 'Processing data...' });
+            const result = processFull(rawMergedGrid, nominalThickness, colorMode, allPlates);
+            
+            self.postMessage({ type: 'DONE', ...result }, [result.displacementBuffer.buffer, result.colorBuffer.buffer]);
 
         } else if (type === 'REPROCESS' || type === 'RECOLOR') {
-            const { gridMatrix, nominalThickness, colorMode, stats } = event.data;
+            const { gridMatrix, nominalThickness, colorMode, stats, plates } = event.data;
             let recomputedStats = stats;
             let recomputedCondition = 'N/A';
             let finalGrid = gridMatrix;
@@ -314,7 +379,7 @@ self.onmessage = async (event: MessageEvent<any>) => {
            
             const { displacementBuffer, colorBuffer } = createBuffers(finalGrid, nominalThickness, recomputedStats.minThickness, recomputedStats.maxThickness, colorMode);
             self.postMessage({
-                type: 'DONE', displacementBuffer, colorBuffer, gridMatrix: finalGrid, stats: recomputedStats, condition: recomputedCondition
+                type: 'DONE', displacementBuffer, colorBuffer, gridMatrix: finalGrid, stats: recomputedStats, condition: recomputedCondition, plates,
             }, [displacementBuffer.buffer, colorBuffer.buffer]);
         }
     } catch (error: any) {

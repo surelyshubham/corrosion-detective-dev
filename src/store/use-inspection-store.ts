@@ -9,6 +9,7 @@ export interface WorkerOutput {
   type: 'PROGRESS' | 'DONE' | 'ERROR';
   message?: string;
   progress?: number;
+  plates?: Plate[];
   displacementBuffer?: Float32Array;
   colorBuffer?: Uint8Array;
   gridMatrix?: MergedGrid;
@@ -29,8 +30,8 @@ export type ProcessConfig = {
 }
 
 interface InspectionState {
-  inspectionResult: Omit<MergedInspectionResult, 'mergedGrid' | 'stats'> | null;
-  setInspectionResult: (result: Omit<MergedInspectionResult, 'mergedGrid' | 'stats'> | null) => void;
+  inspectionResult: MergedInspectionResult | null;
+  setInspectionResult: (result: MergedInspectionResult | null) => void;
   isLoading: boolean;
   loadingProgress: number;
   error: string | null;
@@ -61,7 +62,7 @@ export const useInspectionStore = create<InspectionState>()(
             console.error("Worker Error:", message);
             set({ isLoading: false, error: message || "An unknown error occurred in the worker." });
           } else if (type === 'DONE') {
-             if (data.displacementBuffer && data.colorBuffer && data.gridMatrix && data.stats && data.condition) {
+             if (data.displacementBuffer && data.colorBuffer && data.gridMatrix && data.stats && data.condition && data.plates) {
                 
                 if (data.stats.totalPoints === 0) {
                     set({ isLoading: false, error: "Parsing Failed: No data points found in the file." });
@@ -73,16 +74,23 @@ export const useInspectionStore = create<InspectionState>()(
                 DataVault.gridMatrix = data.gridMatrix;
                 DataVault.stats = data.stats;
                 
-                const currentResult = get().inspectionResult || {} as any;
+                const currentResult = get().inspectionResult;
+                
+                const newResult: MergedInspectionResult = {
+                    ...(currentResult || {}),
+                    plates: data.plates,
+                    mergedGrid: data.gridMatrix,
+                    nominalThickness: data.stats.nominalThickness,
+                    stats: data.stats,
+                    condition: data.condition,
+                    aiInsight: null, // Reset AI insight on new data
+                    assetType: currentResult?.assetType || 'Plate',
+                    pipeOuterDiameter: currentResult?.pipeOuterDiameter,
+                    pipeLength: currentResult?.pipeLength
+                };
                 
                 set(state => ({
-                    inspectionResult: {
-                        ...currentResult,
-                        plates: [...(currentResult.plates || [])], // This needs to be properly updated
-                        nominalThickness: data.stats!.nominalThickness,
-                        condition: data.condition,
-                        aiInsight: null,
-                    },
+                    inspectionResult: newResult,
                     isLoading: false,
                     error: null,
                     dataVersion: state.dataVersion + 1,
@@ -165,6 +173,7 @@ export const useInspectionStore = create<InspectionState>()(
                     existingGrid: DataVault.gridMatrix,
                     nominalThickness: nominalThickness,
                     colorMode: get().colorMode,
+                    plates: get().inspectionResult?.plates,
                 }
                  worker?.postMessage(message, [buffer]);
             } else {
@@ -210,11 +219,11 @@ export const useInspectionStore = create<InspectionState>()(
                 type: 'REPROCESS',
                 gridMatrix: DataVault.gridMatrix,
                 nominalThickness: newNominalThickness,
-                colorMode: get().colorMode
+                colorMode: get().colorMode,
+                plates: get().inspectionResult?.plates
             });
         },
       }
     }
 );
-
     
