@@ -1,4 +1,5 @@
 
+
 "use client"
 
 import React, { useState, useRef, useEffect } from 'react'
@@ -20,12 +21,6 @@ import { useToast } from '@/hooks/use-toast'
 import { parseExcel } from '@/lib/excel-parser'
 
 interface SetupTabProps {
-  onFileProcess: (file: File, assetType: AssetType, nominalThickness: number, options: {
-    direction: 'left' | 'right' | 'top' | 'bottom';
-    start: number;
-    pipeOuterDiameter?: number;
-    pipeLength?: number;
-  }) => void
   isLoading: boolean
   onNominalThicknessChange: (newNominal: number) => void;
 }
@@ -47,10 +42,10 @@ const mergeSchema = z.object({
 type MergeFormValues = z.infer<typeof mergeSchema>;
 
 
-export function SetupTab({ onFileProcess, isLoading, onNominalThicknessChange }: SetupTabProps) {
-  const { inspectionResult, setInspectionResult } = useInspectionStore();
+export function SetupTab({ isLoading, onNominalThicknessChange }: SetupTabProps) {
+  const { inspectionResult, setInspectionResult, processFiles } = useInspectionStore();
   const { toast } = useToast();
-  const [file, setFile] = useState<File | null>(null)
+  const [files, setFiles] = useState<File[]>([])
   const [fileError, setFileError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [isMergeAlertOpen, setIsMergeAlertOpen] = useState(false);
@@ -89,110 +84,68 @@ export function SetupTab({ onFileProcess, isLoading, onNominalThicknessChange }:
 
   const selectedAssetType = watch('assetType')
   
-  const handleFileDrop = async (file: File) => {
-    if (file.name.endsWith('.xlsx')) {
-        setFile(file)
-        setFileError(null)
-        try {
-            const arrayBuffer = await file.arrayBuffer();
-            const { detectedNominalThickness } = parseExcel(arrayBuffer);
-            if (detectedNominalThickness !== null) {
-                setValue('nominalThickness', detectedNominalThickness);
-                 toast({
-                    title: "Nominal Thickness Detected",
-                    description: `Set to ${detectedNominalThickness.toFixed(2)} mm based on file metadata. You can edit this value if needed.`,
-                });
-            }
-        } catch (error: any) {
-            toast({
-                variant: 'destructive',
-                title: 'Error reading file',
-                description: error.message,
+  const handleFileDrop = async (newFiles: FileList | null) => {
+    if (!newFiles) return;
+
+    const validFiles = Array.from(newFiles).filter(file => file.name.endsWith('.xlsx'));
+    
+    if (validFiles.length !== newFiles.length) {
+       setFileError('Invalid file type. Only .xlsx files are accepted.');
+    } else {
+       setFileError(null);
+    }
+    
+    if (validFiles.length === 0) return;
+
+    // For now, we only support single file uploads through this mechanism
+    // The store will be updated to handle multi-file processing soon
+    const firstFile = validFiles[0];
+    setFiles([firstFile]);
+
+     try {
+        const arrayBuffer = await firstFile.arrayBuffer();
+        const { detectedNominalThickness } = parseExcel(arrayBuffer);
+        if (detectedNominalThickness !== null) {
+            setValue('nominalThickness', detectedNominalThickness);
+             toast({
+                title: "Nominal Thickness Detected",
+                description: `Set to ${detectedNominalThickness.toFixed(2)} mm based on file metadata. You can edit this value if needed.`,
             });
         }
-
-      } else {
-        setFile(null)
-        setFileError('Invalid file type. Please upload a .xlsx file.')
-      }
+    } catch (error: any) {
+        toast({
+            variant: 'destructive',
+            title: 'Error reading file',
+            description: error.message,
+        });
+    }
   }
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFile = event.target.files?.[0]
-    if (selectedFile) {
-      handleFileDrop(selectedFile);
-    }
+    handleFileDrop(event.target.files);
   }
   
   const handleDragOver = (e: React.DragEvent<HTMLLabelElement>) => e.preventDefault();
   const handleDrop = (e: React.DragEvent<HTMLLabelElement>) => {
       e.preventDefault();
-      const droppedFile = e.dataTransfer.files?.[0];
-      if (droppedFile) {
-        handleFileDrop(droppedFile);
-      }
+      handleFileDrop(e.dataTransfer.files);
   };
 
-  const handleInitialSubmit = () => {
-    if (!file) {
+  const onSubmit = (data: SetupFormValues) => {
+    if (files.length === 0) {
         setFileError('An Excel file is required.');
         return;
     }
-    const data = getValues();
-    onFileProcess(file, data.assetType, Number(data.nominalThickness), { 
-      direction: 'right', 
-      start: 0, 
+    const mergeConfig = {
       pipeOuterDiameter: data.pipeOuterDiameter,
       pipeLength: data.pipeLength,
-    });
-    setFile(null); // Clear file after processing
+    };
+    processFiles(files, Number(data.nominalThickness), data.assetType, mergeConfig);
   };
 
-  const handleMergeSubmit = (mergeData: MergeFormValues) => {
-    if (!file) return; // Should not happen if button is disabled
-    const setupData = getValues();
-
-    const expectedStart = mergeData.direction === 'right' || mergeData.direction === 'left' 
-        ? inspectionResult!.stats.gridSize.width
-        : inspectionResult!.stats.gridSize.height;
-    
-    if (mergeData.start < expectedStart) {
-        toast({
-            variant: "destructive",
-            title: "Merge Error: Overlap Detected",
-            description: `Start coordinate (${mergeData.start}) cannot be less than the end of the existing grid (${expectedStart}). Plates would overlap.`,
-        });
-        return;
-    }
-    
-    onFileProcess(file, setupData.assetType, Number(setupData.nominalThickness), {
-      direction: mergeData.direction,
-      start: mergeData.start,
-      pipeOuterDiameter: setupData.pipeOuterDiameter,
-      pipeLength: setupData.pipeLength,
-    });
-    setFile(null);
-    setIsMergeAlertOpen(false);
-  };
-
-  const onSubmit = () => {
-    if (inspectionResult) {
-      const { gridSize } = inspectionResult.stats;
-      const direction = mergeForm.watch('direction');
-      const expectedStart = (direction === 'left' || direction === 'right') ? gridSize.width : gridSize.height;
-      mergeForm.setValue('start', expectedStart);
-      setIsMergeAlertOpen(true);
-    } else {
-      handleInitialSubmit();
-    }
-  };
-
-  // Debounce handler for nominal thickness change
-  const handleNominalChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const newValue = parseFloat(e.target.value);
-    if (!isNaN(newValue) && newValue > 0) {
-      onNominalThicknessChange(newValue);
-    }
+  const handleClear = () => {
+    setFiles([]);
+    setInspectionResult(null);
   }
   
   return (
@@ -254,15 +207,15 @@ export function SetupTab({ onFileProcess, isLoading, onNominalThicknessChange }:
 
             <div className="space-y-2">
               <Label>2. Upload Excel File (.xlsx)</Label>
-              <input type="file" ref={fileInputRef} onChange={handleFileChange} accept=".xlsx" className="hidden" disabled={!selectedAssetType || isLoading} />
+              <input type="file" ref={fileInputRef} onChange={handleFileChange} accept=".xlsx" className="hidden" disabled={!selectedAssetType || isLoading} multiple />
               
-                {file ? (
+                {files.length > 0 ? (
                   <div className="flex items-center justify-between p-3 rounded-md border bg-secondary/50">
                     <div className="flex items-center gap-2 text-sm font-medium">
                       <Paperclip className="h-4 w-4" />
-                      <span>{file.name}</span>
+                      <span>{files.map(f => f.name).join(', ')}</span>
                     </div>
-                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setFile(null)} disabled={isLoading}>
+                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setFiles([])} disabled={isLoading}>
                       <X className="h-4 w-4" />
                     </Button>
                   </div>
@@ -275,7 +228,7 @@ export function SetupTab({ onFileProcess, isLoading, onNominalThicknessChange }:
                     >
                     <FileUp className="h-8 w-8 text-muted-foreground" />
                     <span className="mt-2 text-sm font-medium text-center">
-                      {selectedAssetType ? 'Click to browse or drag & drop file' : 'Select an asset type to enable upload'}
+                      {selectedAssetType ? 'Click to browse or drag & drop files' : 'Select an asset type to enable upload'}
                     </span>
                   </label>
                 )}
@@ -296,9 +249,7 @@ export function SetupTab({ onFileProcess, isLoading, onNominalThicknessChange }:
                     {...field}
                     onChange={(e) => {
                       field.onChange(e);
-                      if (inspectionResult) {
-                         handleNominalChange(e);
-                      }
+                      // Debounced reprocessing is handled by a different mechanism now
                     }}
                     disabled={isLoading} />
                 )}
@@ -306,94 +257,18 @@ export function SetupTab({ onFileProcess, isLoading, onNominalThicknessChange }:
               {errors.nominalThickness && <p className="text-sm text-destructive">{errors.nominalThickness.message}</p>}
             </div>
 
-            <Button type="submit" className="w-full" disabled={!file || !selectedAssetType || isLoading}>
+            <Button type="submit" className="w-full" disabled={files.length === 0 || !selectedAssetType || isLoading}>
               {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               {isLoading ? 'Processing...' : (inspectionResult ? 'Process & Merge File' : 'Process File')}
             </Button>
+            {inspectionResult && (
+               <Button variant="link" className="p-0 h-auto mt-2 w-full" onClick={handleClear}>Clear all data</Button>
+            )}
           </form>
-
-          {inspectionResult && (
-              <Card className="bg-muted/50 mt-6">
-                  <CardHeader className="p-4">
-                      <CardTitle className="text-base">Plates Loaded: {inspectionResult.plates.length}</CardTitle>
-                  </CardHeader>
-                  <CardContent className="p-4 pt-0 text-sm">
-                      <ul className="list-disc pl-5">
-                          {inspectionResult.plates.map(p => <li key={p.id} className="truncate">{p.fileName}</li>)}
-                      </ul>
-                       <Button variant="link" className="p-0 h-auto mt-2" onClick={() => { setInspectionResult(null); mergeForm.reset(); }}>Clear all plates</Button>
-                  </CardContent>
-              </Card>
-          )}
-
         </CardContent>
       </Card>
       
       <DummyDataGenerator isLoading={isLoading} />
-      
-      <AlertDialog open={isMergeAlertOpen} onOpenChange={setIsMergeAlertOpen}>
-        <AlertDialogContent>
-          <form onSubmit={mergeForm.handleSubmit(handleMergeSubmit)}>
-            <AlertDialogHeader>
-              <AlertDialogTitle className="flex items-center gap-2"><Merge /> Merge Plate</AlertDialogTitle>
-              <AlertDialogDescription>
-                Define how to attach the new plate relative to the existing grid.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            
-            <div className="space-y-4 py-4">
-               <Controller
-                    name="direction"
-                    control={mergeForm.control}
-                    render={({ field }) => (
-                        <RadioGroup 
-                            onValueChange={(val) => {
-                                field.onChange(val);
-                                const { gridSize } = inspectionResult!.stats;
-                                const expectedStart = (val === 'left' || val === 'right') ? gridSize.width : gridSize.height;
-                                mergeForm.setValue('start', expectedStart);
-                            }} 
-                            value={field.value} 
-                            className="grid grid-cols-2 gap-4"
-                        >
-                            <Label htmlFor="right" className="flex items-center gap-2 p-4 border rounded-md cursor-pointer has-[:checked]:bg-accent has-[:checked]:border-primary">
-                                <RadioGroupItem value="right" id="right" /> Attach to Right
-                            </Label>
-                            <Label htmlFor="left" className="flex items-center gap-2 p-4 border rounded-md cursor-pointer has-[:checked]:bg-accent has-[:checked]:border-primary">
-                                <RadioGroupItem value="left" id="left" /> Attach to Left
-                            </Label>
-                            <Label htmlFor="bottom" className="flex items-center gap-2 p-4 border rounded-md cursor-pointer has-[:checked]:bg-accent has-[:checked]:border-primary">
-                                <RadioGroupItem value="bottom" id="bottom" /> Attach to Bottom
-                            </Label>
-                            <Label htmlFor="top" className="flex items-center gap-2 p-4 border rounded-md cursor-pointer has-[:checked]:bg-accent has-[:checked]:border-primary">
-                                <RadioGroupItem value="top" id="top" /> Attach to Top
-                            </Label>
-                        </RadioGroup>
-                    )}
-                />
-
-                <div className="space-y-2">
-                    <Label htmlFor="start-coord">Start Coordinate (Row/Column Index)</Label>
-                    <Input 
-                        id="start-coord"
-                        type="number"
-                        min={0}
-                        {...mergeForm.register('start')}
-                    />
-                     {mergeForm.formState.errors.start && <p className="text-sm text-destructive">{mergeForm.formState.errors.start.message}</p>}
-                    <p className="text-xs text-muted-foreground">
-                        Defines the starting row/column index for the new plate. A gap will be created if this is greater than the current grid boundary.
-                    </p>
-                </div>
-            </div>
-
-            <AlertDialogFooter>
-              <AlertDialogCancel type="button">Cancel</AlertDialogCancel>
-              <Button type="submit">Validate & Merge</Button>
-            </AlertDialogFooter>
-          </form>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   )
 }
