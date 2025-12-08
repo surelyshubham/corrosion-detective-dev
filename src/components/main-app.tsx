@@ -46,7 +46,7 @@ export function MainApp() {
   }, [inspectionResult, activeTab, isLoading, toast]);
   
   useEffect(() => {
-    if (inspectionResult && !inspectionResult.aiInsight) {
+    if (inspectionResult && inspectionResult.stats && !inspectionResult.aiInsight) {
        generateCorrosionInsight({
           assetType: inspectionResult.assetType,
           nominalThickness: inspectionResult.nominalThickness,
