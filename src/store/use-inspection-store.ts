@@ -4,6 +4,7 @@
 import { create } from 'zustand';
 import type { MergedInspectionResult, AIInsight, Plate, MergedGrid, AssetType, InspectionStats } from '@/lib/types';
 import { DataVault } from './data-vault';
+import { type MergeFormValues } from '@/components/tabs/merge-alert-dialog';
 
 export interface WorkerOutput {
   type: 'PROGRESS' | 'DONE' | 'ERROR';
@@ -22,24 +23,20 @@ export type ColorMode = 'mm' | '%';
 export type ProcessConfig = {
     pipeOuterDiameter?: number;
     pipeLength?: number;
-    merge?: {
-        file: File;
-        direction: 'top' | 'bottom' | 'left' | 'right';
-        start: number;
-    }
 }
 
 interface InspectionState {
   inspectionResult: MergedInspectionResult | null;
-  setInspectionResult: (result: MergedInspectionResult | null) => void;
   isLoading: boolean;
   loadingProgress: number;
   error: string | null;
-  processFiles: (files: File[], nominalThickness: number, assetType: AssetType, config: ProcessConfig) => void;
+  processFirstFile: (file: File, nominalThickness: number, assetType: AssetType, config: ProcessConfig) => void;
+  mergeNextFile: (file: File, mergeConfig: MergeFormValues) => void;
   selectedPoint: { x: number; y: number } | null;
   setSelectedPoint: (point: { x: number; y: number } | null) => void;
   updateAIInsight: (insight: AIInsight | null) => void;
   reprocessPlates: (newNominalThickness: number) => void;
+  resetProject: () => void;
   colorMode: ColorMode;
   setColorMode: (mode: ColorMode) => void;
   dataVersion: number;
@@ -77,13 +74,12 @@ export const useInspectionStore = create<InspectionState>()(
                 const currentResult = get().inspectionResult;
                 
                 const newResult: MergedInspectionResult = {
-                    ...(currentResult || {}),
                     plates: data.plates,
                     mergedGrid: data.gridMatrix,
                     nominalThickness: data.stats.nominalThickness,
                     stats: data.stats,
                     condition: data.condition,
-                    aiInsight: null, // Reset AI insight on new data
+                    aiInsight: null,
                     assetType: currentResult?.assetType || 'Plate',
                     pipeOuterDiameter: currentResult?.pipeOuterDiameter,
                     pipeLength: currentResult?.pipeLength
@@ -111,18 +107,6 @@ export const useInspectionStore = create<InspectionState>()(
         dataVersion: 0,
         error: null,
         
-        setInspectionResult: (result) => {
-          if (result === null) {
-            DataVault.displacementBuffer = null;
-            DataVault.colorBuffer = null;
-            DataVault.gridMatrix = null;
-            DataVault.stats = null;
-            set({ inspectionResult: null, selectedPoint: null, isLoading: false, dataVersion: 0, error: null });
-          } else {
-            set({ inspectionResult: result });
-          }
-        },
-        
         setSelectedPoint: (point) => set({ selectedPoint: point }),
         
         setColorMode: (mode) => {
@@ -132,63 +116,44 @@ export const useInspectionStore = create<InspectionState>()(
             
              worker.postMessage({
                 type: 'RECOLOR',
-                gridMatrix: DataVault.gridMatrix,
                 nominalThickness: currentResult.nominalThickness,
-                stats: DataVault.stats,
                 colorMode: mode,
             });
         },
 
-        processFiles: async (files, nominalThickness, assetType, config) => {
-            if (!worker) {
-                console.error("Worker not initialized!");
-                set({ isLoading: false, error: "Data processing worker is not available." });
-                return;
-            }
+        processFirstFile: async (file, nominalThickness, assetType, config) => {
+            if (!worker) return;
             set({ isLoading: true, loadingProgress: 0, error: null });
-             set(state => ({ 
+             set({ 
                 inspectionResult: {
-                    ...(state.inspectionResult || {}),
                     nominalThickness,
                     assetType,
                     pipeOuterDiameter: config.pipeOuterDiameter,
                     pipeLength: config.pipeLength,
                 } as any,
-             }));
+             });
 
-            let message: any;
+            const buffer = await file.arrayBuffer();
+            const message = {
+                type: 'INIT',
+                file: { name: file.name, buffer: buffer },
+                nominalThickness,
+                colorMode: get().colorMode,
+            };
+            worker?.postMessage(message, [buffer]);
+        },
 
-            if (config.merge) {
-                const buffer = await config.merge.file.arrayBuffer();
-                message = {
-                    type: 'PROCESS',
-                    merge: {
-                        direction: config.merge.direction,
-                        start: config.merge.start,
-                        file: {
-                            name: config.merge.file.name,
-                            buffer: buffer,
-                        },
-                    },
-                    existingGrid: DataVault.gridMatrix,
-                    nominalThickness: nominalThickness,
-                    colorMode: get().colorMode,
-                    plates: get().inspectionResult?.plates,
-                }
-                 worker?.postMessage(message, [buffer]);
-            } else {
-                 const fileBuffers = await Promise.all(files.map(file => file.arrayBuffer()));
-                 message = {
-                    type: 'PROCESS',
-                    files: files.map((file, i) => ({
-                        name: file.name,
-                        buffer: fileBuffers[i]
-                    })),
-                    nominalThickness: nominalThickness,
-                    colorMode: get().colorMode,
-                }
-                 worker?.postMessage(message, fileBuffers);
-            }
+        mergeNextFile: async (file, mergeConfig) => {
+            if (!worker) return;
+            set({ isLoading: true, loadingProgress: 0, error: null });
+            const buffer = await file.arrayBuffer();
+            const message = {
+                type: 'MERGE',
+                file: { name: file.name, buffer: buffer },
+                mergeConfig: mergeConfig,
+                colorMode: get().colorMode,
+            };
+            worker?.postMessage(message, [buffer]);
         },
         
         updateAIInsight: (aiInsight) => {
@@ -204,10 +169,7 @@ export const useInspectionStore = create<InspectionState>()(
         },
         
         reprocessPlates: (newNominalThickness: number) => {
-            if (!worker || !DataVault.gridMatrix) {
-                console.error("Worker or data not available for reprocessing");
-                return;
-            }
+            if (!worker) return;
              set(state => ({ 
                 isLoading: true,
                 loadingProgress: 0,
@@ -217,12 +179,20 @@ export const useInspectionStore = create<InspectionState>()(
             
             worker.postMessage({
                 type: 'REPROCESS',
-                gridMatrix: DataVault.gridMatrix,
                 nominalThickness: newNominalThickness,
                 colorMode: get().colorMode,
-                plates: get().inspectionResult?.plates
             });
         },
+
+        resetProject: () => {
+            if (!worker) return;
+            worker.postMessage({ type: 'RESET' });
+            DataVault.displacementBuffer = null;
+            DataVault.colorBuffer = null;
+            DataVault.gridMatrix = null;
+            DataVault.stats = null;
+            set({ inspectionResult: null, selectedPoint: null, isLoading: false, dataVersion: 0, error: null, loadingProgress: 0 });
+        }
       }
     }
 );

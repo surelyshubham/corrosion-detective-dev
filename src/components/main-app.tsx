@@ -132,10 +132,7 @@ export function MainApp() {
         
         <div className="flex-grow min-h-0 relative">
             <div style={getTabContentStyle('setup')}>
-              <SetupTab 
-                isLoading={isLoading} 
-                onNominalThicknessChange={reprocessPlates}
-              />
+              <SetupTab />
             </div>
             <div style={getTabContentStyle('info')}>
               {isDataLoaded ? <InfoTab /> : <DataPlaceholder />}
