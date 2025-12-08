@@ -69,10 +69,9 @@ export const useInspectionStore = create<InspectionState>()(
                     inspectionResult: {
                         ...(currentState || {}),
                         plates: [],
-                        nominalThickness: data.stats!.nominalThickness || currentState?.nominalThickness || 0,
+                        nominalThickness: data.stats!.nominalThickness,
                         condition: data.condition,
                         aiInsight: null,
-                        // stats and mergedGrid are now in DataVault
                     } as Omit<MergedInspectionResult, 'mergedGrid' | 'stats'>,
                     isLoading: false,
                     error: null,
@@ -186,5 +185,3 @@ export const useInspectionStore = create<InspectionState>()(
       }
     }
 );
-
-    

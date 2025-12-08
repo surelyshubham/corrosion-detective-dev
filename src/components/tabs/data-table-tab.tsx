@@ -85,7 +85,8 @@ export function DataTableTab() {
 
 
   const handleExport = () => {
-    const fileName = inspectionResult?.plates.map(p => p.fileName.replace('.xlsx', '')).join('_') || 'merged_export';
+    if (!inspectionResult) return;
+    const fileName = inspectionResult.plates.map(p => p.fileName.replace('.xlsx', '').replace('.csv', '')).join('_') || 'merged_export';
     const sheet = XLSX.utils.json_to_sheet(sortedAndFilteredData.map(d => ({
         x: d.x,
         y: d.y,
@@ -102,6 +103,14 @@ export function DataTableTab() {
     const blob = new Blob([excelBuffer], { type: 'application/octet-stream' })
     downloadFile(blob, `${fileName}_data.xlsx`)
   }
+
+    const requestSort = (key: SortKey) => {
+        let direction: SortDirection = 'asc';
+        if (sortConfig && sortConfig.key === key && sortConfig.direction === 'asc') {
+            direction = 'desc';
+        }
+        setSortConfig({ key, direction });
+    };
 
   const columns: { key: SortKey; label: string }[] = [
     { key: 'x', label: 'X' },
@@ -126,7 +135,7 @@ export function DataTableTab() {
                 className="pl-10 w-full md:w-80"
             />
         </div>
-        <Button onClick={handleExport} variant="outline">
+        <Button onClick={handleExport} variant="outline" disabled={!inspectionResult}>
           <Download className="mr-2 h-4 w-4" />
           Export to Excel
         </Button>
@@ -181,5 +190,3 @@ export function DataTableTab() {
     </div>
   )
 }
-
-    

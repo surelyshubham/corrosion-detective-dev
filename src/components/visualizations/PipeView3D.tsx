@@ -46,7 +46,8 @@ export const PipeView3D = React.forwardRef<PipeView3DRef, PipeView3DProps>((prop
   const colorTextureRef = useRef<THREE.DataTexture | null>(null);
   const displacementTextureRef = useRef<THREE.DataTexture | null>(null);
 
-  const { stats, nominalThickness, pipeOuterDiameter, pipeLength } = inspectionResult || {};
+  const { nominalThickness, pipeOuterDiameter, pipeLength } = inspectionResult || {};
+  const stats = DataVault.stats;
 
   const animate = useCallback(() => {
     if (!rendererRef.current || !sceneRef.current || !cameraRef.current || !controlsRef.current) return;
@@ -149,7 +150,6 @@ export const PipeView3D = React.forwardRef<PipeView3DRef, PipeView3DProps>((prop
   useEffect(() => {
     if (!mountRef.current || !inspectionResult || !pipeOuterDiameter || !pipeLength) return;
     
-    const { stats } = inspectionResult;
     if (!stats) return;
 
     const currentMount = mountRef.current;
@@ -233,7 +233,7 @@ export const PipeView3D = React.forwardRef<PipeView3DRef, PipeView3DProps>((prop
         currentMount.innerHTML = '';
       }
     };
-  }, [inspectionResult, animate, resetCamera, pipeOuterDiameter, pipeLength, zScale, nominalThickness]);
+  }, [inspectionResult, animate, resetCamera, pipeOuterDiameter, pipeLength, zScale, nominalThickness, stats]);
   
   
   if (!inspectionResult) return null;
@@ -301,5 +301,3 @@ export const PipeView3D = React.forwardRef<PipeView3DRef, PipeView3DProps>((prop
 });
 
 PipeView3D.displayName = "PipeView3D";
-
-    

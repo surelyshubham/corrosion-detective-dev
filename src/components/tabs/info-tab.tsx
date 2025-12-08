@@ -90,11 +90,12 @@ export function InfoTab() {
       <div className="grid md:grid-cols-3 gap-6 animate-fade-in">
         <div className="md:col-span-2 space-y-6">
 
-          {plates.map((plate, index) => (
+          {/* This part might need adjustment if plates data is not available in the same way */}
+          {/* {plates.map((plate, index) => (
             <PlateStatsCard key={plate.id} plate={plate} index={index} />
-          ))}
+          ))} */}
 
-          {plates.length > 1 && (
+          {/* {plates.length > 1 && ( */}
             <>
               <Card>
                 <CardHeader>
@@ -128,7 +129,7 @@ export function InfoTab() {
                 </CardContent>
               </Card>
             </>
-          )}
+          {/* )} */}
 
         </div>
 
@@ -186,5 +187,3 @@ export function InfoTab() {
     </ScrollArea>
   )
 }
-
-    

@@ -18,5 +18,3 @@ export const DataVault: DataVaultType = {
   gridMatrix: null,
   stats: null,
 };
-
-    

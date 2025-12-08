@@ -48,7 +48,8 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
   const colorTextureRef = useRef<THREE.DataTexture | null>(null);
   const displacementTextureRef = useRef<THREE.DataTexture | null>(null);
 
-  const { stats, nominalThickness } = inspectionResult || {};
+  const { nominalThickness } = inspectionResult || {};
+  const stats = DataVault.stats;
   const VISUAL_WIDTH = 100;
   
    const animate = useCallback(() => {
@@ -161,7 +162,6 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
   // Setup scene effect
   useEffect(() => {
     if (!mountRef.current || !inspectionResult) return;
-    const { stats } = inspectionResult;
     if (!stats) return;
      // Safety check for empty data
     if (!stats.gridSize || stats.gridSize.width === 0 || stats.gridSize.height === 0) {
@@ -215,7 +215,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
         currentMount.innerHTML = '';
       }
     };
-  }, [inspectionResult, animate, resetCamera, zScale]);
+  }, [inspectionResult, animate, resetCamera, zScale, stats]);
 
   useEffect(() => {
     if (meshRef.current) {
@@ -294,5 +294,3 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
   )
 });
 PlateView3D.displayName = "PlateView3D";
-
-    

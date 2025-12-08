@@ -87,10 +87,10 @@ export function SetupTab({ isLoading, onNominalThicknessChange }: SetupTabProps)
   const handleFileDrop = async (newFiles: FileList | null) => {
     if (!newFiles) return;
 
-    const validFiles = Array.from(newFiles).filter(file => file.name.endsWith('.xlsx'));
+    const validFiles = Array.from(newFiles).filter(file => file.name.endsWith('.xlsx') || file.name.endsWith('.csv'));
     
     if (validFiles.length !== newFiles.length) {
-       setFileError('Invalid file type. Only .xlsx files are accepted.');
+       setFileError('Invalid file type. Only .xlsx or .csv files are accepted.');
     } else {
        setFileError(null);
     }
@@ -133,7 +133,7 @@ export function SetupTab({ isLoading, onNominalThicknessChange }: SetupTabProps)
 
   const onSubmit = (data: SetupFormValues) => {
     if (files.length === 0) {
-        setFileError('An Excel file is required.');
+        setFileError('An Excel or CSV file is required.');
         return;
     }
     const mergeConfig = {
@@ -213,8 +213,8 @@ export function SetupTab({ isLoading, onNominalThicknessChange }: SetupTabProps)
             )}
 
             <div className="space-y-2">
-              <Label>2. Upload Excel File (.xlsx)</Label>
-              <input type="file" ref={fileInputRef} onChange={handleFileChange} accept=".xlsx" className="hidden" disabled={!selectedAssetType || isLoading} multiple />
+              <Label>2. Upload File (.xlsx, .csv)</Label>
+              <input type="file" ref={fileInputRef} onChange={handleFileChange} accept=".xlsx,.csv" className="hidden" disabled={!selectedAssetType || isLoading} multiple />
               
                 {files.length > 0 ? (
                   <div className="flex items-center justify-between p-3 rounded-md border bg-secondary/50">
@@ -281,5 +281,3 @@ export function SetupTab({ isLoading, onNominalThicknessChange }: SetupTabProps)
       <DummyDataGenerator isLoading={isLoading} />
     </div>
   )
-
-    

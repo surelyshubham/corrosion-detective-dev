@@ -83,7 +83,7 @@ function computeStats(grid: MergedGrid, nominal: number) {
         totalPoints: height * width,
         worstLocation: minThickness === 0 ? {x: 0, y: 0} : worstLocation,
         gridSize: { width, height },
-        scannedArea: totalScannedPoints / 1_000_000,
+        scannedArea: totalScannedPoints / 1_000_000, // Assuming 1 point = 1mm^2
     };
     
     let condition: Condition = 'N/A';
@@ -179,11 +179,9 @@ function universalParse(buffer: ArrayBuffer): any[][] {
     const text = decoder.decode(buffer);
     const lines = text.split(/[\r\n]+/);
     return lines.map(line => {
-        // Handle cases where a row might be a single string of comma-separated values
-        if (line.includes(',') && line.split(',').length > 1) {
-            return line.split(',').map(cell => cell.trim());
-        }
-        return [line]; // Treat as a single column if no commas
+        // Robust CSV splitting
+        const row = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
+        return row.map(cell => cell.trim().replace(/^"|"$/g, '')); // Handle quoted cells
     });
 }
 
@@ -260,12 +258,22 @@ self.onmessage = async (event: MessageEvent<any>) => {
             }, [displacementBuffer.buffer, colorBuffer.buffer]);
 
         } else if (type === 'REPROCESS' || type === 'RECOLOR') {
-            const { gridMatrix, nominalThickness, colorMode } = event.data;
-            const finalGrid = type === 'REPROCESS' ? createFinalGrid(gridMatrix.map((row: MergedCell[]) => row.map(cell => ({ plateId: cell.plateId || 'ND', rawThickness: cell.rawThickness || -1 }))), nominalThickness) : gridMatrix;
-            const { stats, condition } = computeStats(finalGrid, nominalThickness);
-            const { displacementBuffer, colorBuffer } = createBuffers(finalGrid, nominalThickness, stats.minThickness, stats.maxThickness, colorMode);
+            const { gridMatrix, nominalThickness, colorMode, stats } = event.data;
+            let recomputedStats = stats;
+            let recomputedCondition = 'N/A';
+
+            let finalGrid = gridMatrix;
+
+            if (type === 'REPROCESS') {
+                finalGrid = createFinalGrid(gridMatrix.map((row: MergedCell[]) => row.map(cell => ({ plateId: cell.plateId || 'ND', rawThickness: cell.rawThickness || -1 }))), nominalThickness);
+                 const { stats: newStats, condition: newCondition } = computeStats(finalGrid, nominalThickness);
+                 recomputedStats = newStats;
+                 recomputedCondition = newCondition;
+            }
+           
+            const { displacementBuffer, colorBuffer } = createBuffers(finalGrid, nominalThickness, recomputedStats.minThickness, recomputedStats.maxThickness, colorMode);
             self.postMessage({
-                type: 'DONE', displacementBuffer, colorBuffer, gridMatrix: finalGrid, stats, condition,
+                type: 'DONE', displacementBuffer, colorBuffer, gridMatrix: finalGrid, stats: recomputedStats, condition: recomputedCondition
             }, [displacementBuffer.buffer, colorBuffer.buffer]);
         }
     } catch (error: any) {
@@ -275,5 +283,3 @@ self.onmessage = async (event: MessageEvent<any>) => {
 };
 
 export {};
-
-    
