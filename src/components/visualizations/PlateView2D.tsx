@@ -3,86 +3,13 @@
 
 import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react'
 import { useInspectionStore, type ColorMode } from '@/store/use-inspection-store'
+import { DataVault } from '@/store/data-vault'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '../ui/label'
 import { RadioGroup, RadioGroupItem } from '../ui/radio-group'
 import { Percent, Ruler, ZoomIn, ZoomOut, RefreshCw } from 'lucide-react'
 import { Button } from '../ui/button'
 
-// --- Color Helper Functions ---
-const getAbsColor = (percentage: number | null): string => {
-    if (percentage === null) return 'transparent'; // ND
-    if (percentage < 70) return '#ff0000'; // Red
-    if (percentage < 80) return '#ffff00'; // Yellow
-    if (percentage < 90) return '#00ff00'; // Green
-    return '#0000ff'; // Blue
-};
-
-const getNormalizedColor = (normalizedPercent: number | null): string => {
-    if (normalizedPercent === null) return 'transparent'; // ND
-    // Blue to Red
-    const hue = 240 * (1 - normalizedPercent);
-    return `hsl(${hue}, 100%, 50%)`;
-};
-
-
-// --- UI Components ---
-const ColorLegend = ({ mode, min, max, nominal }: { mode: ColorMode, min: number, max: number, nominal: number}) => {
-    const renderMmLegend = () => {
-        const levels = [
-            { label: `> 90%`, color: '#0000ff' },
-            { label: `80-90%`, color: '#00ff00' },
-            { label: `70-80%`, color: '#ffff00' },
-            { label: `< 70%`, color: '#ff0000' },
-        ];
-        return (
-            <>
-                <div className="font-medium text-xs mb-1">Condition (of {nominal}mm)</div>
-                {levels.map(l => (
-                    <div key={l.label} className="flex items-center gap-2 text-xs">
-                        <div className="w-3 h-3 rounded-sm border" style={{ backgroundColor: l.color }} />
-                        <span>{l.label}</span>
-                    </div>
-                ))}
-            </>
-        )
-    }
-
-    const renderPercentLegend = () => {
-        const levels = [
-            { pct: 1, label: `${max.toFixed(2)}mm (Max)` },
-            { pct: 0.75, label: '' },
-            { pct: 0.5, label: `${((max + min) / 2).toFixed(2)}mm` },
-            { pct: 0.25, label: '' },
-            { pct: 0, label: `${min.toFixed(2)}mm (Min)` },
-        ];
-        return (
-             <>
-                <div className="font-medium text-xs mb-1">Normalized Thickness</div>
-                <div className="flex flex-col-reverse">
-                {levels.map(l => (
-                    <div key={l.pct} className="flex items-center gap-2 text-xs">
-                        <div className="w-3 h-3 rounded-sm border" style={{ backgroundColor: getNormalizedColor(l.pct) }} />
-                        <span>{l.label}</span>
-                    </div>
-                ))}
-                </div>
-            </>
-        )
-    }
-
-    return (
-        <Card className="mt-4">
-          <CardHeader className="p-3">
-             <CardTitle className="text-base font-headline">Legend</CardTitle>
-          </CardHeader>
-          <CardContent className="p-3 pt-0 text-xs">
-            {mode === 'mm' ? renderMmLegend() : renderPercentLegend()}
-            <div className="text-xs text-muted-foreground mt-1">ND: transparent</div>
-          </CardContent>
-        </Card>
-    )
-}
 
 const getNiceInterval = (range: number, maxTicks: number): number => {
     if (range === 0) return 1;
@@ -95,7 +22,7 @@ const getNiceInterval = (range: number, maxTicks: number): number => {
 
 // --- Main Component ---
 export function PlateView2D() {
-  const { inspectionResult, selectedPoint, setSelectedPoint, colorMode, setColorMode } = useInspectionStore()
+  const { inspectionResult, selectedPoint, setSelectedPoint, colorMode, setColorMode, dataVersion } = useInspectionStore()
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const xAxisRef = useRef<HTMLDivElement>(null);
@@ -104,133 +31,52 @@ export function PlateView2D() {
   const [zoom, setZoom] = useState(1);
   const [hoveredPoint, setHoveredPoint] = useState<any>(null);
 
-  const { mergedGrid, stats, nominalThickness, plates } = inspectionResult || {};
-  const { gridSize, minThickness, maxThickness } = stats || {};
+  const { nominalThickness } = inspectionResult || {};
+  const { gridSize, minThickness, maxThickness, totalPoints } = DataVault.stats || {};
+  const gridMatrix = DataVault.gridMatrix;
   
   const BASE_CELL_SIZE = 6;
   const scaledCellSize = BASE_CELL_SIZE * zoom;
   const AXIS_SIZE = 45; // Space for axis labels
 
-  const plateIds = useMemo(() => plates?.map(p => p.id), [plates]);
-
-  const plateBoundaries = useMemo(() => {
-    if (!mergedGrid || !plateIds || plateIds.length <= 1) return [];
-
-    const boundaries: { x: number; y: number; width: number; height: number, plateId: string }[] = [];
-    const height = mergedGrid.length;
-    if (height === 0) return [];
-    const width = mergedGrid[0].length;
-    
-    plateIds.forEach(id => {
-      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-      let found = false;
-      for (let y = 0; y < height; y++) {
-        for (let x = 0; x < width; x++) {
-          if (mergedGrid[y][x]?.plateId === id) {
-            found = true;
-            minX = Math.min(minX, x);
-            maxX = Math.max(maxX, x);
-            minY = Math.min(minY, y);
-            maxY = Math.max(maxY, y);
-          }
-        }
-      }
-      if (found) {
-        boundaries.push({
-          x: minX,
-          y: minY,
-          width: maxX - minX + 1,
-          height: maxY - minY + 1,
-          plateId: id
-        });
-      }
-    });
-    return boundaries;
-  }, [mergedGrid, plateIds]);
-
-
   // --- Drawing Logic ---
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
-    if (!gridSize || !mergedGrid || minThickness === undefined || maxThickness === undefined) return;
+    if (!canvas || !gridSize || !DataVault.colorBuffer) return;
     
-    const canvasWidth = gridSize.width * scaledCellSize;
-    const canvasHeight = gridSize.height * scaledCellSize;
+    const { width, height } = gridSize;
+    const canvasWidth = width * scaledCellSize;
+    const canvasHeight = height * scaledCellSize;
     
-    canvas!.width = canvasWidth;
-    canvas!.height = canvasHeight;
+    canvas.width = canvasWidth;
+    canvas.height = canvasHeight;
 
-    const ctx = canvas!.getContext('2d');
+    const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    
-    ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--card').trim();
-    ctx.fillRect(0, 0, canvas!.width, canvas!.height);
 
+    // Create an ImageData object from the color buffer in the vault
+    const imageData = new ImageData(new Uint8ClampedArray(DataVault.colorBuffer), width, height);
 
-    // Heatmap
-    const effTRange = maxThickness - minThickness;
-    
-    for (let y = 0; y < gridSize.height; y++) {
-      for (let x = 0; x < gridSize.width; x++) {
-        const point = mergedGrid[y]?.[x];
-        let color: string;
-        
-        if (!point || point.effectiveThickness === null) {
-          color = 'transparent';
-          if (point?.plateId === 'ND') {
-            // Optional: color ND gaps differently
-            ctx.fillStyle = "rgba(128, 128, 128, 0.1)"; // Light grey for ND gaps
-            ctx.fillRect(x * scaledCellSize, y * scaledCellSize, scaledCellSize, scaledCellSize);
-          }
-        } else if (colorMode === '%') {
-            const normalized = effTRange > 0
-                ? (point.effectiveThickness - minThickness) / effTRange
-                : 0;
-            color = getNormalizedColor(normalized);
-        } else {
-            color = getAbsColor(point.percentage);
-        }
-        
-        if (color !== 'transparent') {
-          ctx.fillStyle = color;
-          ctx.fillRect(x * scaledCellSize, y * scaledCellSize, scaledCellSize, scaledCellSize);
-        }
-      }
-    }
-    
-    // Grid Lines (only when zoomed in)
-    if (zoom > 8) {
-      ctx.strokeStyle = "rgba(100, 100, 100, 0.2)";
-      ctx.lineWidth = 1;
-      for (let x = 0; x <= gridSize.width; x++) {
-        ctx.beginPath();
-        ctx.moveTo(x * scaledCellSize, 0);
-        ctx.lineTo(x * scaledCellSize, canvasHeight);
-        ctx.stroke();
-      }
-      for (let y = 0; y <= gridSize.height; y++) {
-        ctx.beginPath();
-        ctx.moveTo(0, y * scaledCellSize);
-        ctx.lineTo(canvasWidth, y * scaledCellSize);
-        ctx.stroke();
-      }
-    }
-    
-    // Plate Boundaries
-    ctx.strokeStyle = '#FFFFFF'; // White boundaries
-    ctx.lineWidth = Math.max(1, 2 * zoom / 10);
-    plateBoundaries.forEach(b => {
-        ctx.strokeRect(b.x * scaledCellSize, b.y * scaledCellSize, b.width * scaledCellSize, b.height * scaledCellSize);
-    });
+    // Create a temporary canvas to draw the initial image
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = width;
+    tempCanvas.height = height;
+    const tempCtx = tempCanvas.getContext('2d');
+    if (!tempCtx) return;
+    tempCtx.putImageData(imageData, 0, 0);
 
+    // Scale up the image to the main canvas
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(tempCanvas, 0, 0, width, height, 0, 0, canvasWidth, canvasHeight);
+    
     // Selection outline
     if (selectedPoint) {
         ctx.strokeStyle = '#00ffff'; // Cyan
-        ctx.lineWidth = Math.max(1, 3 * zoom / 10);
+        ctx.lineWidth = Math.max(1.5, 3 * zoom / 10);
         ctx.strokeRect(selectedPoint.x * scaledCellSize, selectedPoint.y * scaledCellSize, scaledCellSize, scaledCellSize);
     }
     
-  }, [gridSize, colorMode, mergedGrid, zoom, scaledCellSize, selectedPoint, plateBoundaries, minThickness, maxThickness]);
+  }, [gridSize, dataVersion, zoom, scaledCellSize, selectedPoint]);
 
   useEffect(() => {
     draw();
@@ -260,7 +106,7 @@ export function PlateView2D() {
   };
 
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!gridSize || !mergedGrid || !canvasRef.current) { setHoveredPoint(null); return; };
+    if (!gridSize || !gridMatrix || !canvasRef.current) { setHoveredPoint(null); return; };
     const rect = canvasRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
@@ -269,7 +115,7 @@ export function PlateView2D() {
     const gridY = Math.floor(y / scaledCellSize);
 
     if (gridX >= 0 && gridX < gridSize.width && gridY >= 0 && gridY < gridSize.height) {
-        const pointData = mergedGrid[gridY]?.[gridX];
+        const pointData = gridMatrix[gridY]?.[gridX];
         if(pointData && pointData.plateId) {
              setHoveredPoint({ x: gridX, y: gridY, ...pointData, clientX: e.clientX, clientY: e.clientY });
         } else {
@@ -326,7 +172,7 @@ export function PlateView2D() {
   
 
   // --- Render ---
-  if (!inspectionResult || !stats) return null
+  if (!inspectionResult || !DataVault.stats || !gridMatrix) return null;
 
   return (
     <div className="grid md:grid-cols-4 gap-6 h-full">
@@ -414,10 +260,9 @@ export function PlateView2D() {
                 </div>
             </CardContent>
         </Card>
-        {stats && nominalThickness && minThickness !== undefined && maxThickness !== undefined && (
-          <ColorLegend mode={colorMode} min={minThickness} max={maxThickness} nominal={nominalThickness} />
-        )}
       </div>
     </div>
   )
 }
+
+    

@@ -74,7 +74,6 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
         return;
     }
 
-
     // Update or create displacement texture
     if (displacementTextureRef.current) {
       displacementTextureRef.current.image.data = displacementBuffer;
@@ -191,6 +190,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     const material = new THREE.MeshStandardMaterial({
         side: THREE.DoubleSide,
         displacementScale: zScale,
+        color: 0xff00ff // Fallback color
     });
     
     meshRef.current = new THREE.Mesh(geometry, material);
@@ -215,7 +215,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
         currentMount.innerHTML = '';
       }
     };
-  }, [inspectionResult, animate, resetCamera, zScale, stats]);
+  }, [inspectionResult, animate, resetCamera, stats]);
 
   useEffect(() => {
     if (meshRef.current) {
@@ -294,3 +294,5 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
   )
 });
 PlateView3D.displayName = "PlateView3D";
+
+    
