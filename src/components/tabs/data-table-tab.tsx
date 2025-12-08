@@ -1,13 +1,13 @@
 
 "use client"
 
-import React, { useMemo, useState } from 'react'
+import React, { useMemo, useState, useRef, useEffect } from 'react'
 import * as XLSX from 'xlsx'
 import { useInspectionStore } from '@/store/use-inspection-store'
 import { DataVault } from '@/store/data-vault'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Button } from '@/components/ui/button'
-import { Download, ArrowUpDown, Search, AlertTriangle, Plus } from 'lucide-react'
+import { Download, ArrowUpDown, Search, AlertTriangle, Loader2 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { downloadFile } from '@/lib/utils'
 import { ScrollArea } from '../ui/scroll-area'
@@ -31,6 +31,7 @@ export function DataTableTab() {
   const [filter, setFilter] = useState('')
   const [sortConfig, setSortConfig] = useState<{ key: SortKey; direction: SortDirection } | null>(null)
   const [visibleCount, setVisibleCount] = useState(PREVIEW_ROW_COUNT);
+  const scrollViewportRef = useRef<HTMLDivElement>(null);
 
 
   const data = useMemo(() => {
@@ -82,8 +83,22 @@ export function DataTableTab() {
 
     return filteredData
   }, [data, filter, sortConfig])
+  
+  const totalRows = sortedAndFilteredData.length;
+  const canLoadMore = visibleCount < totalRows;
 
   const previewData = useMemo(() => sortedAndFilteredData.slice(0, visibleCount), [sortedAndFilteredData, visibleCount]);
+  
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
+    if (scrollHeight - scrollTop <= clientHeight * 1.5 && canLoadMore) {
+      setVisibleCount(prev => Math.min(prev + PREVIEW_ROW_COUNT, totalRows));
+    }
+  };
+  
+   useEffect(() => {
+    setVisibleCount(PREVIEW_ROW_COUNT);
+  }, [filter, sortConfig]);
 
 
   const handleExport = () => {
@@ -124,8 +139,6 @@ export function DataTableTab() {
     { key: 'percentage', label: 'Percentage (%)' },
     { key: 'wallLoss', label: 'Wall Loss (mm)' },
   ]
-  
-  const totalRows = sortedAndFilteredData.length;
 
   return (
     <div className="flex flex-col h-full gap-4">
@@ -145,20 +158,9 @@ export function DataTableTab() {
         </Button>
       </div>
 
-       {totalRows > visibleCount && (
-        <Alert>
-          <AlertTriangle className="h-4 w-4" />
-          <AlertTitle>Performance Notice</AlertTitle>
-          <AlertDescription>
-            Showing the first {visibleCount} of {totalRows} data points for preview. Use the "Export to Excel" button to get the full dataset.
-          </AlertDescription>
-        </Alert>
-      )}
-
-
-      <ScrollArea className="border rounded-md flex-grow">
+      <ScrollArea className="border rounded-md flex-grow" onScroll={handleScroll}>
         <Table>
-          <TableHeader className="sticky top-0 bg-card">
+          <TableHeader className="sticky top-0 bg-card z-10">
             <TableRow>
               {columns.map(col => (
                 <TableHead key={col.key}>
@@ -180,7 +182,7 @@ export function DataTableTab() {
               >
                 <TableCell>{item.x}</TableCell>
                 <TableCell>{item.y}</TableCell>
-                <TableCell className="truncate max-w-xs">{item.plateId}</TableCell>
+                <TableCell className="truncate max-w-[150px]">{item.plateId}</TableCell>
                 <TableCell>{item.rawThickness !== null ? item.rawThickness.toFixed(3) : 'ND'}</TableCell>
                 <TableCell>{item.effectiveThickness !== null ? item.effectiveThickness.toFixed(3) : 'ND'}</TableCell>
                 <TableCell>{item.deviation !== null ? item.deviation.toFixed(3) : 'N/A'}</TableCell>
@@ -190,15 +192,16 @@ export function DataTableTab() {
             ))}
           </TableBody>
         </Table>
+         {canLoadMore && (
+          <div className="flex justify-center items-center py-4">
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              <span>Loading more...</span>
+          </div>
+        )}
       </ScrollArea>
-       {totalRows > visibleCount && (
-        <div className="flex justify-center py-2">
-            <Button variant="secondary" onClick={() => setVisibleCount(prev => prev + PREVIEW_ROW_COUNT)}>
-                <Plus className="mr-2 h-4 w-4" />
-                Load {Math.min(PREVIEW_ROW_COUNT, totalRows - visibleCount)} More
-            </Button>
-        </div>
-      )}
+      <div className="text-sm text-muted-foreground text-center">
+        Showing {previewData.length} of {totalRows} data points.
+      </div>
     </div>
   )
 }
