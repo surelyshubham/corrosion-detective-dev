@@ -92,27 +92,27 @@ function createStatsTable(global: FinalReportPayload['global']): Table {
   if (global.nominalThickness !== undefined)
     pushRow(
       'Nominal Thickness',
-      `${global.nominalThickness.toFixed(2)} mm`,
+      `${Number(global.nominalThickness).toFixed(2)} mm`,
     );
 
-  pushRow('Min Thickness', `${global.minThickness.toFixed(2)} mm`);
-  pushRow('Max Thickness', `${global.maxThickness.toFixed(2)} mm`);
-  pushRow('Avg Thickness', `${global.avgThickness.toFixed(2)} mm`);
+  pushRow('Min Thickness', `${Number(global.minThickness).toFixed(2)} mm`);
+  pushRow('Max Thickness', `${Number(global.maxThickness).toFixed(2)} mm`);
+  pushRow('Avg Thickness', `${Number(global.avgThickness).toFixed(2)} mm`);
 
   if (global.corrodedAreaBelow80 !== undefined)
     pushRow(
       'Corroded Area (<80%)',
-      `${global.corrodedAreaBelow80.toFixed(2)} %`,
+      `${Number(global.corrodedAreaBelow80).toFixed(2)} %`,
     );
   if (global.corrodedAreaBelow70 !== undefined)
     pushRow(
       'Corroded Area (<70%)',
-      `${global.corrodedAreaBelow70.toFixed(2)} %`,
+      `${Number(global.corrodedAreaBelow70).toFixed(2)} %`,
     );
   if (global.corrodedAreaBelow60 !== undefined)
     pushRow(
       'Corroded Area (<60%)',
-      `${global.corrodedAreaBelow60.toFixed(2)} %`,
+      `${Number(global.corrodedAreaBelow60).toFixed(2)} %`,
     );
 
   return new Table({
@@ -136,7 +136,6 @@ function createPatchHeader(patch: ReportPatchSegment): Paragraph {
 
 function createPatchStatsTable(patch: ReportPatchSegment): Table {
     const rows: TableRow[] = [];
-    const {xMin, xMax, yMin, yMax} = patch.coordinates;
 
     const pushRow = (label: string, value: string) => {
         rows.push(
@@ -159,11 +158,11 @@ function createPatchStatsTable(patch: ReportPatchSegment): Table {
 
     pushRow(
         'Coordinates (X)',
-        `${xMin.toFixed(0)} to ${xMax.toFixed(0)}`,
+        `${patch.coordinates.xMin.toFixed(0)} to ${patch.coordinates.xMax.toFixed(0)}`,
     );
     pushRow(
         'Coordinates (Y)',
-        `${yMin.toFixed(0)} to ${yMax.toFixed(0)}`,
+        `${patch.coordinates.yMin.toFixed(0)} to ${patch.coordinates.yMax.toFixed(0)}`,
     );
     
     pushRow('Min Thickness', `${patch.worstThickness.toFixed(2)} mm`);
