@@ -323,7 +323,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
         currentMount.innerHTML = '';
       }
     };
-  }, [inspectionResult, animate, resetCamera, dataVersion]); // Depend on dataVersion to re-init
+  }, [inspectionResult, animate, resetCamera, dataVersion, isReady]); // Depend on isReady
 
   useEffect(() => {
     if (meshRef.current) {
@@ -466,3 +466,5 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
   )
 });
 PlateView3D.displayName = "PlateView3D";
+
+    
