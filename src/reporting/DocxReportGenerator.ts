@@ -1,3 +1,4 @@
+
 import {
   Document,
   Packer,
@@ -11,6 +12,7 @@ import {
   Header,
   VerticalAlign,
   BorderStyle,
+  TextRun,
 } from "docx";
 import type { MergedInspectionResult, ReportMetadata, SegmentBox } from '@/lib/types';
 import { format } from 'date-fns';
@@ -60,9 +62,7 @@ export async function generateReportDocx(data: ReportData) {
     return;
   }
   
-  const stats = inspection.stats;
   const patchImages = images.segmentShots || [];
-
 
   const doc = new Document({
     sections: [
