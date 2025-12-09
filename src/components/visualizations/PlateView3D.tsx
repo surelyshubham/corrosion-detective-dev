@@ -69,58 +69,14 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
   
   // This effect runs only when the data from the worker is updated
   useEffect(() => {
-    if (dataVersion === 0 || !stats || !isReady) return;
-
-    const { displacementBuffer, colorBuffer } = DataVault;
-    if (!displacementBuffer || !colorBuffer) return;
-
-    const { width, height } = stats.gridSize;
-
-    // Safety check for empty data
-    if (width === 0 || height === 0) {
-        if (meshRef.current) sceneRef.current?.remove(meshRef.current); // Remove old mesh if any
+    if (dataVersion === 0 || !stats) {
+        setIsReady(false);
         return;
+    };
+    if (DataVault.stats && DataVault.displacementBuffer) {
+        setIsReady(true);
     }
-
-    // Use a small timeout to allow UI to update (e.g., show spinner)
-    const timer = setTimeout(() => {
-        // Update or create displacement texture
-        if (displacementTextureRef.current) {
-          displacementTextureRef.current.image.data = displacementBuffer;
-          displacementTextureRef.current.needsUpdate = true;
-        } else {
-          const texture = new THREE.DataTexture(displacementBuffer, width, height, THREE.RedFormat, THREE.FloatType);
-          texture.minFilter = THREE.NearestFilter;
-          texture.magFilter = THREE.NearestFilter;
-          texture.needsUpdate = true;
-          displacementTextureRef.current = texture;
-        }
-
-        // Update or create color texture
-        if (colorTextureRef.current) {
-            colorTextureRef.current.image.data = colorBuffer;
-            colorTextureRef.current.needsUpdate = true;
-        } else {
-            const texture = new THREE.DataTexture(colorBuffer, width, height, THREE.RGBAFormat, THREE.UnsignedByteType);
-            texture.minFilter = THREE.NearestFilter;
-            texture.magFilter = THREE.NearestFilter;
-            texture.needsUpdate = true;
-            colorTextureRef.current = texture;
-        }
-        
-        // Update material if mesh exists
-        if (meshRef.current) {
-            const material = meshRef.current.material as THREE.MeshStandardMaterial;
-            material.map = colorTextureRef.current;
-            material.displacementMap = displacementTextureRef.current;
-            material.displacementScale = zScale;
-            material.needsUpdate = true;
-        }
-    }, 100);
-
-    return () => clearTimeout(timer);
-
-  }, [dataVersion, stats, zScale, isReady]);
+  }, [dataVersion, stats]);
 
 
   const setView = useCallback((view: 'iso' | 'top' | 'side') => {
@@ -175,23 +131,12 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
   
   // Setup scene effect
   useEffect(() => {
-    if (!mountRef.current || !inspectionResult) {
-        setIsReady(false);
-        return;
-    }
-    
-    // Check if data is already loaded in the vault
-    if (DataVault.stats && DataVault.displacementBuffer) {
-        setIsReady(true);
-    } else {
-        // If not, wait for it (dataVersion will trigger other effects)
-        setIsReady(false);
+    if (!isReady || !mountRef.current || !inspectionResult) {
         return;
     }
     
     const currentStats = DataVault.stats;
     if (!currentStats || !currentStats.gridSize || currentStats.gridSize.width === 0 || currentStats.gridSize.height === 0) {
-        setIsReady(false);
         return;
     }
     
@@ -222,10 +167,25 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     // Cap geometry segments for performance
     const geometry = new THREE.PlaneGeometry(VISUAL_WIDTH, visualHeight, 511, 511);
     
+    const { displacementBuffer, colorBuffer } = DataVault;
+    if (!displacementBuffer || !colorBuffer) return;
+
+    displacementTextureRef.current = new THREE.DataTexture(displacementBuffer, width, height, THREE.RedFormat, THREE.FloatType);
+    displacementTextureRef.current.minFilter = THREE.NearestFilter;
+    displacementTextureRef.current.magFilter = THREE.NearestFilter;
+    displacementTextureRef.current.needsUpdate = true;
+
+    colorTextureRef.current = new THREE.DataTexture(colorBuffer, width, height, THREE.RGBAFormat, THREE.UnsignedByteType);
+    colorTextureRef.current.minFilter = THREE.NearestFilter;
+    colorTextureRef.current.magFilter = THREE.NearestFilter;
+    colorTextureRef.current.needsUpdate = true;
+
     const material = new THREE.MeshStandardMaterial({
         side: THREE.DoubleSide,
         displacementScale: zScale,
-        color: 0xcccccc, // Start with a grey color
+        map: colorTextureRef.current,
+        displacementMap: displacementTextureRef.current,
+        color: 0xffffff,
         metalness: 0.2,
         roughness: 0.3,
         flatShading: false,
@@ -324,34 +284,47 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
         currentMount.innerHTML = '';
       }
     };
-  }, [inspectionResult, animate, resetCamera, dataVersion, isReady]); // Depend on isReady
+  }, [isReady, inspectionResult, animate, resetCamera]); 
 
+  // This effect updates textures and uniforms when data changes, WITHOUT rebuilding the scene
   useEffect(() => {
-    if (meshRef.current) {
+    if (isReady && dataVersion > 0 && meshRef.current && DataVault.displacementBuffer && DataVault.colorBuffer) {
+        const { width, height } = DataVault.stats!.gridSize;
+        
+        if (displacementTextureRef.current) {
+            displacementTextureRef.current.image.data = DataVault.displacementBuffer;
+            displacementTextureRef.current.needsUpdate = true;
+        }
+        if (colorTextureRef.current) {
+            colorTextureRef.current.image.data = DataVault.colorBuffer;
+            colorTextureRef.current.needsUpdate = true;
+        }
+        
         const material = meshRef.current.material as THREE.MeshStandardMaterial;
         material.displacementScale = zScale;
         material.needsUpdate = true;
-    }
-     // Update marker positions when zScale changes
-    if (stats && minMarkerRef.current && maxMarkerRef.current && nominalThickness) {
-      const { worstLocation, bestLocation, gridSize } = stats;
-      const aspect = gridSize.height / gridSize.width;
-      const visualHeight = VISUAL_WIDTH * aspect;
 
-      if (worstLocation) {
-        const minX = (worstLocation.x / gridSize.width) * VISUAL_WIDTH;
-        const minZ = (worstLocation.y / gridSize.height) * visualHeight;
-        const minY = (worstLocation.value - nominalThickness) * zScale;
-        minMarkerRef.current.position.set(minX, minY + 4, minZ);
-      }
-      if (bestLocation) {
-        const maxX = (bestLocation.x / gridSize.width) * VISUAL_WIDTH;
-        const maxZ = (bestLocation.y / gridSize.height) * visualHeight;
-        const maxY = (bestLocation.value - nominalThickness) * zScale;
-        maxMarkerRef.current.position.set(maxX, maxY + 4, maxZ);
-      }
+        if (stats && minMarkerRef.current && maxMarkerRef.current && nominalThickness) {
+          const { worstLocation, bestLocation, gridSize } = stats;
+          const aspect = gridSize.height / gridSize.width;
+          const visualHeight = VISUAL_WIDTH * aspect;
+
+          if (worstLocation) {
+            const minX = (worstLocation.x / gridSize.width) * VISUAL_WIDTH;
+            const minZ = (worstLocation.y / gridSize.height) * visualHeight;
+            const minY = (worstLocation.value - nominalThickness) * zScale;
+            minMarkerRef.current.position.set(minX, minY + 4, minZ);
+          }
+          if (bestLocation) {
+            const maxX = (bestLocation.x / gridSize.width) * VISUAL_WIDTH;
+            const maxZ = (bestLocation.y / gridSize.height) * visualHeight;
+            const maxY = (bestLocation.value - nominalThickness) * zScale;
+            maxMarkerRef.current.position.set(maxX, maxY + 4, maxZ);
+          }
+        }
     }
-  }, [zScale, stats, nominalThickness]);
+  }, [isReady, dataVersion, zScale, stats, nominalThickness]);
+
 
   useEffect(() => {
     if (originAxesRef.current) {
