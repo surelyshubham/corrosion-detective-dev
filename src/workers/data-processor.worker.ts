@@ -120,7 +120,7 @@ function computeStats(grid: MergedGrid, nominal: number) {
     maxThickness = maxThickness === -Infinity ? 0 : maxThickness;
     
     const avgThickness = validPointsCount > 0 ? sumThickness / validPointsCount : 0;
-    const minPercentage = (minThickness / nominal) * 100;
+    const minPercentage = nominal > 0 ? (minThickness / nominal) * 100 : 0;
     const totalScannedPoints = validPointsCount + countND;
 
     const stats: InspectionStats = {
@@ -157,7 +157,7 @@ function createFinalGrid(rawMergedGrid: {plateId: string, rawThickness: number}[
             let effectiveThickness: number | null = null, percentage: number | null = null;
             if (cell && cell.rawThickness > 0) {
                 effectiveThickness = Math.min(cell.rawThickness, nominalThickness);
-                percentage = (effectiveThickness / nominalThickness) * 100;
+                percentage = nominalThickness > 0 ? (effectiveThickness / nominalThickness) * 100 : 0;
             }
             finalGrid[y][x] = {
                 plateId: cell ? cell.plateId : null,
@@ -248,7 +248,7 @@ function segmentAndAnalyze(grid: MergedGrid, nominal: number, threshold: number)
                 }
                 
                 if (points.length > 0) {
-                    const worstPct = (minThick / nominal) * 100;
+                    const worstPct = nominal > 0 ? (minThick / nominal) * 100 : 0;
                     let tier: SeverityTier = 'Moderate';
                     if (worstPct < 60) tier = 'Critical';
                     else if (worstPct < 70) tier = 'Severe';
