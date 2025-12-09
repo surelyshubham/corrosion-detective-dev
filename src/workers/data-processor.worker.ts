@@ -1,7 +1,8 @@
 
 import * as XLSX from 'xlsx';
-import type { MergedGrid, MergedCell, InspectionStats, Condition, Plate, RawInspectionDataPoint, AssetType } from '../lib/types';
+import type { MergedGrid, InspectionStats, Condition, Plate, AssetType } from '../lib/types';
 import { type MergeFormValues } from '@/components/tabs/merge-alert-dialog';
+import { type ProcessConfig } from '@/store/use-inspection-store';
 
 type ColorMode = 'mm' | '%';
 
@@ -9,11 +10,8 @@ interface MasterGrid {
     points: { plateId: string; rawThickness: number }[][];
     width: number;
     height: number;
-    plates: Plate[];
-    assetType: AssetType;
-    nominalThickness: number;
-    pipeOuterDiameter?: number;
-    pipeLength?: number;
+    plates: {name: string, config: ProcessConfig, mergeConfig: MergeFormValues | null}[];
+    baseConfig: ProcessConfig;
 }
 
 // The "Worker Vault" - This state persists between messages
@@ -29,6 +27,7 @@ function universalParse(fileBuffer: ArrayBuffer): any[][] {
     const rows = XLSX.utils.sheet_to_json<any[]>(sheet, { header: 1 });
     return rows;
 }
+
 
 function getAbsoluteColor(percentage: number | null): [number, number, number, number] {
     if (percentage === null) return [128, 128, 128, 255]; // Grey for ND
@@ -229,24 +228,30 @@ function parseFileToGrid(file: {name: string, buffer: ArrayBuffer}) {
     return dataGrid;
 }
 
-function generateResponse(colorMode: ColorMode) {
+function finalizeProcessing(colorMode: ColorMode) {
     if (!MASTER_GRID) {
-        throw new Error("Cannot generate response: MASTER_GRID is not initialized.");
+        throw new Error("Cannot finalize: MASTER_GRID is not initialized.");
     }
-    self.postMessage({ type: 'PROGRESS', progress: 50, message: 'Processing data...' });
+    self.postMessage({ type: 'PROGRESS', progress: 50, message: 'Processing merged data...' });
 
-    const finalGrid = createFinalGrid(MASTER_GRID.points, MASTER_GRID.nominalThickness);
-    const { stats, condition } = computeStats(finalGrid, MASTER_GRID.nominalThickness);
-    const { displacementBuffer, colorBuffer } = createBuffers(finalGrid, MASTER_GRID.nominalThickness, stats.minThickness, stats.maxThickness, colorMode);
+    const finalGrid = createFinalGrid(MASTER_GRID.points, MASTER_GRID.baseConfig.nominalThickness);
+    const { stats, condition } = computeStats(finalGrid, MASTER_GRID.baseConfig.nominalThickness);
+    const { displacementBuffer, colorBuffer } = createBuffers(finalGrid, MASTER_GRID.baseConfig.nominalThickness, stats.minThickness, stats.maxThickness, colorMode);
+    
+    const plates = MASTER_GRID.plates.map(p => ({
+        id: p.name,
+        fileName: p.name,
+        ...p.config
+    })) as Plate[];
     
     self.postMessage({
-        type: 'DONE',
+        type: 'FINALIZED',
         displacementBuffer,
         colorBuffer,
         gridMatrix: finalGrid,
         stats,
         condition,
-        plates: MASTER_GRID.plates,
+        plates: plates,
     }, [displacementBuffer.buffer, colorBuffer.buffer]);
 }
 
@@ -258,33 +263,30 @@ self.onmessage = async (event: MessageEvent<any>) => {
             return;
         }
         if (type === 'INIT') {
-            const { file, nominalThickness, colorMode, assetType, pipeOuterDiameter, pipeLength } = payload;
-            self.postMessage({ type: 'PROGRESS', progress: 10, message: 'Parsing initial file...' });
+            const { file, config } = payload as { file: { name: string, buffer: ArrayBuffer }, config: ProcessConfig };
+            self.postMessage({ type: 'PROGRESS' });
             const points = parseFileToGrid(file);
 
             if (points.length === 0 || points[0].length === 0) {
                 throw new Error("Parsing resulted in empty data grid. Please check file format and content.");
             }
             
-            const plate: Plate = { id: file.name, fileName: file.name, rawGridData: [], processedData: [], stats: {} as InspectionStats, metadata: [], assetType, nominalThickness };
-
             MASTER_GRID = {
                 points,
                 width: points[0].length,
                 height: points.length,
-                plates: [plate],
-                assetType,
-                nominalThickness,
-                pipeOuterDiameter,
-                pipeLength,
+                plates: [{ name: file.name, config, mergeConfig: null }],
+                baseConfig: config,
             };
-            generateResponse(colorMode);
+            
+            self.postMessage({ type: 'STAGED', dimensions: { width: MASTER_GRID.width, height: MASTER_GRID.height }});
+
         } else if (type === 'MERGE') {
             if (!MASTER_GRID) {
                 throw new Error("Cannot merge: Initial file not processed yet.");
             }
-            const { file, mergeConfig, colorMode } = payload as { file: { name: string, buffer: ArrayBuffer }, mergeConfig: MergeFormValues, colorMode: ColorMode };
-            self.postMessage({ type: 'PROGRESS', progress: 10, message: `Parsing ${file.name}...` });
+            const { file, mergeConfig } = payload as { file: { name: string, buffer: ArrayBuffer }, mergeConfig: MergeFormValues };
+            self.postMessage({ type: 'PROGRESS' });
 
             const newPoints = parseFileToGrid(file);
             const { direction, start: offset } = mergeConfig;
@@ -332,19 +334,14 @@ self.onmessage = async (event: MessageEvent<any>) => {
                 MASTER_GRID.width = width;
                 MASTER_GRID.height = height;
             }
-            // Future: Implement 'left' and 'top'
             
-            const plate: Plate = { id: file.name, fileName: file.name, rawGridData: [], processedData: [], stats: {} as InspectionStats, metadata: [], assetType: MASTER_GRID.assetType, nominalThickness: MASTER_GRID.nominalThickness };
-            MASTER_GRID.plates.push(plate);
+            MASTER_GRID.plates.push({ name: file.name, config: MASTER_GRID.baseConfig, mergeConfig });
+            self.postMessage({ type: 'STAGED', dimensions: { width: MASTER_GRID.width, height: MASTER_GRID.height }});
 
-            generateResponse(colorMode);
-
-        } else if (type === 'REPROCESS' || type === 'RECOLOR') {
-             if (!MASTER_GRID) throw new Error("Cannot re-process: No data loaded.");
-             if (type === 'REPROCESS') {
-                MASTER_GRID.nominalThickness = payload.nominalThickness;
-             }
-             generateResponse(payload.colorMode);
+        } else if (type === 'FINALIZE') {
+             finalizeProcessing(payload.colorMode);
+        } else if (type === 'RECOLOR') {
+             finalizeProcessing(payload.colorMode);
         }
     } catch (error: any) {
         console.error("Worker CRASH:", error);

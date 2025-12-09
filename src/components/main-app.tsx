@@ -6,7 +6,6 @@ import React, { useState, useEffect, useRef } from "react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useToast } from "@/hooks/use-toast"
 import { useInspectionStore } from "@/store/use-inspection-store"
-import { generateCorrosionInsight } from "@/ai/flows/generate-corrosion-insight"
 import type { ThreeDeeViewRef } from "./tabs/three-dee-view-tab"
 
 import { SetupTab } from "./tabs/setup-tab"
@@ -17,8 +16,6 @@ import { ThreeDeeViewTab } from "./tabs/three-dee-view-tab"
 import { ReportTab } from "./tabs/report-tab"
 import { FileUp, GanttChartSquare, Image, Info, Table, FileText, Loader2 } from "lucide-react"
 import { Card, CardContent } from "./ui/card"
-import { DataVault } from "@/store/data-vault"
-
 
 const TABS = [
   { value: "setup", label: "Setup", icon: FileUp },
@@ -31,63 +28,20 @@ const TABS = [
 
 export function MainApp() {
   const { toast } = useToast()
-  const { inspectionResult, isLoading, loadingProgress, updateAIInsight, reprocessPlates } = useInspectionStore()
-  const [activeTab, setActiveTab] = useState("setup")
+  const { inspectionResult, isLoading, loadingProgress, isFinalizing, activeTab, setActiveTab } = useInspectionStore()
   const threeDeeViewRef = useRef<ThreeDeeViewRef>(null);
 
-  // Effect to automatically switch tabs after processing
   useEffect(() => {
-    if (inspectionResult && !isLoading && activeTab === 'setup') {
-        // Only switch away from setup ONCE on the very first file load
-        if (inspectionResult.plates.length === 1) {
-            setActiveTab("info");
-            toast({
-                title: "Processing Complete",
-                description: `Data for ${inspectionResult.plates[0].fileName} has been loaded.`,
-            });
-        } else if (inspectionResult.plates.length > 1) {
-            // For subsequent merges, just show a toast but STAY on the setup tab
-            toast({
-                title: "Merge Complete",
-                description: `Successfully merged ${inspectionResult.plates.length} plates. You can add another file.`,
-            });
-        }
+    // This effect now only runs when the final processing is complete
+    if (inspectionResult && !isFinalizing && activeTab === 'setup') {
+      setActiveTab("info");
+      toast({
+        title: "Processing Complete",
+        description: `Project with ${inspectionResult.plates.length} plates has been loaded.`,
+      });
     }
-  }, [inspectionResult, isLoading, toast, activeTab]);
+  }, [inspectionResult, isFinalizing, toast, activeTab, setActiveTab]);
   
-  // Temporarily disabled for rendering test
-  // useEffect(() => {
-  //   if (inspectionResult && DataVault.stats && !inspectionResult.aiInsight) {
-  //      generateCorrosionInsight({
-  //         assetType: inspectionResult.assetType,
-  //         nominalThickness: inspectionResult.nominalThickness,
-  //         minThickness: DataVault.stats.minThickness,
-  //         maxThickness: DataVault.stats.maxThickness,
-  //         avgThickness: DataVault.stats.avgThickness,
-  //         areaBelow80: DataVault.stats.areaBelow80,
-  //         areaBelow70: DataVault.stats.areaBelow70,
-  //         areaBelow60: DataVault.stats.areaBelow60,
-  //         worstLocationX: DataVault.stats.worstLocation.x,
-  //         worstLocationY: DataVault.stats.worstLocation.y,
-  //         minPercentage: DataVault.stats.minPercentage,
-  //       }).then(aiInsight => {
-  //         updateAIInsight(aiInsight);
-  //         toast({
-  //           title: "AI Insight Generated",
-  //           description: "Corrosion analysis and recommendations are now available in the Info tab.",
-  //         });
-  //       }).catch(err => {
-  //         console.error("AI Insight Error:", err);
-  //          updateAIInsight({ condition: "Error", recommendation: "Could not generate AI insight." });
-  //         toast({
-  //           variant: "destructive",
-  //           title: "AI Insight Failed",
-  //           description: "Could not generate AI-powered insights for the latest data.",
-  //         });
-  //       });
-  //   }
-  // }, [inspectionResult, updateAIInsight, toast]);
-
 
   const isDataLoaded = !!inspectionResult;
 
@@ -110,15 +64,15 @@ export function MainApp() {
           zIndex: -1,
         };
 
-  if (isLoading) {
+  if (isFinalizing) {
     return (
       <div className="flex-grow flex items-center justify-center">
         <Card className="max-w-md">
           <CardContent className="pt-6 text-center">
             <Loader2 className="mx-auto h-12 w-12 animate-spin text-primary" />
-            <h3 className="mt-4 text-lg font-semibold font-headline">Processing Data...</h3>
+            <h3 className="mt-4 text-lg font-semibold font-headline">Finalizing Project...</h3>
             <p className="mt-1 text-sm text-muted-foreground">
-              Please wait while we analyze the inspection files.
+              Please wait while we generate textures and statistics for the merged asset.
             </p>
             <progress value={loadingProgress} max="100" className="w-full mt-4" />
           </CardContent>
@@ -171,10 +125,9 @@ const DataPlaceholder = () => (
             <FileUp className="mx-auto h-12 w-12 text-muted-foreground" />
             <h3 className="mt-4 text-lg font-semibold font-headline">No Data Loaded</h3>
             <p className="mt-1 text-sm text-muted-foreground">
-                Please go to the 'Setup' tab to upload an inspection file.
+                Go to the 'Setup' tab to start a new project.
             </p>
         </CardContent>
     </Card>
 )
-
     

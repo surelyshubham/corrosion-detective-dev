@@ -5,11 +5,22 @@ import { create } from 'zustand';
 import type { MergedInspectionResult, AIInsight, Plate, MergedGrid, AssetType, InspectionStats } from '@/lib/types';
 import { DataVault } from './data-vault';
 import { type MergeFormValues } from '@/components/tabs/merge-alert-dialog';
+import { useToast } from '@/hooks/use-toast';
+
+export type StagedFile = {
+  name: string;
+  mergeConfig: MergeFormValues | null;
+}
 
 export interface WorkerOutput {
-  type: 'PROGRESS' | 'DONE' | 'ERROR';
+  type: 'STAGED' | 'FINALIZED' | 'ERROR' | 'PROGRESS';
   message?: string;
   progress?: number;
+  
+  // STAGED output
+  dimensions?: { width: number; height: number };
+
+  // FINALIZED output
   plates?: Plate[];
   displacementBuffer?: Float32Array;
   colorBuffer?: Uint8Array;
@@ -21,22 +32,36 @@ export interface WorkerOutput {
 export type ColorMode = 'mm' | '%';
 
 export type ProcessConfig = {
+    assetType: AssetType;
+    nominalThickness: number;
     pipeOuterDiameter?: number;
     pipeLength?: number;
 }
 
 interface InspectionState {
+  // Final result
   inspectionResult: MergedInspectionResult | null;
-  isLoading: boolean;
+  
+  // Staging state
+  stagedFiles: StagedFile[];
+  projectDimensions: { width: number; height: number } | null;
+
+  // UI state
+  isLoading: boolean; // For staging files
+  isFinalizing: boolean; // For final processing
   loadingProgress: number;
   error: string | null;
-  processFirstFile: (file: File, nominalThickness: number, assetType: AssetType, config: ProcessConfig) => void;
-  mergeNextFile: (file: File, mergeConfig: MergeFormValues) => void;
+  activeTab: string;
+  setActiveTab: (tab: string) => void;
+
+  // Actions
+  addFileToStage: (file: File, config: ProcessConfig, mergeConfig: MergeFormValues | null) => void;
+  finalizeProject: () => void;
+  resetProject: () => void;
+  
+  // Interactive state
   selectedPoint: { x: number; y: number } | null;
   setSelectedPoint: (point: { x: number; y: number } | null) => void;
-  updateAIInsight: (insight: AIInsight | null) => void;
-  reprocessPlates: (newNominalThickness: number) => void;
-  resetProject: () => void;
   colorMode: ColorMode;
   setColorMode: (mode: ColorMode) => void;
   dataVersion: number;
@@ -54,15 +79,23 @@ export const useInspectionStore = create<InspectionState>()(
           const { type, message, progress, ...data } = event.data;
           
           if (type === 'PROGRESS') {
-            set({ isLoading: true, loadingProgress: progress || 0, error: null });
+             if (get().isFinalizing) {
+                set({ loadingProgress: progress || 0 });
+             } else {
+                set({ isLoading: true, error: null });
+             }
           } else if (type === 'ERROR') {
             console.error("Worker Error:", message);
-            set({ isLoading: false, error: message || "An unknown error occurred in the worker." });
-          } else if (type === 'DONE') {
+            useToast.getState().toast({ variant: 'destructive', title: 'Processing Error', description: message });
+            set({ isLoading: false, isFinalizing: false, error: message || "An unknown error occurred in the worker." });
+          } else if (type === 'STAGED') {
+            useToast.getState().toast({ title: 'File Staged', description: `${get().stagedFiles.slice(-1)[0]?.name} has been added.` });
+            set({ isLoading: false, projectDimensions: data.dimensions || null });
+          } else if (type === 'FINALIZED') {
              if (data.displacementBuffer && data.colorBuffer && data.gridMatrix && data.stats && data.condition && data.plates) {
                 
                 if (data.stats.totalPoints === 0) {
-                    set({ isLoading: false, error: "Parsing Failed: No data points found in the file." });
+                    set({ isFinalizing: false, error: "Processing Failed: No data points found in the project." });
                     return;
                 }
 
@@ -71,29 +104,26 @@ export const useInspectionStore = create<InspectionState>()(
                 DataVault.gridMatrix = data.gridMatrix;
                 DataVault.stats = data.stats;
                 
-                const currentResult = get().inspectionResult;
-                const assetType = currentResult?.assetType || (get() as any).assetType || 'Plate';
-                
                 const newResult: MergedInspectionResult = {
                     plates: data.plates,
                     mergedGrid: data.gridMatrix,
                     nominalThickness: data.stats.nominalThickness,
                     stats: data.stats,
                     condition: data.condition,
-                    aiInsight: currentResult?.aiInsight || null, // Preserve existing AI insight
-                    assetType: assetType,
-                    pipeOuterDiameter: currentResult?.pipeOuterDiameter,
-                    pipeLength: currentResult?.pipeLength
+                    aiInsight: null, // AI insight is generated after this
+                    assetType: data.plates[0].assetType,
+                    pipeOuterDiameter: data.plates[0].pipeOuterDiameter,
+                    pipeLength: data.plates[0].pipeLength
                 };
                 
                 set(state => ({
                     inspectionResult: newResult,
-                    isLoading: false,
+                    isFinalizing: false,
                     error: null,
                     dataVersion: state.dataVersion + 1,
                 }));
             } else {
-                 set({ isLoading: false, error: "Worker returned incomplete data." });
+                 set({ isFinalizing: false, error: "Worker returned incomplete data after finalization." });
             }
           }
         };
@@ -101,91 +131,62 @@ export const useInspectionStore = create<InspectionState>()(
 
       return {
         inspectionResult: null,
+        stagedFiles: [],
+        projectDimensions: null,
         isLoading: false,
+        isFinalizing: false,
         loadingProgress: 0,
         selectedPoint: null,
         colorMode: 'mm',
         dataVersion: 0,
         error: null,
-        
+        activeTab: 'setup',
+
+        setActiveTab: (tab) => set({ activeTab: tab }),
         setSelectedPoint: (point) => set({ selectedPoint: point }),
         
         setColorMode: (mode) => {
             const currentResult = get().inspectionResult;
-            if (!worker || !currentResult) return;
-            set({ colorMode: mode, isLoading: true, loadingProgress: 50, error: null });
+            if (!worker || !currentResult) return; // Recolor only works on a finalized project
+            set({ isFinalizing: true, loadingProgress: 50, error: null });
             
              worker.postMessage({
                 type: 'RECOLOR',
-                nominalThickness: currentResult.nominalThickness,
                 colorMode: mode,
             });
         },
 
-        processFirstFile: async (file, nominalThickness, assetType, config) => {
+        addFileToStage: async (file, config, mergeConfig) => {
             if (!worker) return;
-            set({ isLoading: true, loadingProgress: 0, error: null, inspectionResult: null });
+            set({ isLoading: true, error: null });
             
-            // This is a temporary shell, the worker will send the full data
-            const tempResult: MergedInspectionResult = {
-                nominalThickness, assetType, ...config,
-                plates: [], mergedGrid: [], stats: {} as InspectionStats, condition: 'N/A', aiInsight: null
-            };
-            set({ inspectionResult: tempResult });
+            const newStagedFile: StagedFile = { name: file.name, mergeConfig };
+            set(state => ({ stagedFiles: [...state.stagedFiles, newStagedFile] }));
 
             const buffer = await file.arrayBuffer();
-            const message = {
-                type: 'INIT',
-                file: { name: file.name, buffer: buffer },
-                nominalThickness,
-                colorMode: get().colorMode,
-                assetType,
-                ...config
-            };
-            worker?.postMessage(message, [buffer]);
+            const isFirstFile = get().stagedFiles.length === 1;
+
+            if (isFirstFile) {
+                worker?.postMessage({
+                    type: 'INIT',
+                    file: { name: file.name, buffer: buffer },
+                    config: config
+                }, [buffer]);
+            } else {
+                 worker?.postMessage({
+                    type: 'MERGE',
+                    file: { name: file.name, buffer: buffer },
+                    mergeConfig: mergeConfig,
+                }, [buffer]);
+            }
         },
 
-        mergeNextFile: async (file, mergeConfig) => {
-            if (!worker) return;
-            set({ isLoading: true, loadingProgress: 0, error: null });
-            const buffer = await file.arrayBuffer();
-            const message = {
-                type: 'MERGE',
-                file: { name: file.name, buffer: buffer },
-                mergeConfig: mergeConfig,
-                colorMode: get().colorMode,
-            };
-            worker?.postMessage(message, [buffer]);
+        finalizeProject: () => {
+            if (!worker || get().stagedFiles.length === 0) return;
+            set({ isFinalizing: true, loadingProgress: 0, error: null });
+            worker.postMessage({ type: 'FINALIZE', colorMode: get().colorMode });
         },
         
-        updateAIInsight: (aiInsight) => {
-          const currentResult = get().inspectionResult;
-          if (currentResult) {
-            set({
-              inspectionResult: {
-                ...currentResult,
-                aiInsight,
-              },
-            });
-          }
-        },
-        
-        reprocessPlates: (newNominalThickness: number) => {
-            if (!worker) return;
-             set(state => ({ 
-                isLoading: true,
-                loadingProgress: 0,
-                error: null,
-                inspectionResult: state.inspectionResult ? { ...state.inspectionResult, nominalThickness: newNominalThickness } : null
-            }));
-            
-            worker.postMessage({
-                type: 'REPROCESS',
-                nominalThickness: newNominalThickness,
-                colorMode: get().colorMode,
-            });
-        },
-
         resetProject: () => {
             if (!worker) return;
             worker.postMessage({ type: 'RESET' });
@@ -193,7 +194,18 @@ export const useInspectionStore = create<InspectionState>()(
             DataVault.colorBuffer = null;
             DataVault.gridMatrix = null;
             DataVault.stats = null;
-            set({ inspectionResult: null, selectedPoint: null, isLoading: false, dataVersion: 0, error: null, loadingProgress: 0 });
+            set({ 
+                inspectionResult: null, 
+                stagedFiles: [],
+                projectDimensions: null,
+                selectedPoint: null, 
+                isLoading: false, 
+                isFinalizing: false,
+                dataVersion: 0, 
+                error: null, 
+                loadingProgress: 0,
+                activeTab: 'setup'
+            });
         }
       }
     }
