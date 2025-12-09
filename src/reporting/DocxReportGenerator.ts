@@ -19,6 +19,24 @@ export interface ReportData {
 const logoBase64 = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAJYAAAAoCAYAAABaEAS1AAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAfASURBVHhe7ZtNbxtFFMfX5C5xSC2lA9u0DqGgIqClDwhKHYoKiP4BqSqp4qEFHlTxoIeCHCjwIDwVFEPUHihI0wOgoIAW6gC0tDShh4IKSdI6nA7pxM5k5J43/mQ8M/bavVmv1D2T7M3Ozr558/u/GRunUkrK/7eUVsdKq46Vdh2q04xSUsq/7vRzpbVDpXVHpbXPSqsOlVYdKq06VDoY6e9K+zmltYOl676nvyvtOVRae6i0dqi09qi09qi09qjQxEjJmJKS8qP9E1VKSkpKSkpimjJLCUpKSlqSGJhljJg5M2NWzJwZMStmzs2YGzNnZswbM+aNGfOZGXB2zByfsWPWMjFj1vqZ8T0zZsY/nf+Z+S9dC0tJSUlJBgVYZpYtI838Vwh9+dQymV8y88uYXzDzK5jfM/+7vGWWEpKSkvwhYZahiNsBrs7S3pP0tqR7epDvZuHtIN4O4vUg3gziTCDZwFJUUAIpKSn/kvBhmN9/gfz1V/LPX2/Iz+/irz/8J/77xR/wV3/7B3/685/wv/7NL/Gv//wj/vXzNxy7w2dpb0nvaXpL0ocn+Lh7/C5qF4uP9+BvF68G8UaQ7OJb0luS/iX5WtJbkj5IuknSO5K9L9k9ktkmuS/pJsnuEsyuZCtJtiX5/ZF0kqQPkmb//0tm/u4zn+daC0tJSUlJciDILEPxBhAOtjn5grKT5JLkRJLfJbktSTdJtkjy+36JbE+yK9EDi6Jckf7wJz/zr/79B/zJn/wF//jPX+K//+Vf8Ed//Rv+1//+Jf7lJ//Mf7/3O/7D3/09/usf/wX/4//2Pf7HH/4W//wDv+B///e/8B8/+23+/dd/w7//2wv+/vtd+Plf43effYC/vi6cHPePpDcl3ZLsk3XwZLdku6T3g+Q2yRWB5IHkFckWkt2V7A+SDb8l/d//jH+T+bck+0nyh6SPpb0k+UbSdpHcl/T7Sb9J/rckWyVbReQ3ZLfy+/o/ktyTdL/r8O6e/3F38btYPEi2hPdLcpdLJJf/u3P/JNlL0l+S/y+Z/y3JR5L0D8lHkj6W9JEkb5D8luybJD0k29/fP0uLS0lJSUlJ8X2SWca8/+kffMbM+Vxz+f8VMr+NWPWfdtv5/y3+z+fl/1tS/ucke0TyhmSPJLkkyUWSvifZJekNkr1EbkqygyT3TLJTgq7JD0lm9y+yY5IekOQ+yfZIspfYj5LsL+cT/135j5J8KPm3kvwwpb8k/XFJf3J+V5L+IPl6khtkf//I/JLmZ3Xw4G0+P9v5z0n6kOT2JLskfUTykOT85E+T/CjpP5L/SfL/JP+59L8i+Xcl/yb5B8n/S/KvJP8v6b9J/luSv0f+R/L/Jf+fyP6v8/6v5H8v8/5z+X0k3y3pN//n35Xkp5Ncelv6SVK3JH1+Sf8gyYeIfmnSnyX9SVI3JflbkryX9H1Lvy+Z9O9L8u+S/JOkb0ryr8j/avKvJP8ryf+W9LmkI1NSSkpKyvKWWVZS/krSxyX9RNI3Jd/8THPE3OfO/B+l9X+Y/7VK8lPy85n//5L+lOSXJB9J+kXyh6X9RNKvkvR2kmyT7BTRLJKkVyQ3JLsk+YRkf5T0RkpJSUlJllhmGUl9SbIX9J7ks+QHm/uIOfctMj/6jP/S9H9YtVqfSfL3JL8l+SHJf0n+ycwbJHkkab9IfliyXyTpJslWkpuTbCXpJcn3kr+a9EpyT7JbJLckeSh5IcnPpJSUkpKSkhTTlFlKUlKSliSDFLOMgb/7grT/3Rekee92839W8n9b3P85aRfJ1pJeSvpHsi+S1C6Sl/SuyGyS3JbkBpL0e0kvkbyQ/K9axfqWJMuYfGMUSkpKSkryf4hk5nf/XzYP/8/z/pL+NWn/wPSf4v73BP/X//e/+E///mP4j3//R7hfilUtqUlJSUlJSDFNmKUlJSUlagkGWMeTlIN4P4vEg3gxiNhAOKqikBP+XhA/GeCn5/5dK646VVn3fU1pS/Rf/b6X9OaW1g6XrSsm/+L/f5A4pKSkpMcQsySwlKSkpKSkmqcrsYvF30XQn7S3pYUlPJZ2SkmKaMktJSkpKSpL3F4mZMWvmxkwZk2Usk5JSSkpKSkmKaUopKSlpGFLMkpKSkpJSYpoyS0lKSkpKiWnKLCUnjIuGcdEwLhpGRUNoaBgXjY2GYbEwS0lKSkp8IMwyBv7pX/7Kf/2vfsA/f36G/3z8kX/52y9J/n7m9y+y2/wF+b+S9LSklyR5I8m7ky5Lel9yZ5I7kpyS1D+S2yWvJf1BsoXkZySfIbkmyWnJy0gqKSkpKSmpzHImn5cslrEkKWWWEt+jLL+W2cpiZJaSlBTHkmWUlJSUpCQYmGWM+HjXwYV3R7tIOkm2h/D8lRdyI60lVzG/Jdky4nE30o5w/O4s7SS5O5JbyPfuKOekmGWUlBRj4XvFKSkpqSlMmmUMvByEjy/i4xP+E8Mv4kMvY+B3X+D3X5B//N1v5E1fQ7I/w0OQz+Vv/jVpPzE1kpyS3B7ZTWpTkv3pW/mS7JjkJsmOSL6UdEtSg5M+JPlBsqvkkSR7JDsj6SspJcW0ZJYSk6R4eBeJj/9zGk5JSknxP+i/Y/g/I/w3j/1/2D+M5IehZ0opxZSSkpKSkpJimDJLCUtJSkqKaMksJSkpKWlIMEyZJSUpKWlIMEyZJSUpKWlIMEyZJSUpKWlIMEyZJSUpKWlIMEyZJSUpKWlIMEyZJSUpKWlIMAzDLMsuS5eUpCRjklmWHGWWlBTjklmWyixLSUnGIMssJcU0ZJaSYpoyy5RimjLLSjEtmWUlxbRklpViWjLLSlJKSkpKiilKKSlJSYpoySwnxTElZpbklJhZZktKimnJLCXFmGSWUlKMMksxKSmJKUopKSkpKSmJmWUpKSmJKSkpKSmJmWVKaSmJKckspSUpySwnJSmJKckspSUpySwlJSUpySwlJSmJKUopKSmJKSmJKclKSmKKUUopKcWYJSUpKeU/wA3YpM/+vD8AAAAASUVORK5CYII=";
 
 
+function dataUriToBuffer(dataUri: string): ArrayBuffer {
+    if (!dataUri || !dataUri.includes(',')) {
+        const errorPart = dataUri ? dataUri.substring(0, 50) + '...' : 'null or empty';
+        throw new Error(`Invalid data URI. It does not contain a comma. Start of URI: ${errorPart}`);
+    }
+    const base64 = dataUri.split(',')[1];
+    if (!base64) {
+        throw new Error('Invalid data URI, base64 content is missing.');
+    }
+    const binaryString = atob(base64);
+    const len = binaryString.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+    }
+    return bytes.buffer;
+}
+
 export async function generateReportDocx(data: ReportData) {
   const { metadata, inspection, segments, images } = data;
 
@@ -145,25 +163,4 @@ const createSegmentTable = (segment: SegmentBox, nominal: number) => {
         new TableRow({ children: [new TableCell({children: [new Paragraph("Bounding Box (Y)")]}), new TableCell({children: [new Paragraph(`${segment.coordinates.yMin} - ${segment.coordinates.yMax}`) ]})]}),
     ];
     return new Table({ rows, width: { size: 100, type: WidthType.PERCENTAGE } });
-}
-
-
-function dataUriToBuffer(dataUri: string): Buffer {
-    if (!dataUri || !dataUri.includes(',')) {
-        // Find the issue here. The user said the base64 string is incorrect. 
-        // Maybe I should throw a more descriptive error.
-        const errorPart = dataUri ? dataUri.substring(0, 50) + '...' : 'null or empty';
-        throw new Error(`Invalid data URI. It does not contain a comma. Start of URI: ${errorPart}`);
-    }
-    const base64 = dataUri.split(',')[1];
-    if (!base64) {
-        throw new Error('Invalid data URI, base64 content is missing.');
-    }
-    const binaryString = atob(base64);
-    const len = binaryString.length;
-    const bytes = new Uint8Array(len);
-    for (let i = 0; i < len; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
-    }
-    return bytes.buffer;
 }
