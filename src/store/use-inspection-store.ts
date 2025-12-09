@@ -2,10 +2,11 @@
 "use client"
 
 import { create } from 'zustand';
-import type { MergedInspectionResult, AIInsight, Plate, MergedGrid, AssetType, InspectionStats } from '@/lib/types';
+import type { MergedInspectionResult, AIInsight, Plate, MergedGrid, AssetType, InspectionStats, SegmentBox } from '@/lib/types';
 import { DataVault } from './data-vault';
 import { type MergeFormValues } from '@/components/tabs/merge-alert-dialog';
 import { toast } from '@/hooks/use-toast';
+import { type ThicknessConflict } from '../workers/data-processor.worker';
 
 export type StagedFile = {
   name: string;
@@ -13,7 +14,7 @@ export type StagedFile = {
 }
 
 export interface WorkerOutput {
-  type: 'STAGED' | 'FINALIZED' | 'ERROR' | 'PROGRESS';
+  type: 'STAGED' | 'FINALIZED' | 'ERROR' | 'PROGRESS' | 'THICKNESS_CONFLICT';
   message?: string;
   progress?: number;
   
@@ -27,6 +28,10 @@ export interface WorkerOutput {
   gridMatrix?: MergedGrid;
   stats?: InspectionStats & { nominalThickness: number };
   condition?: MergedInspectionResult['condition'];
+  segments?: SegmentBox[];
+  
+  // CONFLICT output
+  conflict?: ThicknessConflict;
 }
 
 export type ColorMode = 'mm' | '%';
@@ -45,10 +50,14 @@ interface InspectionState {
   // Staging state
   stagedFiles: StagedFile[];
   projectDimensions: { width: number; height: number } | null;
+  thicknessConflict: ThicknessConflict | null;
+  setThicknessConflict: (conflict: ThicknessConflict | null) => void;
+  resolveThicknessConflict: (resolution: 'useOriginal' | 'useNew' | { type: 'useCustom', value: number }) => void;
+
 
   // UI state
-  isLoading: boolean; // For staging files
-  isFinalizing: boolean; // For final processing
+  isLoading: boolean;
+  isFinalizing: boolean;
   loadingProgress: number;
   error: string | null;
   activeTab: string;
@@ -58,6 +67,7 @@ interface InspectionState {
   addFileToStage: (file: File, config: ProcessConfig, mergeConfig: MergeFormValues | null) => void;
   finalizeProject: () => void;
   resetProject: () => void;
+  setSegmentsForThreshold: (threshold: number) => void;
   
   // Interactive state
   selectedPoint: { x: number; y: number } | null;
@@ -90,9 +100,11 @@ export const useInspectionStore = create<InspectionState>()(
             set({ isLoading: false, isFinalizing: false, error: message || "An unknown error occurred in the worker." });
           } else if (type === 'STAGED') {
             toast({ title: 'File Staged', description: `${get().stagedFiles.slice(-1)[0]?.name} has been added.` });
-            set({ isLoading: false, projectDimensions: data.dimensions || null });
+            set({ isLoading: false, projectDimensions: data.dimensions || null, thicknessConflict: null });
+          } else if (type === 'THICKNESS_CONFLICT') {
+             set({ isLoading: false, thicknessConflict: data.conflict || null });
           } else if (type === 'FINALIZED') {
-             if (data.displacementBuffer && data.colorBuffer && data.gridMatrix && data.stats && data.condition && data.plates) {
+             if (data.displacementBuffer && data.colorBuffer && data.gridMatrix && data.stats && data.condition && data.plates && data.segments) {
                 
                 if (data.stats.totalPoints === 0) {
                     set({ isFinalizing: false, error: "Processing Failed: No data points found in the project." });
@@ -110,10 +122,11 @@ export const useInspectionStore = create<InspectionState>()(
                     nominalThickness: data.stats.nominalThickness,
                     stats: data.stats,
                     condition: data.condition,
-                    aiInsight: null, // AI insight is generated after this
+                    aiInsight: null,
                     assetType: data.plates[0].assetType,
                     pipeOuterDiameter: data.plates[0].pipeOuterDiameter,
-                    pipeLength: data.plates[0].pipeLength
+                    pipeLength: data.plates[0].pipeLength,
+                    segments: data.segments,
                 };
                 
                 set(state => ({
@@ -133,6 +146,7 @@ export const useInspectionStore = create<InspectionState>()(
         inspectionResult: null,
         stagedFiles: [],
         projectDimensions: null,
+        thicknessConflict: null,
         isLoading: false,
         isFinalizing: false,
         loadingProgress: 0,
@@ -144,10 +158,25 @@ export const useInspectionStore = create<InspectionState>()(
 
         setActiveTab: (tab) => set({ activeTab: tab }),
         setSelectedPoint: (point) => set({ selectedPoint: point }),
+        setThicknessConflict: (conflict) => set({ thicknessConflict: conflict }),
+        
+        resolveThicknessConflict: (resolution) => {
+            const conflict = get().thicknessConflict;
+            if (!worker || !conflict) return;
+
+            set({ isLoading: true, thicknessConflict: null });
+            
+            worker.postMessage({
+                type: 'MERGE',
+                file: { name: conflict.fileName, buffer: conflict.fileBuffer },
+                mergeConfig: conflict.mergeConfig,
+                resolution: resolution,
+            }, [conflict.fileBuffer]);
+        },
         
         setColorMode: (mode) => {
             const currentResult = get().inspectionResult;
-            if (!worker || !currentResult) return; // Recolor only works on a finalized project
+            if (!worker || !currentResult) return;
             set({ isFinalizing: true, loadingProgress: 50, error: null });
             
              worker.postMessage({
@@ -176,6 +205,7 @@ export const useInspectionStore = create<InspectionState>()(
                  worker?.postMessage({
                     type: 'MERGE',
                     file: { name: file.name, buffer: buffer },
+                    config: config,
                     mergeConfig: mergeConfig,
                 }, [buffer]);
             }
@@ -184,7 +214,12 @@ export const useInspectionStore = create<InspectionState>()(
         finalizeProject: () => {
             if (!worker || get().stagedFiles.length === 0) return;
             set({ isFinalizing: true, loadingProgress: 0, error: null });
-            worker.postMessage({ type: 'FINALIZE', colorMode: get().colorMode });
+            worker.postMessage({ type: 'FINALIZE', colorMode: get().colorMode, threshold: 80 });
+        },
+        
+        setSegmentsForThreshold: (threshold) => {
+            if (!worker || !get().inspectionResult) return;
+            worker.postMessage({ type: 'RESEGMENT', threshold: threshold });
         },
         
         resetProject: () => {

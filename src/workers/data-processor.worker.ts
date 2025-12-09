@@ -1,45 +1,74 @@
 
 import * as XLSX from 'xlsx';
-import type { MergedGrid, InspectionStats, Condition, Plate, AssetType } from '../lib/types';
+import type { MergedGrid, InspectionStats, Condition, Plate, AssetType, SegmentBox, SeverityTier } from '../lib/types';
 import { type MergeFormValues } from '@/components/tabs/merge-alert-dialog';
 import { type ProcessConfig } from '@/store/use-inspection-store';
 
 type ColorMode = 'mm' | '%';
 
+export interface ThicknessConflict {
+    fileName: string;
+    fileBuffer: ArrayBuffer;
+    originalThickness: number;
+    conflictingThickness: number;
+    mergeConfig: MergeFormValues;
+}
+
 interface MasterGrid {
     points: { plateId: string; rawThickness: number }[][];
     width: number;
     height: number;
-    plates: {name: string, config: ProcessConfig, mergeConfig: MergeFormValues | null}[];
+    plates: { name: string; config: ProcessConfig; mergeConfig: MergeFormValues | null; detectedNominal: number | null }[];
     baseConfig: ProcessConfig;
 }
 
-// The "Worker Vault" - This state persists between messages
 let MASTER_GRID: MasterGrid | null = null;
+let FINAL_GRID: MergedGrid | null = null;
 
-function universalParse(fileBuffer: ArrayBuffer): any[][] {
+function universalParse(fileBuffer: ArrayBuffer, fileName: string): {rows: any[][], detectedNominal: number | null} {
     const workbook = XLSX.read(fileBuffer, { type: 'array' });
     const sheetName = workbook.SheetNames[0];
-    if (!sheetName) {
-        throw new Error("No sheets found in the Excel file.");
-    }
+    if (!sheetName) throw new Error(`No sheets found in ${fileName}.`);
+    
     const sheet = workbook.Sheets[sheetName];
     const rows = XLSX.utils.sheet_to_json<any[]>(sheet, { header: 1 });
-    return rows;
+
+    let detectedNominal: number | null = null;
+    let maxThickness: number | null = null;
+    // Look for nominal thickness in metadata
+    for (let i = 0; i < Math.min(18, rows.length); i++) {
+        const row = rows[i];
+        if (!row || row.length < 2) continue;
+        const key = String(row[0]).toLowerCase();
+        const value = parseFloat(String(row[1]));
+        if (key.includes('nominal thickness') && !isNaN(value)) {
+            detectedNominal = value;
+            break;
+        }
+        if (key.includes('max thickness') && !isNaN(value)) {
+            maxThickness = value;
+        }
+    }
+
+    if (detectedNominal === null && maxThickness !== null) {
+        detectedNominal = maxThickness;
+    }
+
+    return { rows, detectedNominal };
 }
 
 
 function getAbsoluteColor(percentage: number | null): [number, number, number, number] {
-    if (percentage === null) return [128, 128, 128, 255]; // Grey for ND
-    if (percentage < 60) return [255, 0, 0, 255];   // Red
-    if (percentage < 70) return [255, 165, 0, 255]; // Orange
-    if (percentage < 80) return [255, 255, 0, 255]; // Yellow
-    if (percentage < 90) return [0, 255, 0, 255];   // Green
-    return [0, 0, 255, 255];                       // Blue
+    if (percentage === null) return [128, 128, 128, 255]; 
+    if (percentage < 60) return [255, 0, 0, 255];
+    if (percentage < 70) return [255, 165, 0, 255];
+    if (percentage < 80) return [255, 255, 0, 255];
+    if (percentage < 90) return [0, 255, 0, 255];
+    return [0, 0, 255, 255];
 }
 
 function getNormalizedColor(normalizedPercent: number | null): [number, number, number, number] {
-    if (normalizedPercent === null) return [128, 128, 128, 255]; // Grey for ND
+    if (normalizedPercent === null) return [128, 128, 128, 255];
     const hue = 240 * (1 - normalizedPercent);
     const saturation = 1;
     const lightness = 0.5;
@@ -57,16 +86,10 @@ function getNormalizedColor(normalizedPercent: number | null): [number, number, 
 }
 
 function computeStats(grid: MergedGrid, nominal: number) {
-    let minThickness = Infinity;
-    let maxThickness = -Infinity;
-    let sumThickness = 0;
-    let validPointsCount = 0;
-    let countND = 0;
-    let areaBelow80 = 0, areaBelow70 = 0, areaBelow60 = 0;
-    let worstLocation = { x: 0, y: 0, value: 0 };
-    let bestLocation = { x: 0, y: 0, value: 0 };
-    const height = grid.length;
-    const width = grid[0]?.length || 0;
+    let minThickness = Infinity, maxThickness = -Infinity, sumThickness = 0;
+    let validPointsCount = 0, countND = 0, areaBelow80 = 0, areaBelow70 = 0, areaBelow60 = 0;
+    let worstLocation = { x: 0, y: 0, value: 0 }, bestLocation = { x: 0, y: 0, value: 0 };
+    const height = grid.length, width = grid[0]?.length || 0;
 
     for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
@@ -106,10 +129,8 @@ function computeStats(grid: MergedGrid, nominal: number) {
         areaBelow80: totalScannedPoints > 0 ? (areaBelow80 / totalScannedPoints) * 100 : 0,
         areaBelow70: totalScannedPoints > 0 ? (areaBelow70 / totalScannedPoints) * 100 : 0,
         areaBelow60: totalScannedPoints > 0 ? (areaBelow60 / totalScannedPoints) * 100 : 0,
-        countND,
-        totalPoints: height * width,
-        worstLocation,
-        bestLocation,
+        countND, totalPoints: height * width,
+        worstLocation, bestLocation,
         gridSize: { width, height },
         scannedArea: totalScannedPoints / 1_000_000,
     };
@@ -133,19 +154,15 @@ function createFinalGrid(rawMergedGrid: {plateId: string, rawThickness: number}[
     for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
             const cell = rawMergedGrid[y][x];
-            let effectiveThickness: number | null = null;
-            let percentage: number | null = null;
-            
+            let effectiveThickness: number | null = null, percentage: number | null = null;
             if (cell && cell.rawThickness > 0) {
                 effectiveThickness = Math.min(cell.rawThickness, nominalThickness);
                 percentage = (effectiveThickness / nominalThickness) * 100;
             }
-
             finalGrid[y][x] = {
                 plateId: cell ? cell.plateId : null,
                 rawThickness: cell && cell.rawThickness > 0 ? cell.rawThickness : null,
-                effectiveThickness: effectiveThickness,
-                percentage: percentage,
+                effectiveThickness, percentage
             };
         }
     }
@@ -153,8 +170,7 @@ function createFinalGrid(rawMergedGrid: {plateId: string, rawThickness: number}[
 }
 
 function createBuffers(grid: MergedGrid, nominal: number, min: number, max: number, colorMode: ColorMode) {
-    const height = grid.length;
-    const width = grid[0]?.length || 0;
+    const height = grid.length, width = grid[0]?.length || 0;
     const displacementBuffer = new Float32Array(width * height);
     const colorBuffer = new Uint8Array(width * height * 4);
     const range = max - min;
@@ -167,91 +183,108 @@ function createBuffers(grid: MergedGrid, nominal: number, min: number, max: numb
             
             displacementBuffer[index] = cell.effectiveThickness !== null ? cell.effectiveThickness : nominal;
             
-            let rgba: [number, number, number, number];
-            if (colorMode === '%') {
-                 const normalized = cell.effectiveThickness !== null && range > 0 ? (cell.effectiveThickness - min) / range : null;
-                 rgba = getNormalizedColor(normalized);
-            } else {
-                 rgba = getAbsoluteColor(cell.percentage);
-            }
+            const rgba = colorMode === '%' ? getNormalizedColor(cell.effectiveThickness !== null && range > 0 ? (cell.effectiveThickness - min) / range : null) : getAbsoluteColor(cell.percentage);
             const colorIndex = index * 4;
-            colorBuffer[colorIndex] = rgba[0];
-            colorBuffer[colorIndex + 1] = rgba[1];
-            colorBuffer[colorIndex + 2] = rgba[2];
-            colorBuffer[colorIndex + 3] = rgba[3];
+            [colorBuffer[colorIndex], colorBuffer[colorIndex + 1], colorBuffer[colorIndex + 2], colorBuffer[colorIndex + 3]] = rgba;
         }
     }
     return { displacementBuffer, colorBuffer };
 }
 
-function parseFileToGrid(file: {name: string, buffer: ArrayBuffer}) {
-    const rawData = universalParse(file.buffer);
+function parseFileToGrid(rows: any[][], fileName: string) {
     let headerRow = -1;
-    for (let i = 0; i < Math.min(100, rawData.length); i++) {
-        if (String(rawData[i][0]).trim().toLowerCase() === 'y-pos' && String(rawData[i][1]).trim().toLowerCase() === 'x-pos') {
-            headerRow = i;
-            break;
-        }
-        if (String(rawData[i][0]).trim() === '' && !isNaN(parseFloat(rawData[i][1]))) {
-             headerRow = i;
-             break;
-        }
-        if (i === 18) {
-             headerRow = 18;
-             break;
-        }
+    for (let i = 0; i < Math.min(100, rows.length); i++) {
+        if (String(rows[i][0]).trim().toLowerCase() === 'y-pos' && String(rows[i][1]).trim().toLowerCase() === 'x-pos') { headerRow = i; break; }
+        if (String(rows[i][0]).trim() === '' && !isNaN(parseFloat(rows[i][1]))) { headerRow = i; break; }
+        if (i === 18) { headerRow = 18; break; }
     }
-
-    if (headerRow === -1) {
-        throw new Error(`Could not find a valid header row in ${file.name}. Expected row 19 or a row with Y/X coordinate headers.`);
-    }
-
+    if (headerRow === -1) throw new Error(`Could not find a valid header row in ${fileName}.`);
+    
     const dataGrid: {plateId: string, rawThickness: number}[][] = [];
-    const xCoords = rawData[headerRow].slice(1).map(x => parseFloat(String(x)));
-
-    for (let r = headerRow + 1; r < rawData.length; r++) {
-        const row = rawData[r];
-        if (!row || (row.length < 2 && (row[0] === '' || row[0] === undefined))) continue;
-        
-        const yPos = parseFloat(String(row[0]));
-        if (isNaN(yPos)) continue;
-
-        const cleanRow = row.slice(1).map((val: any) => {
-            const num = parseFloat(val);
-            return isNaN(num) ? -1 : num;
-        });
-
-        if (cleanRow.length > 0) {
-            dataGrid.push(cleanRow.map(val => ({ plateId: file.name, rawThickness: val })));
-        }
+    for (let r = headerRow + 1; r < rows.length; r++) {
+        const row = rows[r];
+        if (!row || (row.length < 2 && (row[0] === '' || row[0] === undefined)) || isNaN(parseFloat(String(row[0])))) continue;
+        const cleanRow = row.slice(1).map((val: any) => ({ plateId: fileName, rawThickness: parseFloat(val) > 0 ? parseFloat(val) : -1 }));
+        if (cleanRow.length > 0) dataGrid.push(cleanRow);
     }
     return dataGrid;
 }
 
-function finalizeProcessing(colorMode: ColorMode) {
-    if (!MASTER_GRID) {
-        throw new Error("Cannot finalize: MASTER_GRID is not initialized.");
+function segmentAndAnalyze(grid: MergedGrid, nominal: number, threshold: number): SegmentBox[] {
+    const height = grid.length, width = grid[0]?.length || 0;
+    const visited: boolean[][] = Array(height).fill(null).map(() => Array(width).fill(false));
+    const segments: SegmentBox[] = [];
+    let segmentIdCounter = 1;
+
+    for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+            const cell = grid[y][x];
+            if (cell && cell.percentage !== null && cell.percentage < threshold && !visited[y][x]) {
+                const points: {x: number, y: number, cell: any}[] = [];
+                const queue: [number, number][] = [[x, y]];
+                visited[y][x] = true;
+                let minThick = Infinity, sumThick = 0, xMin = x, xMax = x, yMin = y, yMax = y;
+
+                while (queue.length > 0) {
+                    const [curX, curY] = queue.shift()!;
+                    const currentCell = grid[curY][curX];
+                    if (currentCell && currentCell.effectiveThickness !== null) {
+                        points.push({ x: curX, y: curY, cell: currentCell });
+                        minThick = Math.min(minThick, currentCell.effectiveThickness);
+                        sumThick += currentCell.effectiveThickness;
+                        xMin = Math.min(xMin, curX); xMax = Math.max(xMax, curX);
+                        yMin = Math.min(yMin, curY); yMax = Math.max(yMax, curY);
+                    }
+                    [[0, -1], [0, 1], [-1, 0], [1, 0]].forEach(([dx, dy]) => {
+                        const nx = curX + dx, ny = curY + dy;
+                        if (nx >= 0 && nx < width && ny >= 0 && ny < height && !visited[ny][nx]) {
+                            const neighbor = grid[ny][nx];
+                            if (neighbor && neighbor.percentage !== null && neighbor.percentage < threshold) {
+                                visited[ny][nx] = true;
+                                queue.push([nx, ny]);
+                            }
+                        }
+                    });
+                }
+                
+                if (points.length > 0) {
+                    const worstPct = (minThick / nominal) * 100;
+                    let tier: SeverityTier = 'Moderate';
+                    if (worstPct < 60) tier = 'Critical';
+                    else if (worstPct < 70) tier = 'Severe';
+
+                    segments.push({
+                        id: segmentIdCounter++,
+                        tier, pointCount: points.length,
+                        worstThickness: minThick,
+                        avgThickness: sumThick / points.length,
+                        severityScore: (1 - minThick / nominal) * points.length,
+                        coordinates: { xMin, xMax, yMin, yMax },
+                        center: { x: Math.round(xMin + (xMax - xMin) / 2), y: Math.round(yMin + (yMax - yMin) / 2) }
+                    });
+                }
+            }
+        }
     }
+    return segments.sort((a, b) => a.worstThickness - b.worstThickness);
+}
+
+function finalizeProcessing(colorMode: ColorMode, threshold: number) {
+    if (!MASTER_GRID) throw new Error("Cannot finalize: MASTER_GRID is not initialized.");
     self.postMessage({ type: 'PROGRESS', progress: 50, message: 'Processing merged data...' });
 
-    const finalGrid = createFinalGrid(MASTER_GRID.points, MASTER_GRID.baseConfig.nominalThickness);
-    const { stats, condition } = computeStats(finalGrid, MASTER_GRID.baseConfig.nominalThickness);
-    const { displacementBuffer, colorBuffer } = createBuffers(finalGrid, MASTER_GRID.baseConfig.nominalThickness, stats.minThickness, stats.maxThickness, colorMode);
+    FINAL_GRID = createFinalGrid(MASTER_GRID.points, MASTER_GRID.baseConfig.nominalThickness);
+    const { stats, condition } = computeStats(FINAL_GRID, MASTER_GRID.baseConfig.nominalThickness);
+    const { displacementBuffer, colorBuffer } = createBuffers(FINAL_GRID, MASTER_GRID.baseConfig.nominalThickness, stats.minThickness, stats.maxThickness, colorMode);
+    const segments = segmentAndAnalyze(FINAL_GRID, MASTER_GRID.baseConfig.nominalThickness, threshold);
     
     const plates = MASTER_GRID.plates.map(p => ({
-        id: p.name,
-        fileName: p.name,
-        ...p.config
+        id: p.name, fileName: p.name, ...p.config
     })) as Plate[];
     
     self.postMessage({
-        type: 'FINALIZED',
-        displacementBuffer,
-        colorBuffer,
-        gridMatrix: finalGrid,
-        stats,
-        condition,
-        plates: plates,
+        type: 'FINALIZED', displacementBuffer, colorBuffer,
+        gridMatrix: FINAL_GRID, stats, condition, plates, segments,
     }, [displacementBuffer.buffer, colorBuffer.buffer]);
 }
 
@@ -260,88 +293,95 @@ self.onmessage = async (event: MessageEvent<any>) => {
     try {
         if (type === 'RESET') {
             MASTER_GRID = null;
+            FINAL_GRID = null;
             return;
         }
+
         if (type === 'INIT') {
             const { file, config } = payload as { file: { name: string, buffer: ArrayBuffer }, config: ProcessConfig };
             self.postMessage({ type: 'PROGRESS' });
-            const points = parseFileToGrid(file);
+            const { rows, detectedNominal } = universalParse(file.buffer, file.name);
+            const points = parseFileToGrid(rows, file.name);
 
-            if (points.length === 0 || points[0].length === 0) {
-                throw new Error("Parsing resulted in empty data grid. Please check file format and content.");
-            }
+            if (points.length === 0 || points[0].length === 0) throw new Error("Parsing resulted in empty data grid.");
             
+            const finalConfig = { ...config, nominalThickness: detectedNominal ?? config.nominalThickness };
+
             MASTER_GRID = {
-                points,
-                width: points[0].length,
-                height: points.length,
-                plates: [{ name: file.name, config, mergeConfig: null }],
-                baseConfig: config,
+                points, width: points[0].length, height: points.length,
+                plates: [{ name: file.name, config: finalConfig, mergeConfig: null, detectedNominal }],
+                baseConfig: finalConfig,
             };
             
             self.postMessage({ type: 'STAGED', dimensions: { width: MASTER_GRID.width, height: MASTER_GRID.height }});
+            return;
+        }
 
-        } else if (type === 'MERGE') {
-            if (!MASTER_GRID) {
-                throw new Error("Cannot merge: Initial file not processed yet.");
-            }
-            const { file, mergeConfig } = payload as { file: { name: string, buffer: ArrayBuffer }, mergeConfig: MergeFormValues };
+        if (type === 'MERGE') {
+            if (!MASTER_GRID) throw new Error("Cannot merge: Initial file not processed yet.");
+
+            const { file, config, mergeConfig, resolution } = payload;
             self.postMessage({ type: 'PROGRESS' });
 
-            const newPoints = parseFileToGrid(file);
-            const { direction, start: offset } = mergeConfig;
+            if (!resolution) {
+                const { rows, detectedNominal } = universalParse(file.buffer, file.name);
+                if (detectedNominal && Math.abs(detectedNominal - MASTER_GRID.baseConfig.nominalThickness) > 0.01) {
+                    const conflict: ThicknessConflict = {
+                        fileName: file.name, fileBuffer: file.buffer,
+                        originalThickness: MASTER_GRID.baseConfig.nominalThickness,
+                        conflictingThickness: detectedNominal,
+                        mergeConfig: mergeConfig,
+                    };
+                    self.postMessage({ type: 'THICKNESS_CONFLICT', conflict: conflict }, [file.buffer]);
+                    return;
+                }
+            }
 
-            const oldWidth = MASTER_GRID.width;
-            const oldHeight = MASTER_GRID.height;
-            const newWidth = newPoints[0].length;
-            const newHeight = newPoints.length;
-
-            if (direction === 'right') {
-                const height = Math.max(oldHeight, newHeight);
-                const width = offset + newWidth;
-                const newMaster = Array(height).fill(null).map(() => Array(width).fill({ plateId: 'ND', rawThickness: -1 }));
-                
-                for(let y=0; y < oldHeight; y++) {
-                    for(let x=0; x < oldWidth; x++) {
-                        newMaster[y][x] = MASTER_GRID.points[y][x];
-                    }
+            if (resolution) {
+                if (resolution === 'useNew') {
+                    const { conflictingThickness } = MASTER_GRID.plates.slice(-1)[0];
+                    MASTER_GRID.baseConfig.nominalThickness = MASTER_GRID.plates.find(p => p.name === file.name)?.detectedNominal ?? MASTER_GRID.baseConfig.nominalThickness;
+                } else if (resolution.type === 'useCustom') {
+                    MASTER_GRID.baseConfig.nominalThickness = resolution.value;
                 }
-                for(let y = 0; y < newHeight; y++) {
-                    for (let x = 0; x < newWidth; x++) {
-                        newMaster[y][offset + x] = newPoints[y][x];
-                    }
-                }
-                MASTER_GRID.points = newMaster;
-                MASTER_GRID.width = width;
-                MASTER_GRID.height = height;
-
-            } else if (direction === 'bottom') {
-                 const width = Math.max(oldWidth, newWidth);
-                 const height = offset + newHeight;
-                 const newMaster = Array(height).fill(null).map(() => Array(width).fill({ plateId: 'ND', rawThickness: -1 }));
-                
-                for(let y=0; y < oldHeight; y++) {
-                    for(let x=0; x < oldWidth; x++) {
-                        newMaster[y][x] = MASTER_GRID.points[y][x];
-                    }
-                }
-                 for(let y = 0; y < newHeight; y++) {
-                    for (let x = 0; x < newWidth; x++) {
-                        newMaster[offset + y][x] = newPoints[y][x];
-                    }
-                }
-                MASTER_GRID.points = newMaster;
-                MASTER_GRID.width = width;
-                MASTER_GRID.height = height;
             }
             
-            MASTER_GRID.plates.push({ name: file.name, config: MASTER_GRID.baseConfig, mergeConfig });
-            self.postMessage({ type: 'STAGED', dimensions: { width: MASTER_GRID.width, height: MASTER_GRID.height }});
+            const { rows } = universalParse(file.buffer, file.name);
+            const newPoints = parseFileToGrid(rows, file.name);
+            const { direction, start: offset } = mergeConfig;
 
-        } else if (type === 'FINALIZE') {
-             finalizeProcessing(payload.colorMode);
+            if (direction === 'right') {
+                const height = Math.max(MASTER_GRID.height, newPoints.length);
+                const width = offset + newPoints[0].length;
+                const newMaster = Array(height).fill(null).map(() => Array(width).fill({ plateId: 'ND', rawThickness: -1 }));
+                for(let y=0; y < MASTER_GRID.height; y++) for(let x=0; x < MASTER_GRID.width; x++) newMaster[y][x] = MASTER_GRID.points[y][x];
+                for(let y = 0; y < newPoints.length; y++) for (let x = 0; x < newPoints[0].length; x++) newMaster[y][offset + x] = newPoints[y][x];
+                MASTER_GRID.points = newMaster; MASTER_GRID.width = width; MASTER_GRID.height = height;
+            } else if (direction === 'bottom') {
+                 const width = Math.max(MASTER_GRID.width, newPoints[0].length);
+                 const height = offset + newPoints.length;
+                 const newMaster = Array(height).fill(null).map(() => Array(width).fill({ plateId: 'ND', rawThickness: -1 }));
+                 for(let y=0; y < MASTER_GRID.height; y++) for(let x=0; x < MASTER_GRID.width; x++) newMaster[y][x] = MASTER_GRID.points[y][x];
+                 for(let y = 0; y < newPoints.length; y++) for (let x = 0; x < newPoints[0].length; x++) newMaster[offset + y][x] = newPoints[y][x];
+                 MASTER_GRID.points = newMaster; MASTER_GRID.width = width; MASTER_GRID.height = height;
+            }
+            
+            MASTER_GRID.plates.push({ name: file.name, config: MASTER_GRID.baseConfig, mergeConfig, detectedNominal: null }); // Nominal already handled
+            self.postMessage({ type: 'STAGED', dimensions: { width: MASTER_GRID.width, height: MASTER_GRID.height }});
+            return;
+        }
+
+        if (type === 'FINALIZE') {
+             finalizeProcessing(payload.colorMode, payload.threshold);
+        } else if (type === 'RESEGMENT') {
+            if (!FINAL_GRID || !MASTER_GRID) return;
+            const segments = segmentAndAnalyze(FINAL_GRID, MASTER_GRID.baseConfig.nominalThickness, payload.threshold);
+            self.postMessage({ type: 'FINALIZED', segments: segments });
         } else if (type === 'RECOLOR') {
-             finalizeProcessing(payload.colorMode);
+             if (!FINAL_GRID || !MASTER_GRID) return;
+             const { stats } = computeStats(FINAL_GRID, MASTER_GRID.baseConfig.nominalThickness);
+             const { displacementBuffer, colorBuffer } = createBuffers(FINAL_GRID, MASTER_GRID.baseConfig.nominalThickness, stats.minThickness, stats.maxThickness, payload.colorMode);
+             self.postMessage({ type: 'FINALIZED', displacementBuffer, colorBuffer }, [displacementBuffer.buffer, colorBuffer.buffer]);
         }
     } catch (error: any) {
         console.error("Worker CRASH:", error);

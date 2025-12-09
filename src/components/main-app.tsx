@@ -1,5 +1,4 @@
 
-
 "use client"
 
 import React, { useState, useEffect, useRef } from "react"
@@ -7,6 +6,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useToast } from "@/hooks/use-toast"
 import { useInspectionStore } from "@/store/use-inspection-store"
 import type { ThreeDeeViewRef } from "./tabs/three-dee-view-tab"
+import type { TwoDeeViewRef } from "./tabs/two-dee-heatmap-tab"
 
 import { SetupTab } from "./tabs/setup-tab"
 import { InfoTab } from "./tabs/info-tab"
@@ -30,9 +30,9 @@ export function MainApp() {
   const { toast } = useToast()
   const { inspectionResult, isLoading, loadingProgress, isFinalizing, activeTab, setActiveTab } = useInspectionStore()
   const threeDeeViewRef = useRef<ThreeDeeViewRef>(null);
+  const twoDeeViewRef = useRef<TwoDeeViewRef>(null);
 
   useEffect(() => {
-    // This effect now only runs when the final processing is complete
     if (inspectionResult && !isFinalizing && activeTab === 'setup') {
       setActiveTab("info");
       toast({
@@ -52,6 +52,20 @@ export function MainApp() {
   
   const threeDViewStyle: React.CSSProperties =
     activeTab === '3d-view'
+      ? { height: '100%', position: 'relative', zIndex: 10 }
+      : {
+          position: 'fixed',
+          left: '0px',
+          top: '0px',
+          width: '800px',
+          height: '600px',
+          opacity: 0,
+          pointerEvents: 'none',
+          zIndex: -1,
+        };
+  
+  const twoDViewStyle: React.CSSProperties =
+    activeTab === '2d-heatmap'
       ? { height: '100%', position: 'relative', zIndex: 10 }
       : {
           position: 'fixed',
@@ -100,16 +114,15 @@ export function MainApp() {
             <div style={getTabContentStyle('info')}>
               {isDataLoaded ? <InfoTab /> : <DataPlaceholder />}
             </div>
-            <div style={getTabContentStyle('2d-heatmap')}>
-              {isDataLoaded ? <TwoDeeHeatmapTab /> : <DataPlaceholder />}
-            </div>
             <div style={getTabContentStyle('data-table')}>
               {isDataLoaded ? <DataTableTab /> : <DataPlaceholder />}
             </div>
              <div style={getTabContentStyle('report')}>
-              {isDataLoaded ? <ReportTab viewRef={threeDeeViewRef} /> : <DataPlaceholder />}
+              {isDataLoaded ? <ReportTab threeDViewRef={threeDeeViewRef} twoDViewRef={twoDeeViewRef} /> : <DataPlaceholder />}
             </div>
-            {/* Always mount 3D view but control visibility */}
+            <div style={twoDViewStyle}>
+              {isDataLoaded ? <TwoDeeHeatmapTab ref={twoDeeViewRef} /> : <DataPlaceholder />}
+            </div>
             <div style={threeDViewStyle}>
                 {isDataLoaded ? <ThreeDeeViewTab ref={threeDeeViewRef} /> : <DataPlaceholder />}
             </div>
@@ -130,4 +143,3 @@ const DataPlaceholder = () => (
         </CardContent>
     </Card>
 )
-    

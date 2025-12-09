@@ -1,7 +1,7 @@
 
 "use client"
 
-import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react'
+import React, { useRef, useEffect, useState, useCallback, useImperativeHandle, forwardRef } from 'react'
 import { useInspectionStore, type ColorMode } from '@/store/use-inspection-store'
 import { DataVault } from '@/store/data-vault'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -18,9 +18,13 @@ const getNiceInterval = (range: number, maxTicks: number): number => {
     return step;
 };
 
+export type PipeView2DRef = {
+  capture: () => string;
+};
 
-// --- Main Component ---
-export function PipeView2D() {
+interface PipeView2DProps {}
+
+export const PipeView2D = forwardRef<PipeView2DRef, PipeView2DProps>((props, ref) => {
   const { inspectionResult, selectedPoint, setSelectedPoint, colorMode, setColorMode, dataVersion } = useInspectionStore()
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -36,9 +40,12 @@ export function PipeView2D() {
   
   const BASE_CELL_SIZE = 6;
   const scaledCellSize = BASE_CELL_SIZE * zoom;
-  const AXIS_SIZE = 45; // Space for axis labels
+  const AXIS_SIZE = 45;
 
-  // --- Drawing Logic ---
+  useImperativeHandle(ref, () => ({
+    capture: () => canvasRef.current?.toDataURL('image/png') || '',
+  }));
+
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas || !gridSize || !DataVault.colorBuffer) return;
@@ -53,10 +60,8 @@ export function PipeView2D() {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Create an ImageData object from the color buffer in the vault
     const imageData = new ImageData(new Uint8ClampedArray(DataVault.colorBuffer), width, height);
 
-    // Create a temporary canvas to draw the initial image
     const tempCanvas = document.createElement('canvas');
     tempCanvas.width = width;
     tempCanvas.height = height;
@@ -64,13 +69,11 @@ export function PipeView2D() {
     if (!tempCtx) return;
     tempCtx.putImageData(imageData, 0, 0);
 
-    // Scale up the image to the main canvas
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(tempCanvas, 0, 0, width, height, 0, 0, canvasWidth, canvasHeight);
     
-    // Selection outline
     if (selectedPoint) {
-        ctx.strokeStyle = '#00ffff'; // Cyan
+        ctx.strokeStyle = '#00ffff';
         ctx.lineWidth = Math.max(1.5, 3 * zoom / 10);
         ctx.strokeRect(selectedPoint.x * scaledCellSize, selectedPoint.y * scaledCellSize, scaledCellSize, scaledCellSize);
     }
@@ -89,7 +92,6 @@ export function PipeView2D() {
       }
   };
 
-  // --- Interaction Handlers ---
   const adjustZoom = (factor: number) => {
     const newZoom = zoom * factor;
     const clampedZoom = Math.max(0.2, Math.min(newZoom, 50));
@@ -169,8 +171,6 @@ export function PipeView2D() {
     return <div style={{ height: gridSize.height * scaledCellSize }}>{ticks}</div>;
   };
   
-
-  // --- Render ---
   if (!inspectionResult || !DataVault.stats || !gridMatrix) return null;
 
   return (
@@ -181,7 +181,6 @@ export function PipeView2D() {
         </CardHeader>
         <CardContent className="flex-grow relative p-0 border-t flex flex-col">
             <div className="relative w-full h-full flex">
-                {/* Y Axis */}
                 <div className="flex-shrink-0" style={{ width: AXIS_SIZE }}>
                     <div className='text-xs text-muted-foreground -rotate-90 whitespace-nowrap absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 origin-center'>Axial Position (mm)</div>
                     <div ref={yAxisRef} className="relative h-full pt-1">
@@ -190,7 +189,6 @@ export function PipeView2D() {
                 </div>
 
                 <div className="flex-grow flex flex-col overflow-hidden">
-                    {/* X Axis */}
                     <div className="flex-shrink-0" style={{ height: AXIS_SIZE }}>
                        <div className='text-xs text-muted-foreground absolute bottom-0 left-1/2 -translate-x-1/2 pb-1'>Circumferential Angle</div>
                        <div ref={xAxisRef} className="relative h-full pr-1">
@@ -198,7 +196,6 @@ export function PipeView2D() {
                        </div>
                     </div>
                     
-                    {/* Canvas Scroll Area */}
                     <div ref={scrollContainerRef} className="flex-grow overflow-auto" onScroll={handleScroll}>
                          <div 
                             className="relative"
@@ -262,6 +259,5 @@ export function PipeView2D() {
       </div>
     </div>
   )
-}
-
-    
+});
+PipeView2D.displayName = "PipeView2D";

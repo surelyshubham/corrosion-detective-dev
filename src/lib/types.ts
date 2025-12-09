@@ -53,7 +53,27 @@ export interface AIInsight {
   recommendation: string;
 }
 
-// New types for merging
+export type SeverityTier = 'Critical' | 'Severe' | 'Moderate' | 'Normal';
+
+export interface SegmentBox {
+  id: number;
+  tier: SeverityTier;
+  pointCount: number;
+  worstThickness: number;
+  avgThickness: number;
+  severityScore: number;
+  coordinates: {
+    xMin: number;
+    xMax: number;
+    yMin: number;
+    yMax: number;
+  };
+  center: {
+    x: number;
+    y: number;
+  };
+}
+
 export type Plate = {
   id: string; // Typically the filename
   fileName: string;
@@ -83,31 +103,21 @@ export interface MergedInspectionResult {
   assetType: AssetType;
   pipeOuterDiameter?: number;
   pipeLength?: number;
-  // Global stats are calculated from the merged grid
   stats: InspectionStats; 
   condition: Condition;
   aiInsight: AIInsight | null;
+  segments: SegmentBox[];
 }
 
 
 // Reporting Types
 export interface ReportMetadata {
-  companyName?: string;
-  projectName?: string;
-  assetName?: string;
+  companyName: string;
+  projectName: string;
+  assetName: string;
   scanDate?: Date;
   reportDate?: Date;
-  area?: string;
-  operatorName?: string;
-  remarks?: string;
-  defectThreshold: number;
-}
-
-export interface Defect {
-  x: number;
-  y: number;
-  rawThickness: number | null;
-  effectiveThickness: number | null;
-  loss: number | null;
-  percentage: number | null;
+  area: string;
+  operatorName: string;
+  remarks: string;
 }
