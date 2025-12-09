@@ -59,7 +59,7 @@ const PlateStatsCard = ({ plate, index }: { plate: Plate; index: number }) => {
 
 
 export function InfoTab() {
-  const { inspectionResult } = useInspectionStore();
+  const { inspectionResult, isGeneratingAI } = useInspectionStore();
   const stats = DataVault.stats;
 
   if (!inspectionResult || !stats) return null
@@ -88,7 +88,7 @@ export function InfoTab() {
   return (
     <ScrollArea className="h-full pr-4">
       <div className="grid md:grid-cols-3 gap-6 animate-fade-in">
-        <div className="md:col-span-3 space-y-6">
+        <div className="md:col-span-2 space-y-6">
             <>
               <Card>
                 <CardHeader>
@@ -122,6 +122,50 @@ export function InfoTab() {
                 </CardContent>
               </Card>
             </>
+        </div>
+         <div className="md:col-span-1 space-y-6">
+            <Card className="bg-gradient-to-br from-primary/10 to-background">
+                <CardHeader>
+                    <CardTitle className="font-headline flex items-center gap-2"><BrainCircuit className="text-primary"/> AI-Powered Insight</CardTitle>
+                </CardHeader>
+                <CardContent>
+                    {isGeneratingAI ? (
+                        <div className="flex items-center justify-center h-24">
+                            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                        </div>
+                    ) : aiInsight ? (
+                        <div className="space-y-4">
+                            <div>
+                                <h4 className="font-semibold text-muted-foreground">Condition</h4>
+                                <p className={`text-lg font-bold ${getConditionClass(aiInsight.condition as Condition)}`}>{aiInsight.condition}</p>
+                            </div>
+                            <div>
+                                <h4 className="font-semibold text-muted-foreground">Recommendation</h4>
+                                <p>{aiInsight.recommendation}</p>
+                            </div>
+                        </div>
+                    ) : (
+                        <p className="text-sm text-muted-foreground">No AI insight available. Process a file to generate one.</p>
+                    )}
+                </CardContent>
+            </Card>
+            {plates.length > 1 && (
+                <Card>
+                    <CardHeader>
+                        <CardTitle className="font-headline flex items-center gap-2"><Layers /> Input Plates</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        <ul className="space-y-2 text-sm text-muted-foreground">
+                            {plates.map((plate, index) => (
+                                <li key={plate.id} className="flex items-center gap-2 border-b pb-1">
+                                    <span className="font-mono text-xs bg-muted rounded-full h-5 w-5 flex items-center justify-center">{index + 1}</span>
+                                    <span>{plate.fileName}</span>
+                                </li>
+                            ))}
+                        </ul>
+                    </CardContent>
+                </Card>
+            )}
         </div>
       </div>
     </ScrollArea>

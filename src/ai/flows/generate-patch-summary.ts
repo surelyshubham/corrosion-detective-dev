@@ -1,3 +1,4 @@
+
 'use server';
 /**
  * @fileOverview A Genkit flow to generate a summary for a specific corrosion patch.
@@ -5,6 +6,42 @@
 
 import { ai } from '@/ai/genkit';
 import { z } from 'genkit';
+import type { SegmentBox } from '@/lib/types';
+
+
+export interface PatchAiInput {
+  patchId: number;
+  // sizeMm: { width: number; height: number };
+  minThickness: number;
+  avgThickness: number;
+  minPercentage: number;
+  pointCount: number;
+}
+
+
+export async function generatePatchInsight(
+  input: PatchAiInput,
+): Promise<string> {
+  try {
+
+    const { patchId, minThickness, avgThickness, minPercentage } = input;
+    const loss = 100 - minPercentage;
+
+    return (
+      `Patch #${patchId} shows a minimum remaining wall of ` +
+      `${minThickness.toFixed(2)} mm and an average of ${avgThickness.toFixed(
+        2,
+      )} mm. Local wall loss is approximately ${loss.toFixed(
+        1,
+      )}%. ` +
+      `Recommended: schedule targeted repair and re-check this location in the next maintenance window.`
+    );
+  } catch (err) {
+    console.error('generatePatchInsight failed', err);
+    return 'Unable to generate AI observation for this patch. Please review thickness and location manually.';
+  }
+}
+
 
 const PatchSummaryInputSchema = z.object({
     patchId: z.number().describe('The ID of the corrosion patch.'),
@@ -27,7 +64,7 @@ const PatchSummaryOutputSchema = z.object({
 });
 
 export async function generatePatchSummary(
-    patch: any, 
+    patch: SegmentBox, 
     nominalThickness: number, 
     assetType: string,
     defectThreshold: number,
@@ -38,10 +75,10 @@ export async function generatePatchSummary(
         xMax: patch.coordinates.xMax,
         yMin: patch.coordinates.yMin,
         yMax: patch.coordinates.yMax,
-        patchArea: patch.boundingBox.toFixed(0),
-        minThickness: patch.minThickness.toFixed(2),
+        patchArea: "N/A", // This data is not available on SegmentBox
+        minThickness: patch.worstThickness.toFixed(2),
         avgThickness: patch.avgThickness.toFixed(2),
-        severity: patch.severity,
+        severity: patch.tier,
         nominalThickness,
         assetType,
         defectThreshold,

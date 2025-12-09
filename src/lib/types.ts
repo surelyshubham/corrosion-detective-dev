@@ -1,4 +1,5 @@
 
+
 export type AssetType = 
   | 'Plate'
   | 'Tank'
@@ -72,6 +73,12 @@ export interface SegmentBox {
     x: number;
     y: number;
   };
+  // NEW fields for multi-view reporting
+  isoViewDataUrl?: string;
+  topViewDataUrl?: string;
+  sideViewDataUrl?: string;
+  heatmapDataUrl?: string;
+  aiObservation?: string;
 }
 
 export type Plate = {

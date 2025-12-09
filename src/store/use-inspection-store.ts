@@ -1,4 +1,5 @@
 
+
 "use client"
 
 import { create } from 'zustand';
@@ -7,6 +8,7 @@ import { DataVault } from './data-vault';
 import { type MergeFormValues } from '@/components/tabs/merge-alert-dialog';
 import { toast } from '@/hooks/use-toast';
 import { type ThicknessConflict } from '../workers/data-processor.worker';
+import { generateCorrosionInsight, type CorrosionInsightInput } from '@/ai/flows/generate-corrosion-insight';
 
 export type StagedFile = {
   name: string;
@@ -59,6 +61,7 @@ interface InspectionState {
   // UI state
   isLoading: boolean;
   isFinalizing: boolean;
+  isGeneratingAI: boolean;
   loadingProgress: number;
   error: string | null;
   activeTab: string;
@@ -143,6 +146,34 @@ export const useInspectionStore = create<InspectionState>()(
                     error: null,
                     dataVersion: state.dataVersion + 1,
                 }));
+                 
+                // Fire off AI insight generation
+                set({ isGeneratingAI: true });
+                const aiInput: CorrosionInsightInput = {
+                    assetType: newResult.assetType,
+                    nominalThickness: newResult.nominalThickness,
+                    minThickness: newResult.stats.minThickness,
+                    maxThickness: newResult.stats.maxThickness,
+                    avgThickness: newResult.stats.avgThickness,
+                    areaBelow80: newResult.stats.areaBelow80,
+                    areaBelow70: newResult.stats.areaBelow70,
+                    areaBelow60: newResult.stats.areaBelow60,
+                    worstLocationX: newResult.stats.worstLocation.x,
+                    worstLocationY: newResult.stats.worstLocation.y,
+                    minPercentage: newResult.stats.minPercentage,
+                };
+
+                generateCorrosionInsight(aiInput)
+                    .then(aiInsight => {
+                        set(state => ({
+                            inspectionResult: state.inspectionResult ? { ...state.inspectionResult, aiInsight } : null,
+                            isGeneratingAI: false,
+                        }));
+                    })
+                    .catch(error => {
+                        console.error("AI Insight generation failed:", error);
+                        set({ isGeneratingAI: false });
+                    });
             } else {
                  set({ isFinalizing: false, error: "Worker returned incomplete data after finalization." });
             }
@@ -158,6 +189,7 @@ export const useInspectionStore = create<InspectionState>()(
         thicknessConflict: null,
         isLoading: false,
         isFinalizing: false,
+        isGeneratingAI: false,
         loadingProgress: 0,
         selectedPoint: null,
         colorMode: 'mm',
@@ -249,6 +281,7 @@ export const useInspectionStore = create<InspectionState>()(
                 selectedPoint: null, 
                 isLoading: false, 
                 isFinalizing: false,
+                isGeneratingAI: false,
                 dataVersion: 0, 
                 error: null, 
                 loadingProgress: 0,

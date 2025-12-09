@@ -1,6 +1,8 @@
 
+
 import { create } from 'zustand';
 import type { ReportMetadata } from '@/lib/types';
+import type { ReportPatchSegment } from '@/reporting/DocxReportGenerator';
 
 interface ReportImages {
   fullModel3D?: string;
@@ -10,16 +12,17 @@ interface ReportImages {
 
 interface ReportState {
   // Step 1: Configuration
-  defectThreshold: number;
-  setDefectThreshold: (threshold: number) => void;
   isThresholdLocked: boolean;
   setIsThresholdLocked: (isLocked: boolean) => void;
 
   // Step 2: Screenshot Generation
   isGenerating: boolean;
   setIsGenerating: (isGenerating: boolean) => void;
-  reportImages: ReportImages;
+  reportImages: ReportImages; // This can be deprecated
   setReportImages: (images: ReportImages) => void;
+  enrichedSegments: ReportPatchSegment[] | null;
+  setEnrichedSegments: (segments: ReportPatchSegment[]) => void;
+
 
   // Step 3: Metadata Submission
   reportMetadata: Omit<ReportMetadata, 'defectThreshold'> | null;
@@ -35,10 +38,10 @@ interface ReportState {
 }
 
 const initialState = {
-  defectThreshold: 80,
   isThresholdLocked: false,
   isGenerating: false,
-  reportImages: {},
+  reportImages: {}, // Deprecated
+  enrichedSegments: null,
   reportMetadata: null,
   detailsSubmitted: false,
   generationProgress: null,
@@ -47,12 +50,11 @@ const initialState = {
 export const useReportStore = create<ReportState>()(
   (set) => ({
     ...initialState,
-    setDefectThreshold: (threshold) => set({ defectThreshold: threshold }),
     setIsThresholdLocked: (isLocked) => {
         set({ isThresholdLocked: isLocked });
         if (!isLocked) {
             set({
-                reportImages: {},
+                enrichedSegments: null,
                 detailsSubmitted: false,
                 reportMetadata: null,
             });
@@ -63,6 +65,9 @@ export const useReportStore = create<ReportState>()(
       reportImages: images,
       isGenerating: false,
       generationProgress: null,
+    }),
+    setEnrichedSegments: (segments) => set({
+        enrichedSegments: segments
     }),
     setReportMetadata: (metadata) => set({
         reportMetadata: metadata,

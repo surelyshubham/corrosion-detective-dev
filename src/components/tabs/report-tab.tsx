@@ -1,4 +1,5 @@
 
+
 "use client"
 
 import React, { useEffect, useState } from 'react'
@@ -8,7 +9,7 @@ import { Button } from '../ui/button'
 import { AIReportDialog } from '../reporting/AIReportDialog'
 import { useReportStore } from '@/store/use-report-store'
 import { useToast } from '@/hooks/use-toast'
-import { generateReportDocx, type ReportData } from '@/reporting/DocxReportGenerator'
+import { generateReportDocx, type FinalReportPayload, type ReportPatchSegment } from '@/reporting/DocxReportGenerator'
 import { Progress } from '../ui/progress'
 import { Slider } from '../ui/slider'
 import { Label } from '../ui/label'
@@ -19,6 +20,8 @@ import { ScrollArea } from '../ui/scroll-area'
 import { Camera, Download, Edit, FileText, Info, Loader2, Lock, Pencil } from 'lucide-react'
 import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from '../ui/carousel'
 import Image from 'next/image'
+import { generatePatchInsight } from '@/ai/flows/generate-patch-summary'
+import type { SegmentBox } from '@/lib/types'
 
 interface ReportTabProps {
   threeDViewRef: React.RefObject<ThreeDeeViewRef>;
@@ -46,6 +49,8 @@ export function ReportTab({ threeDViewRef, twoDViewRef }: ReportTabProps) {
     setGenerationProgress,
     isThresholdLocked,
     setIsThresholdLocked,
+    enrichedSegments,
+    setEnrichedSegments,
   } = useReportStore();
   
   const [isReportDialogOpen, setIsReportDialogOpen] = useState(false);
@@ -80,57 +85,81 @@ export function ReportTab({ threeDViewRef, twoDViewRef }: ReportTabProps) {
       });
       return;
     }
-    
-    setIsGenerating(true);
-    const totalSteps = 2 + (segments?.length || 0);
-    setGenerationProgress({ current: 0, total: totalSteps, task: 'Starting...' });
 
-    try {
-      // 1. Capture Full Model
-      setGenerationProgress({ current: 1, total: totalSteps, task: 'Capturing 3D model view...' });
-      captureFunctions3D.setView('iso');
-      await new Promise(resolve => setTimeout(resolve, 500));
-      const fullModel3D = captureFunctions3D.capture();
-
-      // 2. Capture Full Heatmap
-      setGenerationProgress({ current: 2, total: totalSteps, task: 'Capturing 2D heatmap view...' });
-      const fullHeatmap2D = captureFunctions2D.capture();
-      
-      // 3. Capture Segment Shots
-      const segmentShots: { segmentId: number; imageDataUrl: string }[] = [];
-      if (segments) {
-        for (let i = 0; i < segments.length; i++) {
-          const segment = segments[i];
-          setGenerationProgress({ current: 3 + i, total: totalSteps, task: `Capturing segment #${segment.id}...` });
-          captureFunctions3D.focus(segment.center.x, segment.center.y, true);
-          await new Promise(resolve => setTimeout(resolve, 500)); // allow camera to move
-          const shot = captureFunctions3D.capture();
-          segmentShots.push({ segmentId: segment.id, imageDataUrl: shot });
-        }
-      }
-      captureFunctions3D.resetCamera();
-      
-      setReportImages({ fullModel3D, fullHeatmap2D, segmentShots });
-      toast({
-        title: "Visual Assets Captured",
-        description: `Captured ${2 + segmentShots.length} images. Please fill in report details.`,
-      });
-
-    } catch (error) {
-      console.error("Failed to generate screenshots", error);
+    if (!segments || segments.length === 0) {
       toast({
         variant: "destructive",
-        title: "Capture Failed",
-        description: error instanceof Error ? error.message : "An unknown error occurred.",
+        title: "No Segments Detected",
+        description: "No patches were found for the current threshold. Adjust the slider and try again.",
       });
-    } finally {
-        setIsGenerating(false);
-        setGenerationProgress(null);
+      return;
     }
+    
+    setIsGenerating(true);
+    const totalSteps = segments.length * 5; // 4 views + 1 AI insight per segment
+    setGenerationProgress({ current: 0, total: totalSteps, task: 'Starting Capture Sequence...' });
+
+    const finalSegments: ReportPatchSegment[] = [];
+
+    for (let i = 0; i < segments.length; i++) {
+        const segment = segments[i];
+        const progressBase = i * 5;
+
+        // --- Capture Views ---
+        setGenerationProgress({ current: progressBase + 1, total: totalSteps, task: `Capturing ISO view for Patch #${segment.id}` });
+        captureFunctions3D.focus(segment.center.x, segment.center.y, true);
+        
+        await new Promise(resolve => setTimeout(resolve, 250));
+        captureFunctions3D.setView('iso');
+        await new Promise(resolve => setTimeout(resolve, 250));
+        const isoViewDataUrl = captureFunctions3D.capture();
+
+        setGenerationProgress({ current: progressBase + 2, total: totalSteps, task: `Capturing TOP view for Patch #${segment.id}` });
+        captureFunctions3D.setView('top');
+        await new Promise(resolve => setTimeout(resolve, 250));
+        const topViewDataUrl = captureFunctions3D.capture();
+
+        setGenerationProgress({ current: progressBase + 3, total: totalSteps, task: `Capturing SIDE view for Patch #${segment.id}` });
+        captureFunctions3D.setView('side');
+        await new Promise(resolve => setTimeout(resolve, 250));
+        const sideViewDataUrl = captureFunctions3D.capture();
+        
+        // TODO: Focus 2D view on segment before capture
+        const heatmapDataUrl = captureFunctions2D.capture();
+        
+        setGenerationProgress({ current: progressBase + 4, total: totalSteps, task: `Generating AI insight for Patch #${segment.id}` });
+        const aiObservation = await generatePatchInsight(segment, inspectionResult?.nominalThickness || 0, inspectionResult?.assetType || 'N/A', threshold);
+
+        const enrichedSegment: ReportPatchSegment = {
+            id: segment.id,
+            tier: segment.tier,
+            pointCount: segment.pointCount,
+            worstThickness: segment.worstThickness,
+            avgThickness: segment.avgThickness,
+            severityScore: segment.severityScore,
+            coordinates: segment.coordinates,
+            center: segment.center,
+            isoViewDataUrl,
+            topViewDataUrl,
+            sideViewDataUrl,
+            heatmapDataUrl,
+            aiObservation,
+        };
+        finalSegments.push(enrichedSegment);
+    }
+      
+    captureFunctions3D.resetCamera();
+    setEnrichedSegments(finalSegments);
+    setIsGenerating(false);
+    setGenerationProgress(null);
+    toast({
+      title: "Visual Assets Captured",
+      description: `Captured ${finalSegments.length} patches with 4 views each. Please fill in report details.`,
+    });
   };
   
   const handleGenerateFinalReport = async () => {
-      if (!reportImages || !reportMetadata || !inspectionResult || !segments) {
+      if (!enrichedSegments || enrichedSegments.length === 0 || !reportMetadata || !inspectionResult) {
         toast({
             variant: "destructive",
             title: "Cannot Generate Report",
@@ -141,15 +170,29 @@ export function ReportTab({ threeDViewRef, twoDViewRef }: ReportTabProps) {
       setIsGenerating(true);
       setGenerationProgress({ current: 0, total: 1, task: 'Generating DOCX file...'});
       try {
-        console.log("DOCX segments count:", reportImages.segmentShots?.length);
-        const reportData: ReportData = {
-            metadata: { ...reportMetadata, defectThreshold: threshold },
-            inspection: inspectionResult,
-            segments: segments,
-            images: reportImages,
+        const payload: FinalReportPayload = {
+            global: {
+                assetName: reportMetadata.assetName || 'N/A',
+                projectName: reportMetadata.projectName,
+                inspectionDate: reportMetadata.scanDate ? reportMetadata.scanDate.toLocaleDateString() : 'N/A',
+                nominalThickness: inspectionResult.nominalThickness,
+                minThickness: inspectionResult.stats.minThickness,
+                maxThickness: inspectionResult.stats.maxThickness,
+                avgThickness: inspectionResult.stats.avgThickness,
+                corrodedAreaBelow80: inspectionResult.stats.areaBelow80,
+                corrodedAreaBelow70: inspectionResult.stats.areaBelow70,
+                corrodedAreaBelow60: inspectionResult.stats.areaBelow60,
+            },
+            segments: enrichedSegments,
+            remarks: reportMetadata.remarks,
         };
-        
-        await generateReportDocx(reportData);
+        const blob = await generateReportDocx(payload);
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `Report_${reportMetadata.assetName || 'Asset'}.docx`;
+        a.click();
+        URL.revokeObjectURL(url);
 
       } catch (error) {
         console.error("Failed to generate final report", error);
@@ -164,7 +207,7 @@ export function ReportTab({ threeDViewRef, twoDViewRef }: ReportTabProps) {
       }
   };
   
-  const hasImages = !!reportImages.fullModel3D;
+  const hasImages = !!enrichedSegments && enrichedSegments.length > 0;
 
   return (
     <ScrollArea className="h-full">
@@ -271,10 +314,8 @@ export function ReportTab({ threeDViewRef, twoDViewRef }: ReportTabProps) {
                     <h3 className="font-semibold">Image Preview</h3>
                     <Carousel className="w-full max-w-sm mx-auto">
                       <CarouselContent>
-                        {reportImages.fullModel3D && <CarouselItem><Card><CardHeader className="p-2 pb-0"><CardTitle className="text-sm">3D Model</CardTitle></CardHeader><CardContent className="p-2"><Image src={reportImages.fullModel3D} alt="3D Model" width={300} height={200} className="rounded-md" /></CardContent></Card></CarouselItem>}
-                        {reportImages.fullHeatmap2D && <CarouselItem><Card><CardHeader className="p-2 pb-0"><CardTitle className="text-sm">2D Heatmap</CardTitle></CardHeader><CardContent className="p-2"><Image src={reportImages.fullHeatmap2D} alt="2D Heatmap" width={300} height={200} className="rounded-md" /></CardContent></Card></CarouselItem>}
-                        {reportImages.segmentShots?.map(({segmentId, imageDataUrl}) => (
-                           <CarouselItem key={segmentId}><Card><CardHeader className="p-2 pb-0"><CardTitle className="text-sm">Segment #{segmentId}</CardTitle></CardHeader><CardContent className="p-2"><Image src={imageDataUrl} alt={`Segment ${segmentId}`} width={300} height={200} className="rounded-md" /></CardContent></Card></CarouselItem>
+                        {enrichedSegments?.map((seg) => (
+                           <CarouselItem key={seg.id}><Card><CardHeader className="p-2 pb-0"><CardTitle className="text-sm">Segment #{seg.id} (ISO)</CardTitle></CardHeader><CardContent className="p-2">{seg.isoViewDataUrl && <Image src={seg.isoViewDataUrl} alt={`Segment ${seg.id}`} width={300} height={200} className="rounded-md" />}</CardContent></Card></CarouselItem>
                         ))}
                       </CarouselContent>
                       <CarouselPrevious />
@@ -306,5 +347,3 @@ export function ReportTab({ threeDViewRef, twoDViewRef }: ReportTabProps) {
     </ScrollArea>
   )
 }
-
-    

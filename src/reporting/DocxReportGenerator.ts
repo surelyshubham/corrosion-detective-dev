@@ -1,243 +1,354 @@
 
+// src/reporting/DocxReportGenerator.ts
+
 import {
+  AlignmentType,
   Document,
+  HeadingLevel,
+  ImageRun,
   Packer,
   Paragraph,
   Table,
-  TableRow,
   TableCell,
-  AlignmentType,
-  WidthType,
-  ImageRun,
-  Header,
-  VerticalAlign,
-  BorderStyle,
+  TableRow,
   TextRun,
-} from "docx";
-import type { MergedInspectionResult, ReportMetadata, SegmentBox } from '@/lib/types';
-import { format } from 'date-fns';
+} from 'docx';
 
-export interface ReportData {
-  metadata: ReportMetadata & { defectThreshold: number };
-  inspection: MergedInspectionResult;
-  segments: SegmentBox[];
-  images: {
-    fullModel3D?: string;
-    fullHeatmap2D?: string;
-    segmentShots?: { segmentId: number; imageDataUrl: string }[];
-  };
+export interface GlobalStatsForDocx {
+  assetName: string;
+  projectName?: string;
+  jobNumber?: string;
+  inspectionDate?: string;
+  nominalThickness?: number;
+  minThickness: number;
+  maxThickness: number;
+  avgThickness: number;
+  corrodedAreaBelow80?: number;
+  corrodedAreaBelow70?: number;
+  corrodedAreaBelow60?: number;
 }
 
-function dataUriToBuffer(dataUri: string): ArrayBuffer {
-    if (!dataUri || !dataUri.includes(',')) {
-        const errorPart = dataUri ? dataUri.substring(0, 50) + '...' : 'null or empty';
-        throw new Error(`Invalid data URI. It does not contain a comma. Start of URI: ${errorPart}`);
+export interface ReportPatchSegment {
+  id: number;
+  label?: string;
+
+  coordinates: {
+    xMin: number;
+    xMax: number;
+    yMin: number;
+    yMax: number;
+  };
+  pointCount: number;
+  worstThickness: number;
+  avgThickness: number;
+  tier: string;
+
+  isoViewDataUrl?: string;
+  topViewDataUrl?: string;
+  sideViewDataUrl?: string;
+  heatmapDataUrl?: string;
+
+  aiObservation?: string;
+}
+
+export interface FinalReportPayload {
+  global: GlobalStatsForDocx;
+  segments: ReportPatchSegment[];
+  // Optional: any free-form remarks filled in the UI
+  remarks?: string;
+}
+
+// Helper: convert data URI to Buffer-safe Uint8Array
+function dataUriToUint8(dataUri?: string): Uint8Array | null {
+  if (!dataUri) return null;
+  try {
+    const commaIndex = dataUri.indexOf(',');
+    if (commaIndex === -1) {
+      console.warn('dataUriToUint8: no comma in data URI');
+      return null;
     }
-    const base64 = dataUri.split(',')[1];
+    const base64 = dataUri.substring(commaIndex + 1).trim();
     if (!base64) {
-        throw new Error('Invalid data URI, base64 content is missing.');
+      console.warn('dataUriToUint8: empty base64 section');
+      return null;
     }
-    const binaryString = atob(base64);
-    const len = binaryString.length;
+    const binary = atob(base64);
+    const len = binary.length;
     const bytes = new Uint8Array(len);
     for (let i = 0; i < len; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
+      bytes[i] = binary.charCodeAt(i);
     }
-    return bytes.buffer;
+    return bytes;
+  } catch (err) {
+    console.error('dataUriToUint8 failed', err);
+    return null;
+  }
 }
 
-function chunkArray<T>(arr: T[], size: number): T[][] {
-  const result: T[][] = [];
-  for (let i = 0; i < arr.length; i += size) {
-    result.push(arr.slice(i, i + size));
-  }
-  return result;
-}
+function createStatsTable(global: GlobalStatsForDocx): Table {
+  const rows: TableRow[] = [];
 
-export async function generateReportDocx(data: ReportData) {
-  const { metadata, inspection, segments, images } = data;
-  
-  if (!inspection) {
-    console.error("generateReportDocx called with no inspection data.");
-    return;
-  }
-  
-  const patchImages = images.segmentShots || [];
-
-  const doc = new Document({
-    sections: [
-      {
-        properties: {},
+  const pushRow = (label: string, value: string) => {
+    rows.push(
+      new TableRow({
         children: [
-          new Paragraph({
-            text: "Corrosion Inspection Report",
-            heading: "Title",
-            alignment: AlignmentType.CENTER,
-            spacing: { after: 300 },
-          }),
-
-          new Table({
-            width: { size: 100, type: WidthType.PERCENTAGE },
-            rows: [
-              new TableRow({
-                children: [
-                  new TableCell({ children: [new Paragraph("Client Name")] }),
-                  new TableCell({ children: [new Paragraph(String(metadata.companyName || "-"))] }),
-                  new TableCell({ children: [new Paragraph("Scan Date")] }),
-                  new TableCell({ children: [new Paragraph(metadata.scanDate ? format(metadata.scanDate, 'PP') : "-")] }),
-                ],
-              }),
-               new TableRow({
-                children: [
-                  new TableCell({ children: [new Paragraph("Project Name")] }),
-                  new TableCell({ children: [new Paragraph(String(metadata.projectName || "-"))] }),
-                  new TableCell({ children: [new Paragraph("Report Date")] }),
-                  new TableCell({ children: [new Paragraph(metadata.reportDate ? format(metadata.reportDate, 'PP') : "-")] }),
-                ],
-              }),
-              new TableRow({
-                children: [
-                  new TableCell({ children: [new Paragraph("Asset / Equipment")] }),
-                  new TableCell({ children: [new Paragraph(String(metadata.assetName || "-"))] }),
-                   new TableCell({ children: [new Paragraph("Operator")] }),
-                  new TableCell({ children: [new Paragraph(String(metadata.operatorName || "-"))] }),
-                ],
+          new TableCell({
+            children: [
+              new Paragraph({
+                children: [new TextRun({ text: label, bold: true })],
               }),
             ],
-           }),
-          
-          new Paragraph({
-            text: "Overall Asset Views",
-            heading: "Title",
-            spacing: { before: 400, after: 200 },
           }),
-          
-          new Paragraph({
-            heading: "Heading2",
-            children: [new TextRun("3D Surface View")],
+          new TableCell({
+            children: [new Paragraph({ text: value })],
           }),
-
-          ...(images.fullModel3D
-            ? [
-                new Paragraph({
-                  alignment: AlignmentType.CENTER,
-                  children: [
-                    new ImageRun({
-                      data: dataUriToBuffer(images.fullModel3D),
-                      transformation: { width: 500, height: 250 },
-                    }),
-                  ],
-                }),
-              ]
-            : []),
-
-          new Paragraph({
-            heading: "Heading2",
-            children: [new TextRun("2D Heatmap View")],
-            spacing: { before: 200 },
-          }),
-
-          ...(images.fullHeatmap2D
-            ? [
-                new Paragraph({
-                   alignment: AlignmentType.CENTER,
-                  children: [
-                    new ImageRun({
-                      data: dataUriToBuffer(images.fullHeatmap2D),
-                      transformation: { width: 500, height: 250 },
-                    }),
-                  ],
-                }),
-              ]
-            : []),
-            
-            ...createPatchTables(patchImages),
         ],
-      },
-    ],
-  });
+      }),
+    );
+  };
 
-  const blob = await Packer.toBlob(doc);
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = `Report_${metadata.assetName?.replace(/ /g, "_") || 'Inspection'}.docx`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(a.href);
-}
-
-
-function createPatchTables(patchImages: { segmentId: number; imageDataUrl: string }[]) {
-  if (patchImages.length === 0) return [];
-  
-  const chunks = chunkArray(patchImages, 9);
-  const result: (Paragraph | Table)[] = [
-      new Paragraph({ text: "", pageBreakBefore: true }),
-      new Paragraph({
-        text: "Corrosion Patch Segments",
-        heading: "Title",
-        spacing: { before: 400, after: 200 },
-      })
-  ];
-
-  for (const chunk of chunks) {
-    const rows: TableRow[] = [];
-    for (let i = 0; i < 3; i++) {
-      const cells: TableCell[] = [];
-      for (let j = 0; j < 3; j++) {
-        const imgData = chunk[i * 3 + j];
-        if (imgData) {
-          try {
-            cells.push(
-              new TableCell({
-                children: [
-                  new Paragraph({
-                    text: `Segment #${imgData.segmentId}`,
-                    alignment: AlignmentType.CENTER,
-                    style: "IntenseQuote" 
-                  }),
-                  new Paragraph({
-                    children: [
-                      new ImageRun({
-                        data: dataUriToBuffer(imgData.imageDataUrl),
-                        transformation: { width: 180, height: 120 },
-                      }),
-                    ],
-                    alignment: AlignmentType.CENTER,
-                  }),
-                ],
-                width: { size: 33, type: WidthType.PERCENTAGE },
-                verticalAlign: VerticalAlign.CENTER,
-              })
-            );
-          } catch(e) {
-            console.error("Error adding image to DOCX", e)
-            cells.push(new TableCell({ children: [new Paragraph("Image error")] }));
-          }
-        } else {
-          cells.push(new TableCell({ children: [new Paragraph("")], borders: {
-              top: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
-              bottom: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
-              left: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
-              right: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
-          }}));
-        }
-      }
-      rows.push(new TableRow({ children: cells }));
-    }
-    result.push(
-      new Table({
-        rows,
-        width: { size: 100, type: WidthType.PERCENTAGE },
-      })
+  pushRow('Asset', global.assetName || 'N/A');
+  if (global.projectName)
+    pushRow('Project', global.projectName);
+  if (global.jobNumber)
+    pushRow('Job Number', global.jobNumber);
+  if (global.inspectionDate)
+    pushRow('Inspection Date', global.inspectionDate);
+  if (global.nominalThickness !== undefined)
+    pushRow(
+      'Nominal Thickness',
+      `${global.nominalThickness.toFixed(2)} mm`,
     );
 
-    result.push(new Paragraph({ text: "", pageBreakBefore: true }));
+  pushRow('Min Thickness', `${global.minThickness.toFixed(2)} mm`);
+  pushRow('Max Thickness', `${global.maxThickness.toFixed(2)} mm`);
+  pushRow('Avg Thickness', `${global.avgThickness.toFixed(2)} mm`);
+
+  if (global.corrodedAreaBelow80 !== undefined)
+    pushRow(
+      'Corroded Area (<80%)',
+      `${global.corrodedAreaBelow80.toFixed(2)} %`,
+    );
+  if (global.corrodedAreaBelow70 !== undefined)
+    pushRow(
+      'Corroded Area (<70%)',
+      `${global.corrodedAreaBelow70.toFixed(2)} %`,
+    );
+  if (global.corrodedAreaBelow60 !== undefined)
+    pushRow(
+      'Corroded Area (<60%)',
+      `${global.corrodedAreaBelow60.toFixed(2)} %`,
+    );
+
+  return new Table({
+    width: {
+      size: 100,
+      type: 'pct',
+    },
+    rows,
+  });
+}
+
+function createPatchHeader(patch: ReportPatchSegment): Paragraph {
+  const label = patch.label ?? `Patch #${patch.id}`;
+  return new Paragraph({
+    text: label,
+    heading: HeadingLevel.HEADING_2,
+    spacing: { after: 200, before: 400 },
+    pageBreakBefore: true,
+  });
+}
+
+function createPatchStatsTable(patch: ReportPatchSegment): Table {
+  const rows: TableRow[] = [];
+  const {xMin, xMax, yMin, yMax} = patch.coordinates;
+
+  const pushRow = (label: string, value: string) => {
+    rows.push(
+      new TableRow({
+        children: [
+          new TableCell({
+            children: [
+              new Paragraph({
+                children: [new TextRun({ text: label, bold: true })],
+              }),
+            ],
+          }),
+          new TableCell({
+            children: [new Paragraph({ text: value })],
+          }),
+        ],
+      }),
+    );
+  };
+
+  pushRow(
+    'Coordinates (X)',
+    `${xMin.toFixed(0)} to ${xMax.toFixed(0)} mm`,
+  );
+  pushRow(
+    'Coordinates (Y)',
+    `${yMin.toFixed(0)} to ${yMax.toFixed(0)} mm`,
+  );
+  pushRow(
+    'Patch Size',
+    `${(xMax - xMin).toFixed(0)} mm x ${(yMax - yMin).toFixed(0)} mm`,
+  );
+  pushRow('Min Thickness', `${patch.worstThickness.toFixed(2)} mm`);
+  pushRow('Avg Thickness', `${patch.avgThickness.toFixed(2)} mm`);
+  
+  const minPercentage = (patch.worstThickness / (patch as any).nominalThickness) * 100;
+  if(!isNaN(minPercentage)) {
+      pushRow(
+        'Minimum Remaining Wall',
+        `${minPercentage.toFixed(1)} %`,
+      );
+  }
+  pushRow('Measured Points', `${patch.pointCount}`);
+
+  return new Table({
+    width: { size: 100, type: 'pct' },
+    rows,
+  });
+}
+
+function createImageParagraph(label: string, dataUri?: string): Paragraph[] {
+  const bytes = dataUriToUint8(dataUri);
+  if (!bytes) {
+    return [
+      new Paragraph({
+        text: `${label}: [image unavailable]`,
+        italics: true,
+      }),
+    ];
+  }
+
+  return [
+    new Paragraph({
+      text: label,
+      spacing: { after: 100 },
+      bold: true,
+    }),
+    new Paragraph({
+      children: [
+        new ImageRun({
+          data: bytes,
+          transformation: {
+            width: 480,
+            height: 270,
+          },
+        }),
+      ],
+      alignment: AlignmentType.CENTER,
+      spacing: { after: 200 },
+    }),
+  ];
+}
+
+export async function generateReportDocx(
+  payload: FinalReportPayload,
+): Promise<Blob> {
+  const { global, segments, remarks } = payload;
+
+  const doc = new Document({
+    sections: [],
+  });
+  
+  const sections: any[] = [];
+
+  // --- Cover / Global section ---
+  const globalChildren: (Paragraph | Table)[] = [];
+
+  globalChildren.push(
+    new Paragraph({
+      text: 'Corrosion Inspection Report',
+      heading: HeadingLevel.TITLE,
+      alignment: AlignmentType.CENTER,
+      spacing: { after: 300 },
+    }),
+  );
+
+  if (global.assetName) {
+    globalChildren.push(
+      new Paragraph({
+        text: `Asset: ${global.assetName}`,
+        alignment: AlignmentType.CENTER,
+        spacing: { after: 100 },
+      }),
+    );
+  }
+
+  globalChildren.push(
+    new Paragraph({
+      text: '',
+      spacing: { after: 200 },
+    }),
+  );
+
+  globalChildren.push(new Paragraph({ text: 'Global Statistics', heading: HeadingLevel.HEADING_1, spacing: { after: 200 } }));
+  globalChildren.push(new Paragraph({ text: '' }));
+  globalChildren.push(createStatsTable(global));
+
+  if (remarks) {
+    globalChildren.push(
+      new Paragraph({
+        text: '',
+        spacing: { before: 200 },
+      }),
+    );
+    globalChildren.push(
+      new Paragraph({
+        text: 'Inspector Remarks',
+        heading: HeadingLevel.HEADING_2,
+        spacing: { after: 100 },
+      }),
+    );
+    globalChildren.push(new Paragraph({ text: remarks }));
+  }
+
+  sections.push({
+    children: globalChildren,
+  });
+
+  // --- Per-patch sections ---
+  for (const patch of segments) {
+    const children: (Paragraph | Table)[] = [];
+
+    children.push(createPatchHeader(patch));
+    children.push(
+      new Paragraph({
+        text:
+          'Views: Isometric (45°/35°), Top (90°/0°), Side (0°/90°), plus the 2D heatmap.',
+        italics: true,
+        spacing: { after: 200 },
+      }),
+    );
+    
+    (children as any).push(createPatchStatsTable(patch));
+
+    // Images
+    children.push(...createImageParagraph('Isometric View', patch.isoViewDataUrl));
+    children.push(...createImageParagraph('Top View', patch.topViewDataUrl));
+    children.push(...createImageParagraph('Side View', patch.sideViewDataUrl));
+    children.push(...createImageParagraph('2D Heatmap', patch.heatmapDataUrl));
+
+    // AI Observation
+    if (patch.aiObservation) {
+      children.push(
+        new Paragraph({
+          text: 'AI Observation',
+          heading: HeadingLevel.HEADING_3,
+          spacing: { before: 200, after: 100 },
+        }),
+      );
+      children.push(new Paragraph({ text: patch.aiObservation }));
+    }
+
+    sections.push({ children });
   }
   
-  // Remove last page break
-  if(result.length > 2) result.pop();
+  (doc as any).sections = sections;
 
-  return result;
+  const buffer = await Packer.toBlob(doc);
+  return buffer;
 }
