@@ -42,29 +42,7 @@ export async function generateReportDocx(data: ReportData) {
 
   const doc = new Document({
     sections: [{
-      headers: {
-        default: new Table({
-          rows: [
-            new TableRow({
-              children: [
-                new TableCell({
-                  children: [new Paragraph({
-                    text: "Sigma NDT",
-                    style: "header-left"
-                  })],
-                  borders: { top: { style: BorderStyle.NONE }, bottom: { style: BorderStyle.SINGLE, size: 4, color: "4287f5" }, left: { style: BorderStyle.NONE }, right: { style: BorderStyle.NONE } },
-                }),
-                new TableCell({
-                  children: [new Paragraph({ text: "AI Corrosion Inspection Report", style: "header-right" })],
-                  borders: { top: { style: BorderStyle.NONE }, bottom: { style: BorderStyle.SINGLE, size: 4, color: "4287f5" }, left: { style: BorderStyle.NONE }, right: { style: BorderStyle.NONE } },
-                }),
-              ],
-            }),
-          ],
-          width: { size: 100, type: WidthType.PERCENTAGE },
-          columnWidths: [3000, 6500],
-        }),
-      },
+      properties: {},
       children: [
         new Paragraph({
           alignment: AlignmentType.CENTER,
@@ -72,10 +50,11 @@ export async function generateReportDocx(data: ReportData) {
             new TextRun({
               text: "Inspection Report",
               bold: true,
-              size: 48,
+              size: 40,
             }),
           ],
         }),
+        new Paragraph({}), // spacer
         new Paragraph({ text: `Project: ${metadata.projectName}`, heading: HeadingLevel.HEADING_2 }),
         new Paragraph({ text: `Asset: ${metadata.assetName}`, heading: HeadingLevel.HEADING_3 }),
         new Paragraph({ text: `Report Date: ${metadata.reportDate ? format(metadata.reportDate, 'PP') : 'N/A'}`, heading: HeadingLevel.HEADING_4 }),
