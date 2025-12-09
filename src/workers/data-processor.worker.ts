@@ -181,7 +181,7 @@ function createBuffers(grid: MergedGrid, nominal: number, min: number, max: numb
             const index = y * width + x;
             const cell = grid[flippedY][x]; 
             
-            displacementBuffer[index] = cell.effectiveThickness !== null ? cell.effectiveThickness : nominal;
+            displacementBuffer[index] = cell.effectiveThickness !== null ? cell.effectiveThickness - nominal : 0;
             
             const rgba = colorMode === '%' ? getNormalizedColor(cell.effectiveThickness !== null && range > 0 ? (cell.effectiveThickness - min) / range : null) : getAbsoluteColor(cell.percentage);
             const colorIndex = index * 4;
@@ -322,9 +322,9 @@ self.onmessage = async (event: MessageEvent<any>) => {
 
             const { file, config, mergeConfig, resolution } = payload;
             self.postMessage({ type: 'PROGRESS' });
-
+            const { rows, detectedNominal } = universalParse(file.buffer, file.name);
+            
             if (!resolution) {
-                const { rows, detectedNominal } = universalParse(file.buffer, file.name);
                 if (detectedNominal && Math.abs(detectedNominal - MASTER_GRID.baseConfig.nominalThickness) > 0.01) {
                     const conflict: ThicknessConflict = {
                         fileName: file.name, fileBuffer: file.buffer,
@@ -335,18 +335,14 @@ self.onmessage = async (event: MessageEvent<any>) => {
                     self.postMessage({ type: 'THICKNESS_CONFLICT', conflict: conflict }, [file.buffer]);
                     return;
                 }
-            }
-
-            if (resolution) {
+            } else {
                 if (resolution === 'useNew') {
-                    const { conflictingThickness } = MASTER_GRID.plates.slice(-1)[0];
-                    MASTER_GRID.baseConfig.nominalThickness = MASTER_GRID.plates.find(p => p.name === file.name)?.detectedNominal ?? MASTER_GRID.baseConfig.nominalThickness;
+                     MASTER_GRID.baseConfig.nominalThickness = detectedNominal ?? MASTER_GRID.baseConfig.nominalThickness;
                 } else if (resolution.type === 'useCustom') {
                     MASTER_GRID.baseConfig.nominalThickness = resolution.value;
                 }
             }
             
-            const { rows } = universalParse(file.buffer, file.name);
             const newPoints = parseFileToGrid(rows, file.name);
             const { direction, start: offset } = mergeConfig;
 
@@ -376,7 +372,7 @@ self.onmessage = async (event: MessageEvent<any>) => {
         } else if (type === 'RESEGMENT') {
             if (!FINAL_GRID || !MASTER_GRID) return;
             const segments = segmentAndAnalyze(FINAL_GRID, MASTER_GRID.baseConfig.nominalThickness, payload.threshold);
-            self.postMessage({ type: 'FINALIZED', segments: segments });
+            self.postMessage({ type: 'SEGMENTS_UPDATED', segments: segments });
         } else if (type === 'RECOLOR') {
              if (!FINAL_GRID || !MASTER_GRID) return;
              const { stats } = computeStats(FINAL_GRID, MASTER_GRID.baseConfig.nominalThickness);
@@ -390,3 +386,5 @@ self.onmessage = async (event: MessageEvent<any>) => {
 };
 
 export {};
+
+    

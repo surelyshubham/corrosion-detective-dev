@@ -14,14 +14,14 @@ export type StagedFile = {
 }
 
 export interface WorkerOutput {
-  type: 'STAGED' | 'FINALIZED' | 'ERROR' | 'PROGRESS' | 'THICKNESS_CONFLICT';
+  type: 'STAGED' | 'FINALIZED' | 'ERROR' | 'PROGRESS' | 'THICKNESS_CONFLICT' | 'SEGMENTS_UPDATED';
   message?: string;
   progress?: number;
   
   // STAGED output
   dimensions?: { width: number; height: number };
 
-  // FINALIZED output
+  // FINALIZED / SEGMENTS_UPDATED output
   plates?: Plate[];
   displacementBuffer?: Float32Array;
   colorBuffer?: Uint8Array;
@@ -103,16 +103,12 @@ export const useInspectionStore = create<InspectionState>()(
             set({ isLoading: false, projectDimensions: data.dimensions || null, thicknessConflict: null });
           } else if (type === 'THICKNESS_CONFLICT') {
              set({ isLoading: false, thicknessConflict: data.conflict || null });
+          } else if (type === 'SEGMENTS_UPDATED') {
+            set(state => ({
+                inspectionResult: state.inspectionResult ? { ...state.inspectionResult, segments: data.segments! } : null,
+                dataVersion: state.dataVersion + 1, // To trigger re-renders that depend on segments
+            }));
           } else if (type === 'FINALIZED') {
-              // If only segments are returned, update them in the existing result
-              if (data.segments && !data.plates) {
-                set(state => ({
-                    inspectionResult: state.inspectionResult ? { ...state.inspectionResult, segments: data.segments! } : null,
-                    dataVersion: state.dataVersion + 1, // To trigger re-renders that depend on segments
-                }));
-                return;
-              }
-
              if (data.displacementBuffer && data.colorBuffer && data.gridMatrix && data.stats && data.condition && data.plates && data.segments) {
                 
                 if (data.stats.totalPoints === 0) {
@@ -223,7 +219,7 @@ export const useInspectionStore = create<InspectionState>()(
         finalizeProject: () => {
             if (!worker || get().stagedFiles.length === 0) return;
             set({ isFinalizing: true, loadingProgress: 0, error: null });
-            worker.postMessage({ type: 'FINALIZE', colorMode: get().colorMode, threshold: 80 });
+            worker.postMessage({ type: 'FINALIZE', colorMode: get().colorMode, threshold: get().inspectionResult?.segments[0]?.coordinates ? 80 : useReportStore.getState().defectThreshold });
         },
         
         setSegmentsForThreshold: (threshold) => {
@@ -254,5 +250,7 @@ export const useInspectionStore = create<InspectionState>()(
       }
     }
 );
+// This import is needed to break a circular dependency, do not remove
+import { useReportStore } from './use-report-store';
 
     

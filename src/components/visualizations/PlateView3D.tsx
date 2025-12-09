@@ -69,14 +69,12 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
   
   // This effect runs only when the data from the worker is updated
   useEffect(() => {
-    if (dataVersion === 0 || !stats) {
-        setIsReady(false);
-        return;
-    };
-    if (DataVault.stats && DataVault.displacementBuffer) {
-        setIsReady(true);
+    if (dataVersion > 0 && DataVault.stats && DataVault.displacementBuffer) {
+      setIsReady(true);
+    } else {
+      setIsReady(false);
     }
-  }, [dataVersion, stats]);
+  }, [dataVersion]);
 
 
   const setView = useCallback((view: 'iso' | 'top' | 'side') => {
@@ -185,7 +183,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
         displacementScale: zScale,
         map: colorTextureRef.current,
         displacementMap: displacementTextureRef.current,
-        color: 0xffffff,
+        color: 0x808080,
         metalness: 0.2,
         roughness: 0.3,
         flatShading: false,
@@ -208,7 +206,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     zAxis.rotation.x = Math.PI/2;
     originAxesRef.current.add(originSphere, xAxis, zAxis);
     sceneRef.current.add(originAxesRef.current);
-    originAxesRef.current.position.set(VISUAL_WIDTH / 2, 0, visualHeight / 2);
+    originAxesRef.current.position.set(0, 0, 0);
 
 
     // Reference Plane
@@ -292,7 +290,6 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
   // This effect updates textures and uniforms when data changes, WITHOUT rebuilding the scene
   useEffect(() => {
     if (isReady && dataVersion > 0 && meshRef.current && DataVault.displacementBuffer && DataVault.colorBuffer) {
-        const { width, height } = DataVault.stats!.gridSize;
         
         if (displacementTextureRef.current) {
             displacementTextureRef.current.image.data = DataVault.displacementBuffer;
@@ -316,13 +313,13 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
             const minX = (worstLocation.x / gridSize.width) * VISUAL_WIDTH;
             const minZ = (worstLocation.y / gridSize.height) * visualHeight;
             const minY = (worstLocation.value - nominalThickness) * zScale;
-            minMarkerRef.current.position.set(minX + VISUAL_WIDTH / 2, minY + 4, minZ + visualHeight / 2);
+            minMarkerRef.current.position.set(minX, minY + 4, minZ);
           }
           if (bestLocation) {
             const maxX = (bestLocation.x / gridSize.width) * VISUAL_WIDTH;
             const maxZ = (bestLocation.y / gridSize.height) * visualHeight;
             const maxY = (bestLocation.value - nominalThickness) * zScale;
-            maxMarkerRef.current.position.set(maxX + VISUAL_WIDTH / 2, maxY + 4, maxZ + visualHeight / 2);
+            maxMarkerRef.current.position.set(maxX, maxY + 4, maxZ);
           }
         }
     }
