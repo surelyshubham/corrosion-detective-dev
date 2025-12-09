@@ -5,7 +5,7 @@ import { create } from 'zustand';
 import type { MergedInspectionResult, AIInsight, Plate, MergedGrid, AssetType, InspectionStats } from '@/lib/types';
 import { DataVault } from './data-vault';
 import { type MergeFormValues } from '@/components/tabs/merge-alert-dialog';
-import { useToast } from '@/hooks/use-toast';
+import { toast } from '@/hooks/use-toast';
 
 export type StagedFile = {
   name: string;
@@ -86,10 +86,10 @@ export const useInspectionStore = create<InspectionState>()(
              }
           } else if (type === 'ERROR') {
             console.error("Worker Error:", message);
-            useToast.getState().toast({ variant: 'destructive', title: 'Processing Error', description: message });
+            toast({ variant: 'destructive', title: 'Processing Error', description: message });
             set({ isLoading: false, isFinalizing: false, error: message || "An unknown error occurred in the worker." });
           } else if (type === 'STAGED') {
-            useToast.getState().toast({ title: 'File Staged', description: `${get().stagedFiles.slice(-1)[0]?.name} has been added.` });
+            toast({ title: 'File Staged', description: `${get().stagedFiles.slice(-1)[0]?.name} has been added.` });
             set({ isLoading: false, projectDimensions: data.dimensions || null });
           } else if (type === 'FINALIZED') {
              if (data.displacementBuffer && data.colorBuffer && data.gridMatrix && data.stats && data.condition && data.plates) {
