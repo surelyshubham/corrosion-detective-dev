@@ -12,7 +12,7 @@ import {
   TableRow,
   TextRun,
 } from 'docx';
-import type { FinalReportPayload, GlobalStatsForDocx, ReportPatchSegment } from '@/lib/types';
+import type { FinalReportPayload, ReportPatchSegment } from '@/lib/types';
 
 
 // Helper: convert data URI to Buffer-safe Uint8Array
@@ -42,7 +42,27 @@ function dataUriToUint8(dataUri?: string): Uint8Array | null {
   }
 }
 
-function createStatsTable(global: GlobalStatsForDocx): Table {
+async function createImageParagraph(dataUrl?: string): Promise<Paragraph> {
+    if (!dataUrl) {
+        return new Paragraph({ text: "[image unavailable]", italics: true });
+    }
+    const imageBuffer = dataUriToUint8(dataUrl);
+    if (!imageBuffer) {
+        return new Paragraph({ text: "[image processing failed]", italics: true });
+    }
+    return new Paragraph({
+        alignment: AlignmentType.CENTER,
+        children: [
+            new ImageRun({
+                data: imageBuffer,
+                transformation: { width: 550, height: 350 },
+            }),
+        ],
+    });
+}
+
+
+function createStatsTable(global: FinalReportPayload['global']): Table {
   const rows: TableRow[] = [];
 
   const pushRow = (label: string, value: string) => {
@@ -149,7 +169,7 @@ function createPatchStatsTable(patch: ReportPatchSegment): Table {
     pushRow('Min Thickness', `${patch.worstThickness.toFixed(2)} mm`);
     pushRow('Avg Thickness', `${patch.avgThickness.toFixed(2)} mm`);
     
-    const minPercentage = patch.worstThickness / patch.avgThickness * 100 // placeholder
+    const minPercentage = (patch.worstThickness / (patch.avgThickness > 0 ? patch.avgThickness : 1)) * 100;
     if(!isNaN(minPercentage)) {
         pushRow(
             'Minimum Remaining Wall',
@@ -164,39 +184,6 @@ function createPatchStatsTable(patch: ReportPatchSegment): Table {
     });
 }
 
-
-function createImageParagraph(label: string, dataUri?: string): Paragraph[] {
-  const bytes = dataUriToUint8(dataUri);
-  if (!bytes) {
-    return [
-      new Paragraph({
-        text: `${label}: [image unavailable]`,
-        italics: true,
-      }),
-    ];
-  }
-
-  return [
-    new Paragraph({
-      text: label,
-      spacing: { after: 100 },
-      bold: true,
-    }),
-    new Paragraph({
-      children: [
-        new ImageRun({
-          data: bytes,
-          transformation: {
-            width: 480,
-            height: 270,
-          },
-        }),
-      ],
-      alignment: AlignmentType.CENTER,
-      spacing: { after: 200 },
-    }),
-  ];
-}
 
 export async function generateReportDocx(
   payload: FinalReportPayload,
@@ -239,23 +226,45 @@ export async function generateReportDocx(
     children: globalChildren
   });
 
-  // Patch pages
-  for (const patch of segments) {
-    const children: (Paragraph | Table)[] = [];
-    children.push(createPatchHeader(patch));
-    (children as any).push(createPatchStatsTable(patch))
-    children.push(...createImageParagraph('Isometric View', patch.isoViewDataUrl));
-    children.push(...createImageParagraph('Top View', patch.topViewDataUrl));
-    children.push(...createImageParagraph('Side View', patch.sideViewDataUrl));
-    children.push(...createImageParagraph('2D Heatmap', patch.heatmapDataUrl));
+  // Create PAGE PER PATCH with async yielding to avoid UI freeze
+  for (let i = 0; i < segments.length; i++) {
 
-    if (patch.aiObservation) {
-      children.push(new Paragraph({ text: 'AI Observation', heading: HeadingLevel.HEADING_3, spacing: { before: 200, after: 100 } }));
-      children.push(new Paragraph({ text: patch.aiObservation }));
-    }
+      // 👇 IMPORTANT: prevent main thread freeze
+      await new Promise(resolve => setTimeout(resolve, 0));
 
-    sections.push({ children });
+      const patch = segments[i];
+
+      const patchChildren : (Paragraph|Table)[] = [];
+
+      patchChildren.push(createPatchHeader(patch));
+      patchChildren.push(createPatchStatsTable(patch));
+      patchChildren.push(new Paragraph({ text: "" })); // Spacer
+
+      patchChildren.push(new Paragraph({ text: "Isometric View", alignment: AlignmentType.CENTER, spacing: { before: 100, after: 100 } }));
+      patchChildren.push(await createImageParagraph(patch.isoViewDataUrl));
+
+      patchChildren.push(new Paragraph({ text: "Top View", alignment: AlignmentType.CENTER, spacing: { before: 100, after: 100 } }));
+      patchChildren.push(await createImageParagraph(patch.topViewDataUrl));
+      
+      patchChildren.push(new Paragraph({ text: "Side View", alignment: AlignmentType.CENTER, spacing: { before: 100, after: 100 } }));
+      patchChildren.push(await createImageParagraph(patch.sideViewDataUrl));
+      
+      patchChildren.push(new Paragraph({ text: "2D Heatmap", alignment: AlignmentType.CENTER, spacing: { before: 100, after: 100 } }));
+      patchChildren.push(await createImageParagraph(patch.heatmapDataUrl));
+
+      if (patch.aiObservation) {
+        patchChildren.push(new Paragraph({ text: 'AI Observation', heading: HeadingLevel.HEADING_3, spacing: {before: 200, after: 100 } }));
+        patchChildren.push(new Paragraph({ text: patch.aiObservation }));
+      }
+
+      sections.push({
+          children: patchChildren
+      });
+
+      // (Optional) show progress in console
+      console.log(`DOCX page generated for patch ${i + 1} of ${segments.length}`);
   }
+
 
   // FINAL FIX — use docx official structure
   const doc = new Document({
