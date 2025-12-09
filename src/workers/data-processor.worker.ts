@@ -1,4 +1,5 @@
 
+
 import * as XLSX from 'xlsx';
 import type { MergedGrid, InspectionStats, Condition, Plate, AssetType, SegmentBox, SeverityTier } from '../lib/types';
 import { type MergeFormValues } from '@/components/tabs/merge-alert-dialog';
@@ -100,6 +101,8 @@ function computeStats(grid: MergedGrid, nominalInput: number) {
                 continue;
             }
             const value = cell.effectiveThickness;
+            if (!isFinite(value)) continue;
+
             validPointsCount++;
             sumThickness += value;
             if (value < minThickness) {
@@ -309,7 +312,7 @@ self.onmessage = async (event: MessageEvent<any>) => {
 
             if (points.length === 0 || points[0].length === 0) throw new Error("Parsing resulted in empty data grid.");
             
-            const finalConfig = { ...config, nominalThickness: detectedNominal ?? config.nominalThickness };
+            const finalConfig = { ...config, nominalThickness: Number(detectedNominal ?? config.nominalThickness) };
 
             MASTER_GRID = {
                 points, width: points[0].length, height: points.length,
@@ -341,7 +344,7 @@ self.onmessage = async (event: MessageEvent<any>) => {
                 }
             } else {
                 if (resolution === 'useNew') {
-                     MASTER_GRID.baseConfig.nominalThickness = detectedNominal ?? MASTER_GRID.baseConfig.nominalThickness;
+                     MASTER_GRID.baseConfig.nominalThickness = Number(detectedNominal ?? MASTER_GRID.baseConfig.nominalThickness);
                 } else if (resolution.type === 'useCustom') {
                     MASTER_GRID.baseConfig.nominalThickness = resolution.value;
                 }

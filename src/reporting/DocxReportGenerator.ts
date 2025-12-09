@@ -1,4 +1,3 @@
-// src/reporting/DocxReportGenerator.ts
 
 import {
   AlignmentType,
@@ -12,7 +11,29 @@ import {
   TableRow,
   TextRun,
 } from 'docx';
-import type { FinalReportPayload, ReportPatchSegment } from '@/lib/types';
+import type { SegmentBox } from '@/lib/types';
+
+
+export interface GlobalStatsForDocx {
+  assetName: string;
+  projectName?: string;
+  inspectionDate?: string;
+  nominalThickness?: number;
+  minThickness: number;
+  maxThickness: number;
+  avgThickness: number;
+  corrodedAreaBelow80?: number;
+  corrodedAreaBelow70?: number;
+  corrodedAreaBelow60?: number;
+}
+
+export type ReportPatchSegment = SegmentBox;
+
+export interface FinalReportPayload {
+  global: GlobalStatsForDocx;
+  segments: ReportPatchSegment[];
+  remarks?: string;
+}
 
 
 // Helper: convert data URI to Buffer-safe Uint8Array
@@ -62,7 +83,7 @@ async function createImageParagraph(dataUrl?: string): Promise<Paragraph> {
 }
 
 
-function createStatsTable(global: FinalReportPayload['global']): Table {
+function createStatsTable(global: GlobalStatsForDocx): Table {
   const rows: TableRow[] = [];
 
   const pushRow = (label: string, value: string) => {
@@ -134,7 +155,7 @@ function createPatchHeader(patch: ReportPatchSegment): Paragraph {
   });
 }
 
-function createPatchStatsTable(patch: ReportPatchSegment): Table {
+function createPatchStatsTable(patch: ReportPatchSegment, nominalThickness: number): Table {
     const rows: TableRow[] = [];
 
     const pushRow = (label: string, value: string) => {
@@ -168,7 +189,7 @@ function createPatchStatsTable(patch: ReportPatchSegment): Table {
     pushRow('Min Thickness', `${patch.worstThickness.toFixed(2)} mm`);
     pushRow('Avg Thickness', `${patch.avgThickness.toFixed(2)} mm`);
     
-    const minPercentage = (patch.worstThickness / (patch.avgThickness > 0 ? patch.avgThickness : 1)) * 100;
+    const minPercentage = (patch.worstThickness / nominalThickness) * 100;
     if(!isNaN(minPercentage)) {
         pushRow(
             'Minimum Remaining Wall',
@@ -228,7 +249,6 @@ export async function generateReportDocx(
   // Create PAGE PER PATCH with async yielding to avoid UI freeze
   for (let i = 0; i < segments.length; i++) {
 
-      // 👇 IMPORTANT: prevent main thread freeze
       await new Promise(resolve => setTimeout(resolve, 0));
 
       const patch = segments[i];
@@ -236,7 +256,7 @@ export async function generateReportDocx(
       const patchChildren : (Paragraph|Table)[] = [];
 
       patchChildren.push(createPatchHeader(patch));
-      patchChildren.push(createPatchStatsTable(patch));
+      patchChildren.push(createPatchStatsTable(patch, global.nominalThickness || 0));
       patchChildren.push(new Paragraph({ text: "" })); // Spacer
 
       patchChildren.push(new Paragraph({ text: "Isometric View", alignment: AlignmentType.CENTER, spacing: { before: 100, after: 100 } }));
@@ -259,9 +279,6 @@ export async function generateReportDocx(
       sections.push({
           children: patchChildren
       });
-
-      // (Optional) show progress in console
-      console.log(`DOCX page generated for patch ${i + 1} of ${segments.length}`);
   }
 
 

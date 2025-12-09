@@ -21,7 +21,6 @@ import { Camera, Download, Edit, FileText, Info, Loader2, Lock, Pencil } from 'l
 import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from '../ui/carousel'
 import Image from 'next/image'
 import { generatePatchSummary } from '@/ai/flows/generate-patch-summary'
-import type { SegmentBox } from '@/lib/types'
 
 interface ReportTabProps {
   threeDViewRef: React.RefObject<ThreeDeeViewRef>;
@@ -192,7 +191,9 @@ export function ReportTab({ threeDViewRef, twoDViewRef }: ReportTabProps) {
         const a = document.createElement('a');
         a.href = url;
         a.download = `Report_${reportMetadata.assetName || 'Asset'}.docx`;
+        document.body.appendChild(a);
         a.click();
+        document.body.removeChild(a);
         URL.revokeObjectURL(url);
 
       } catch (error) {
