@@ -76,12 +76,7 @@ export async function generateReportDocx(data: ReportData) {
             spacing: { after: 300 },
           }),
 
-          new Paragraph({
-            text: "1.0 Executive Summary",
-            heading: HeadingLevel.HEADING_1,
-            spacing: { before: 400, after: 200 },
-          }),
-           new Table({
+          new Table({
             width: { size: 100, type: WidthType.PERCENTAGE },
             rows: [
               new TableRow({
@@ -110,62 +105,16 @@ export async function generateReportDocx(data: ReportData) {
               }),
             ],
            }),
-
-          new Paragraph({
-            text: "2.0 Inspection Statistics",
-            heading: HeadingLevel.HEADING_1,
-            spacing: { before: 400, after: 200 },
-          }),
-
-          new Table({
-            width: { size: 100, type: WidthType.PERCENTAGE },
-            rows: [
-              new TableRow({
-                children: [
-                  new TableCell({ children: [new Paragraph("Overall Condition")] }),
-                  new TableCell({ children: [new Paragraph(String(inspection.condition || "-"))] }),
-                  new TableCell({ children: [new Paragraph("Nominal Thickness")] }),
-                  new TableCell({ children: [new Paragraph(`${stats.nominalThickness.toFixed(2)} mm`)] }),
-                ],
-              }),
-              new TableRow({
-                children: [
-                  new TableCell({ children: [new Paragraph("Minimum Thickness")] }),
-                  new TableCell({ children: [new Paragraph(`${stats.minThickness?.toFixed(2) || "-"} mm (${stats.minPercentage?.toFixed(1) || "-"}%)`)] }),
-                   new TableCell({ children: [new Paragraph("Maximum Thickness")] }),
-                  new TableCell({ children: [new Paragraph(`${stats.maxThickness?.toFixed(2) || "-"} mm`)] }),
-                ],
-              }),
-               new TableRow({
-                children: [
-                  new TableCell({ children: [new Paragraph("Average Thickness")] }),
-                  new TableCell({ children: [new Paragraph(`${stats.avgThickness?.toFixed(2) || "-"} mm`)] }),
-                  new TableCell({ children: [new Paragraph("Worst Location")] }),
-                  new TableCell({ children: [new Paragraph(stats.worstLocation ? `X:${stats.worstLocation.x}, Y:${stats.worstLocation.y}`: "-")] }),
-                ],
-              }),
-              new TableRow({
-                children: [
-                  new TableCell({ children: [new Paragraph("Total Scanned Area")] }),
-                  new TableCell({ children: [new Paragraph(`${stats.scannedArea.toFixed(2)} m²`)] }),
-                  new TableCell({ children: [new Paragraph("Defect Threshold")] }),
-                  new TableCell({ children: [new Paragraph(`< ${metadata.defectThreshold}%`)] }),
-                ],
-              }),
-            ],
-          }),
           
-          new Paragraph({ text: "", pageBreakBefore: true }),
-
           new Paragraph({
-            text: "3.0 Overall Asset Views",
-            heading: HeadingLevel.HEADING_1,
+            text: "Overall Asset Views",
+            heading: "Title",
             spacing: { before: 400, after: 200 },
           }),
           
           new Paragraph({
-            heading: HeadingLevel.HEADING_2,
-            children: [new TextRun("3.1 3D Surface View")],
+            heading: "Heading2",
+            children: [new TextRun("3D Surface View")],
           }),
 
           ...(images.fullModel3D
@@ -183,8 +132,8 @@ export async function generateReportDocx(data: ReportData) {
             : []),
 
           new Paragraph({
-            heading: HeadingLevel.HEADING_2,
-            children: [new TextRun("3.2 2D Heatmap View")],
+            heading: "Heading2",
+            children: [new TextRun("2D Heatmap View")],
             spacing: { before: 200 },
           }),
 
@@ -226,8 +175,8 @@ function createPatchTables(patchImages: { segmentId: number; imageDataUrl: strin
   const result: (Paragraph | Table)[] = [
       new Paragraph({ text: "", pageBreakBefore: true }),
       new Paragraph({
-        text: "4.0 Corrosion Patch Segments",
-        heading: HeadingLevel.HEADING_1,
+        text: "Corrosion Patch Segments",
+        heading: "Title",
         spacing: { before: 400, after: 200 },
       })
   ];
