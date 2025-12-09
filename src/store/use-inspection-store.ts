@@ -104,6 +104,15 @@ export const useInspectionStore = create<InspectionState>()(
           } else if (type === 'THICKNESS_CONFLICT') {
              set({ isLoading: false, thicknessConflict: data.conflict || null });
           } else if (type === 'FINALIZED') {
+              // If only segments are returned, update them in the existing result
+              if (data.segments && !data.plates) {
+                set(state => ({
+                    inspectionResult: state.inspectionResult ? { ...state.inspectionResult, segments: data.segments! } : null,
+                    dataVersion: state.dataVersion + 1, // To trigger re-renders that depend on segments
+                }));
+                return;
+              }
+
              if (data.displacementBuffer && data.colorBuffer && data.gridMatrix && data.stats && data.condition && data.plates && data.segments) {
                 
                 if (data.stats.totalPoints === 0) {
@@ -245,3 +254,5 @@ export const useInspectionStore = create<InspectionState>()(
       }
     }
 );
+
+    
