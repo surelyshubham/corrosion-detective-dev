@@ -35,26 +35,9 @@ function dataUriToBuffer(dataUri: string): ArrayBuffer {
     return bytes.buffer;
 }
 
-async function fetchUrlAsBase64(url: string): Promise<string> {
-  const res = await fetch(url);
-  if (!res.ok) {
-    throw new Error(`Failed to fetch image from ${url}: ${res.statusText}`);
-  }
-  const blob = await res.blob();
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => resolve(reader.result as string);
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
-  });
-}
-
 
 export async function generateReportDocx(data: ReportData) {
   const { metadata, inspection, segments, images } = data;
-
-  const logoBase64Url = await fetchUrlAsBase64("https://www.sigmandt.com/images/logo.png");
-  const logoBuffer = dataUriToBuffer(logoBase64Url);
 
   const doc = new Document({
     sections: [{
@@ -65,7 +48,8 @@ export async function generateReportDocx(data: ReportData) {
               children: [
                 new TableCell({
                   children: [new Paragraph({
-                    children: [new ImageRun({ data: logoBuffer, transformation: { width: 150, height: 38 } })],
+                    text: "Sigma NDT",
+                    style: "header-left"
                   })],
                   borders: { top: { style: BorderStyle.NONE }, bottom: { style: BorderStyle.SINGLE, size: 4, color: "4287f5" }, left: { style: BorderStyle.NONE }, right: { style: BorderStyle.NONE } },
                 }),
@@ -81,7 +65,16 @@ export async function generateReportDocx(data: ReportData) {
         }),
       },
       children: [
-        new Paragraph({ text: "Inspection Report", heading: HeadingLevel.TITLE, alignment: AlignmentType.CENTER }),
+        new Paragraph({
+          alignment: AlignmentType.CENTER,
+          children: [
+            new TextRun({
+              text: "Inspection Report",
+              bold: true,
+              size: 48,
+            }),
+          ],
+        }),
         new Paragraph({ text: `Project: ${metadata.projectName}`, heading: HeadingLevel.HEADING_2 }),
         new Paragraph({ text: `Asset: ${metadata.assetName}`, heading: HeadingLevel.HEADING_3 }),
         new Paragraph({ text: `Report Date: ${metadata.reportDate ? format(metadata.reportDate, 'PP') : 'N/A'}`, heading: HeadingLevel.HEADING_4 }),
@@ -96,7 +89,16 @@ export async function generateReportDocx(data: ReportData) {
       ],
     }],
     styles: {
-        paragraphStyles: [{
+        paragraphStyles: [
+          {
+            id: "header-left",
+            name: "Header Left",
+            basedOn: "Normal",
+            next: "Normal",
+            run: { size: 24, bold: true, color: "4287f5" },
+            paragraph: { alignment: AlignmentType.LEFT, spacing: { before: 200 } }
+          },
+          {
             id: "header-right",
             name: "Header Right",
             basedOn: "Normal",
