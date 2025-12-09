@@ -1,14 +1,11 @@
-
 import {
-  AlignmentType,
   Document,
-  HeadingLevel,
   Packer,
   Paragraph,
-  TextRun,
   Table,
   TableRow,
   TableCell,
+  AlignmentType,
   WidthType,
   ImageRun,
   Header,
@@ -17,8 +14,6 @@ import {
 } from "docx";
 import type { MergedInspectionResult, ReportMetadata, SegmentBox } from '@/lib/types';
 import { format } from 'date-fns';
-
-const SIGMA_LOGO_BASE64 = "data:image/png;base64,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";
 
 export interface ReportData {
   metadata: ReportMetadata & { defectThreshold: number };
@@ -49,6 +44,14 @@ function dataUriToBuffer(dataUri: string): ArrayBuffer {
     return bytes.buffer;
 }
 
+function chunkArray<T>(arr: T[], size: number): T[][] {
+  const result: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) {
+    result.push(arr.slice(i, i + size));
+  }
+  return result;
+}
+
 export async function generateReportDocx(data: ReportData) {
   const { metadata, inspection, segments, images } = data;
   
@@ -58,31 +61,19 @@ export async function generateReportDocx(data: ReportData) {
   }
   
   const stats = inspection.stats;
+  const patchImages = images.segmentShots || [];
+
 
   const doc = new Document({
     sections: [
       {
         properties: {},
         children: [
-           new Paragraph({
-            alignment: AlignmentType.CENTER,
-            children: [
-              new ImageRun({
-                data: dataUriToBuffer(SIGMA_LOGO_BASE64),
-                transformation: { width: 200, height: 48 },
-              }),
-            ],
-            spacing: { after: 200 },
-          }),
           new Paragraph({
+            text: "Corrosion Inspection Report",
+            heading: "Title",
             alignment: AlignmentType.CENTER,
-            children: [
-              new TextRun({
-                text: "Corrosion Inspection Report",
-                bold: true,
-                size: 36,
-              }),
-            ],
+            spacing: { after: 300 },
           }),
 
           new Paragraph({
@@ -210,48 +201,8 @@ export async function generateReportDocx(data: ReportData) {
                 }),
               ]
             : []),
-          
-            ...(segments && segments.length > 0 ? [new Paragraph({ text: "", pageBreakBefore: true })] : []),
             
-            ...(segments && segments.length > 0 ? [new Paragraph({
-                text: "4.0 Defect Areas Summary",
-                heading: HeadingLevel.HEADING_1,
-                spacing: { before: 400, after: 200 },
-            })] : []),
-            
-            ...segments.flatMap((segment, index) => {
-              const segmentImage = images.segmentShots?.find(shot => shot.segmentId === segment.id);
-              return [
-                new Paragraph({
-                  text: `4.${index + 1} Defect Patch #${segment.id}`,
-                  heading: HeadingLevel.HEADING_2,
-                  spacing: { before: 300, after: 150 },
-                }),
-                new Table({
-                    width: { size: 100, type: WidthType.PERCENTAGE },
-                    rows: [
-                        new TableRow({
-                            children: [
-                                new TableCell({ children: [new Paragraph("Severity Tier")], verticalAlign: VerticalAlign.CENTER }),
-                                new TableCell({ children: [new Paragraph(segment.tier)], verticalAlign: VerticalAlign.CENTER }),
-                                new TableCell({ rowSpan: 4, children: [
-                                    ...(segmentImage ? [new Paragraph({
-                                        alignment: AlignmentType.CENTER,
-                                        children: [new ImageRun({
-                                            data: dataUriToBuffer(segmentImage.imageDataUrl),
-                                            transformation: { width: 250, height: 150 },
-                                        })]
-                                    })] : [new Paragraph("No Image")])
-                                ]}),
-                            ]
-                        }),
-                        new TableRow({ children: [new TableCell({ children: [new Paragraph("Min. Thickness")] }), new TableCell({ children: [new Paragraph(`${segment.worstThickness.toFixed(2)} mm`)] })] }),
-                        new TableRow({ children: [new TableCell({ children: [new Paragraph("Avg. Thickness")] }), new TableCell({ children: [new Paragraph(`${segment.avgThickness.toFixed(2)} mm`)] })] }),
-                        new TableRow({ children: [new TableCell({ children: [new Paragraph("Location (Bounding Box)")] }), new TableCell({ children: [new Paragraph(`X: ${segment.coordinates.xMin}-${segment.coordinates.xMax}, Y: ${segment.coordinates.yMin}-${segment.coordinates.yMax}`)] })] }),
-                    ]
-                })
-              ];
-            })
+            ...createPatchTables(patchImages),
         ],
       },
     ],
@@ -267,4 +218,77 @@ export async function generateReportDocx(data: ReportData) {
   URL.revokeObjectURL(a.href);
 }
 
-    
+
+function createPatchTables(patchImages: { segmentId: number; imageDataUrl: string }[]) {
+  if (patchImages.length === 0) return [];
+  
+  const chunks = chunkArray(patchImages, 9);
+  const result: (Paragraph | Table)[] = [
+      new Paragraph({ text: "", pageBreakBefore: true }),
+      new Paragraph({
+        text: "4.0 Corrosion Patch Segments",
+        heading: HeadingLevel.HEADING_1,
+        spacing: { before: 400, after: 200 },
+      })
+  ];
+
+  for (const chunk of chunks) {
+    const rows: TableRow[] = [];
+    for (let i = 0; i < 3; i++) {
+      const cells: TableCell[] = [];
+      for (let j = 0; j < 3; j++) {
+        const imgData = chunk[i * 3 + j];
+        if (imgData) {
+          try {
+            cells.push(
+              new TableCell({
+                children: [
+                  new Paragraph({
+                    text: `Segment #${imgData.segmentId}`,
+                    alignment: AlignmentType.CENTER,
+                    style: "IntenseQuote" 
+                  }),
+                  new Paragraph({
+                    children: [
+                      new ImageRun({
+                        data: dataUriToBuffer(imgData.imageDataUrl),
+                        transformation: { width: 180, height: 120 },
+                      }),
+                    ],
+                    alignment: AlignmentType.CENTER,
+                  }),
+                ],
+                width: { size: 33, type: WidthType.PERCENTAGE },
+                verticalAlign: VerticalAlign.CENTER,
+              })
+            );
+          } catch(e) {
+            console.error("Error adding image to DOCX", e)
+            cells.push(new TableCell({ children: [new Paragraph("Image error")] }));
+          }
+        } else {
+          cells.push(new TableCell({ children: [new Paragraph("")], borders: {
+              top: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+              bottom: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+              left: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+              right: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+          }}));
+        }
+      }
+      rows.push(new TableRow({ children: cells }));
+    }
+    result.push(
+      new Table({
+        rows,
+        width: { size: 100, type: WidthType.PERCENTAGE },
+      })
+    );
+
+    result.push(new Paragraph({ text: "", pageBreakBefore: true }));
+  }
+  
+  // Remove last page break
+  if(result.length > 2) result.pop();
+
+  return result;
+}
