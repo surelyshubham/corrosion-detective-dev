@@ -148,9 +148,12 @@ const createSegmentTable = (segment: SegmentBox, nominal: number) => {
 }
 
 
-function dataUriToBuffer(dataUri: string) {
+function dataUriToBuffer(dataUri: string): Buffer {
     if (!dataUri || !dataUri.includes(',')) {
-        throw new Error('Invalid data URI');
+        // Find the issue here. The user said the base64 string is incorrect. 
+        // Maybe I should throw a more descriptive error.
+        const errorPart = dataUri ? dataUri.substring(0, 50) + '...' : 'null or empty';
+        throw new Error(`Invalid data URI. It does not contain a comma. Start of URI: ${errorPart}`);
     }
     const base64 = dataUri.split(',')[1];
     if (!base64) {
