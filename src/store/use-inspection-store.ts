@@ -151,16 +151,16 @@ export const useInspectionStore = create<InspectionState>()(
                 set({ isGeneratingAI: true });
                 const aiInput: CorrosionInsightInput = {
                     assetType: newResult.assetType,
-                    nominalThickness: newResult.nominalThickness,
-                    minThickness: newResult.stats.minThickness,
-                    maxThickness: newResult.stats.maxThickness,
-                    avgThickness: newResult.stats.avgThickness,
-                    areaBelow80: newResult.stats.areaBelow80,
-                    areaBelow70: newResult.stats.areaBelow70,
-                    areaBelow60: newResult.stats.areaBelow60,
-                    worstLocationX: newResult.stats.worstLocation.x,
-                    worstLocationY: newResult.stats.worstLocation.y,
-                    minPercentage: newResult.stats.minPercentage,
+                    nominalThickness: Number(newResult.nominalThickness),
+                    minThickness: Number(newResult.stats.minThickness),
+                    maxThickness: Number(newResult.stats.maxThickness),
+                    avgThickness: Number(newResult.stats.avgThickness),
+                    areaBelow80: Number(newResult.stats.areaBelow80),
+                    areaBelow70: Number(newResult.stats.areaBelow70),
+                    areaBelow60: Number(newResult.stats.areaBelow60),
+                    worstLocationX: Number(newResult.stats.worstLocation.x),
+                    worstLocationY: Number(newResult.stats.worstLocation.y),
+                    minPercentage: Number(newResult.stats.minPercentage),
                 };
 
                 generateCorrosionInsight(aiInput)
