@@ -12,9 +12,10 @@ import { Button } from '@/components/ui/button'
 import { Slider } from '@/components/ui/slider'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
-import { Expand, Pin, RefreshCw, Percent, Ruler, LocateFixed, Loader2 } from 'lucide-react'
+import { Expand, Pin, RefreshCw, Percent, Ruler, LocateFixed, Loader2, FileText } from 'lucide-react'
 import { RadioGroup, RadioGroupItem } from '../ui/radio-group'
 import { useImperativeHandle } from 'react'
+import { captureAssetPatches, generatePDF } from '@/report/ReportGenerator'
 
 
 const ColorLegend = ({ mode, stats, nominalThickness }: { mode: ColorMode, stats: any, nominalThickness: number}) => {
@@ -41,6 +42,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
   const [showMinMax, setShowMinMax] = useState(true)
   const [showOrigin, setShowOrigin] = useState(true)
   const [hoveredPoint, setHoveredPoint] = useState<any>(null);
+  const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   
   const sceneRef = useRef<THREE.Scene | null>(null)
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null)
@@ -76,6 +78,31 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
       setIsReady(false);
     }
   }, [dataVersion]);
+
+  const handleGenerateReport = async () => {
+   if (!sceneRef.current || !cameraRef.current || !rendererRef.current || !meshRef.current) return;
+   setIsGeneratingReport(true);
+   
+    try {
+        // 1. Capture Images
+        // The renderer needs to have local clipping enabled to respect the planes
+        rendererRef.current.localClippingEnabled = true;
+        const patches = await captureAssetPatches(sceneRef.current, cameraRef.current, rendererRef.current, meshRef.current);
+        rendererRef.current.localClippingEnabled = false; // Disable it after capture
+
+        // 2. Capture Full Overview (optional, just take one normal screenshot)
+        rendererRef.current.render(sceneRef.current, cameraRef.current);
+        const fullAsset = rendererRef.current.domElement.toDataURL("image/png");
+
+        // 3. Create PDF
+        generatePDF("ASSET-001", fullAsset, patches);
+    } catch(err) {
+        console.error("Report generation failed:", err);
+        alert("Failed to generate report. Check console for details.");
+    } finally {
+        setIsGeneratingReport(false);
+    }
+  };
 
 
   const setView = useCallback((view: 'iso' | 'top' | 'side') => {
@@ -434,6 +461,21 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
             <Button variant="outline" onClick={() => setView('top')}>Top</Button>
             <Button variant="outline" onClick={() => setView('side')}>Side</Button>
             <Button variant="outline" onClick={() => setView('iso')}>Isometric</Button>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg font-headline">Reporting</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Button onClick={handleGenerateReport} disabled={isGeneratingReport} className="w-full">
+              {isGeneratingReport ? (
+                <Loader2 className="mr-2 animate-spin" />
+              ) : (
+                <FileText className="mr-2" />
+              )}
+              {isGeneratingReport ? 'Generating...' : 'Generate PDF Report'}
+            </Button>
           </CardContent>
         </Card>
       </div>
