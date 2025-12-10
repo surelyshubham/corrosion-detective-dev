@@ -110,3 +110,5 @@ export function pickTopNPatches(vault: {[key: string]: any} | null, n: number): 
 
   return scored.slice(0, n);
 }
+
+    

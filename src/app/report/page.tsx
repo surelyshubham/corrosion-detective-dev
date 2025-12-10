@@ -8,7 +8,6 @@ import html2canvas from "html2canvas";
 import {
   pickTopNPatches,
   getPatchFromVault,
-  getPatchViewUrls,
 } from "@/report/patchHelpers";
 
 const LOGO_URL = "https://www.sigmandt.com/images/logo.png";
@@ -94,46 +93,78 @@ export default function ReportPage() {
       `;
       container.appendChild(cover);
 
-      // Patch Pages
-      topPatches.forEach((meta, rank) => {
-        const entry = getPatchFromVault(patchVault, meta.id);
-        // Ensure we actually have URLs
-        const urls = entry ? getPatchViewUrls(entry) : [];
-        
-        if (urls.length === 0) console.warn(`Patch ${meta.id} has no images!`);
-
-        const page = document.createElement("div");
-        page.setAttribute("style", pageStyle);
-        
-        let imgHtml = "";
-        urls.forEach((u) => {
-          // Add loading="eager" to force priority
-          imgHtml += `
-            <div style="border:1px solid #ddd; padding:6px; display:flex; align-items:center; justify-content:center; height: 280px;">
-              <img src="${u}" loading="eager" style="max-width:100%; max-height:100%; object-fit:contain;" />
-            </div>
-          `;
-        });
-
-        page.innerHTML = `
-          <h2 style="margin-top:0;">Patch ${meta.id} — Rank ${rank + 1}</h2>
-          <div><strong>Area:</strong> ${(meta.area_m2 ?? 0).toFixed(4)} m²</div>
-          <div><strong>Min Thickness:</strong> ${meta.worstThickness?.toFixed(2) ?? "-"} mm</div>
-          <div><strong>Severity:</strong> ${meta.tier ?? "-"}</div>
-          <br />
-          <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
-            ${imgHtml || '<div>No Images Available</div>'}
-          </div>
-        `;
-        
-        if(logoBase64) {
-             const wm = document.createElement("img");
-             wm.src = logoBase64;
-             wm.setAttribute("style", watermarkStyle);
-             page.appendChild(wm);
+      // --- 2D VIEW PAGE ---
+      const twoDPage = document.createElement("div");
+      twoDPage.setAttribute("style", pageStyle);
+      twoDPage.innerHTML = `
+        <h2 style="margin-top:0;">Full Asset 2D Heatmap</h2>
+        <div style="border:1px solid #ddd; padding:6px; display:flex; align-items:center; justify-content:center; height: 800px;">
+          <img src="https://picsum.photos/seed/2dview/600/800" data-ai-hint="heatmap chart" style="max-width:100%; max-height:100%; object-fit:contain;" />
+        </div>
+        <p style="font-size:12px; color: #555; text-align:center; margin-top:10px;">Overall 2D unwrapped view of the asset showing corrosion distribution.</p>
+      `;
+       if(logoBase64) {
+             const wm2D = document.createElement("img");
+             wm2D.src = logoBase64;
+             wm2D.setAttribute("style", watermarkStyle);
+             twoDPage.appendChild(wm2D);
         }
-        container.appendChild(page);
+      container.appendChild(twoDPage);
+      
+      // --- 3D VIEW PAGE ---
+      const threeDPage = document.createElement("div");
+      threeDPage.setAttribute("style", pageStyle);
+      threeDPage.innerHTML = `
+        <h2 style="margin-top:0;">Full Asset 3D View</h2>
+        <div style="border:1px solid #ddd; padding:6px; display:flex; align-items:center; justify-content:center; height: 800px;">
+          <img src="https://picsum.photos/seed/3dview/600/800" data-ai-hint="3d model" style="max-width:100%; max-height:100%; object-fit:contain;" />
+        </div>
+        <p style="font-size:12px; color: #555; text-align:center; margin-top:10px;">Overall 3D model of the asset showing surface condition and corrosion depth.</p>
+      `;
+       if(logoBase64) {
+             const wm3D = document.createElement("img");
+             wm3D.src = logoBase64;
+             wm3D.setAttribute("style", watermarkStyle);
+             threeDPage.appendChild(wm3D);
+        }
+      container.appendChild(threeDPage);
+
+      // --- PATCH SUMMARY PAGE ---
+      const patchSummaryPage = document.createElement("div");
+      patchSummaryPage.setAttribute("style", pageStyle);
+      let summaryHtml = `<h2 style="margin-top:0;">Top Corrosion Patch Summary</h2>`;
+      summaryHtml += `<table style="width:100%; border-collapse: collapse; font-size: 12px;">
+        <thead>
+            <tr style="background:#f0f0f0;">
+                <th style="padding:8px; border:1px solid #ccc; text-align:left;">Rank</th>
+                <th style="padding:8px; border:1px solid #ccc; text-align:left;">Patch ID</th>
+                <th style="padding:8px; border:1px solid #ccc; text-align:left;">Severity</th>
+                <th style="padding:8px; border:1px solid #ccc; text-align:left;">Min Thick. (mm)</th>
+                <th style="padding:8px; border:1px solid #ccc; text-align:left;">Area (m²)</th>
+            </tr>
+        </thead>
+        <tbody>`;
+      topPatches.forEach((meta, rank) => {
+        summaryHtml += `
+            <tr>
+                <td style="padding:6px; border:1px solid #ddd;">${rank + 1}</td>
+                <td style="padding:6px; border:1px solid #ddd;">${meta.id}</td>
+                <td style="padding:6px; border:1px solid #ddd;">${meta.tier || '-'}</td>
+                <td style="padding:6px; border:1px solid #ddd;">${meta.worstThickness?.toFixed(2) ?? "-"}</td>
+                <td style="padding:6px; border:1px solid #ddd;">${(meta.area_m2 ?? 0).toFixed(4)}</td>
+            </tr>
+        `;
       });
+      summaryHtml += `</tbody></table>`;
+      patchSummaryPage.innerHTML = summaryHtml;
+      if(logoBase64) {
+         const wmSummary = document.createElement("img");
+         wmSummary.src = logoBase64;
+         wmSummary.setAttribute("style", watermarkStyle);
+         patchSummaryPage.appendChild(wmSummary);
+      }
+      container.appendChild(patchSummaryPage);
+
 
       setProgress(50);
 
@@ -237,3 +268,5 @@ export default function ReportPage() {
     </div>
   );
 }
+
+    
