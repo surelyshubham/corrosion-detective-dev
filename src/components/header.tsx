@@ -1,8 +1,11 @@
 import { Sigma } from "lucide-react"
+import Link from "next/link";
+import { Button } from "./ui/button";
+import { FileText } from "lucide-react";
 
 export function Header() {
   return (
-    <header className="flex items-center gap-4 px-6 py-4 border-b bg-card">
+    <header className="flex items-center justify-between gap-4 px-6 py-4 border-b bg-card">
       <div className="flex items-center gap-2">
         <div className="p-2 rounded-lg bg-primary text-primary-foreground">
           <Sigma className="w-6 h-6" />
@@ -11,6 +14,14 @@ export function Header() {
           Sigma Corrosion Detective
         </h1>
         <span className="text-xs font-mono text-muted-foreground mt-1">V1</span>
+      </div>
+      <div className="flex items-center gap-4">
+        <Button asChild variant="outline">
+            <Link href="/report">
+                <FileText className="mr-2"/>
+                Go to Report Page
+            </Link>
+        </Button>
       </div>
     </header>
   )
