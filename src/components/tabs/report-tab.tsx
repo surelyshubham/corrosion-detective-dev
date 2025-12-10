@@ -9,7 +9,7 @@ import { Button } from '../ui/button'
 import { AIReportDialog } from '../reporting/AIReportDialog'
 import { useReportStore } from '@/store/use-report-store'
 import { useToast } from '@/hooks/use-toast'
-import { generateReportDocx, type FinalReportPayload, type ReportPatchSegment } from '@/reporting/DocxReportGenerator'
+import type { FinalReportPayload, ReportPatchSegment } from '@/reporting/DocxReportGenerator'
 import { Progress } from '../ui/progress'
 import { Slider } from '../ui/slider'
 import { Label } from '../ui/label'
@@ -26,6 +26,17 @@ interface ReportTabProps {
   threeDViewRef: React.RefObject<ThreeDeeViewRef>;
   twoDViewRef: React.RefObject<TwoDeeViewRef>;
 }
+
+let docxWorker: Worker | null = null;
+if (typeof window !== 'undefined') {
+    docxWorker = new Worker(new URL('../../workers/docx.worker.ts', import.meta.url), { type: 'module' });
+
+    // Initialize the PatchVault
+    if (!(window as any).PatchVault) {
+        (window as any).PatchVault = {};
+    }
+}
+
 
 export function ReportTab({ threeDViewRef, twoDViewRef }: ReportTabProps) {
   const { inspectionResult, segments } = useInspectionStore();
@@ -60,6 +71,19 @@ export function ReportTab({ threeDViewRef, twoDViewRef }: ReportTabProps) {
     resetReportState();
     if (inspectionResult) {
       setSegmentsForThreshold(threshold);
+    }
+    // Cleanup worker and vault on unmount
+    return () => {
+        if ((window as any).PatchVault) {
+            const vault = (window as any).PatchVault;
+            Object.keys(vault).forEach(key => {
+                const item = vault[key];
+                if (item.previewUrls) {
+                    Object.values(item.previewUrls).forEach(url => URL.revokeObjectURL(url as string));
+                }
+            });
+            (window as any).PatchVault = {};
+        }
     }
   }, [inspectionResult, resetReportState, setSegmentsForThreshold, threshold]);
 
@@ -104,7 +128,7 @@ export function ReportTab({ threeDViewRef, twoDViewRef }: ReportTabProps) {
 
         // --- Focus on the segment in both views
         captureFunctions3D.focus(segment.center.x, segment.center.y, true);
-        await new Promise(resolve => setTimeout(resolve, 250)); // Wait for camera to move
+        await new Promise(resolve => setTimeout(resolve, 250));
 
         // --- Capture 3D Views ---
         setGenerationProgress({ current: progressBase + 1, total: totalSteps, task: `Capturing ISO view for Patch #${segment.id}` });
@@ -124,7 +148,6 @@ export function ReportTab({ threeDViewRef, twoDViewRef }: ReportTabProps) {
         
         // --- Capture 2D View ---
         setGenerationProgress({ current: progressBase + 4, total: totalSteps, task: `Capturing 2D Heatmap for Patch #${segment.id}` });
-        // TODO: Implement focus on 2D view before capture if possible
         const heatmapDataUrl = captureFunctions2D.capture();
         
         // --- Generate AI Insight ---
@@ -132,14 +155,7 @@ export function ReportTab({ threeDViewRef, twoDViewRef }: ReportTabProps) {
         const aiObservation = await generatePatchSummary(segment, inspectionResult?.nominalThickness || 0, inspectionResult?.assetType || 'N/A', threshold);
 
         const enrichedSegment: ReportPatchSegment = {
-            id: segment.id,
-            tier: segment.tier,
-            pointCount: segment.pointCount,
-            worstThickness: segment.worstThickness,
-            avgThickness: segment.avgThickness,
-            severityScore: segment.severityScore,
-            coordinates: segment.coordinates,
-            center: segment.center,
+            ...segment,
             isoViewDataUrl,
             topViewDataUrl,
             sideViewDataUrl,
@@ -168,10 +184,16 @@ export function ReportTab({ threeDViewRef, twoDViewRef }: ReportTabProps) {
         });
         return;
       }
+      
+      if (!docxWorker) {
+        toast({ variant: 'destructive', title: 'Worker Not Ready', description: 'The report generator worker is not available.' });
+        return;
+      }
+
       setIsGenerating(true);
       setGenerationProgress({ current: 0, total: 1, task: 'Generating DOCX file...'});
-      try {
-        const payload: FinalReportPayload = {
+
+      const payload: FinalReportPayload = {
             global: {
                 assetName: reportMetadata.assetName || 'N/A',
                 projectName: reportMetadata.projectName,
@@ -187,27 +209,37 @@ export function ReportTab({ threeDViewRef, twoDViewRef }: ReportTabProps) {
             segments: enrichedSegments,
             remarks: reportMetadata.remarks,
         };
-        const blob = await generateReportDocx(payload);
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `Report_${reportMetadata.assetName || 'Asset'}.docx`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
 
-      } catch (error) {
-        console.error("Failed to generate final report", error);
-        toast({
-          variant: "destructive",
-          title: "Report Generation Failed",
-          description: error instanceof Error ? error.message : "An unknown error occurred.",
-        });
-      } finally {
-          setIsGenerating(false);
-          setGenerationProgress(null);
-      }
+        docxWorker.onmessage = (ev) => {
+            const { ok, buffer, error } = ev.data;
+             setIsGenerating(false);
+             setGenerationProgress(null);
+
+            if (!ok || !buffer) {
+                console.error("DOCX Worker Error:", error);
+                toast({ variant: 'destructive', title: 'Report Generation Failed', description: error || 'An unknown worker error occurred.' });
+                return;
+            }
+
+            const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `Report_${reportMetadata.assetName || 'Asset'}.docx`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        };
+        
+        docxWorker.onerror = (err) => {
+             setIsGenerating(false);
+             setGenerationProgress(null);
+             console.error("DOCX Worker crashed:", err);
+             toast({ variant: 'destructive', title: 'Report Worker Crashed', description: err.message });
+        };
+        
+        docxWorker.postMessage({ cmd: 'generate_report', payload });
   };
   
   const hasImages = !!enrichedSegments && enrichedSegments.length > 0;
@@ -354,3 +386,5 @@ export function ReportTab({ threeDViewRef, twoDViewRef }: ReportTabProps) {
     </ScrollArea>
   )
 }
+
+    
