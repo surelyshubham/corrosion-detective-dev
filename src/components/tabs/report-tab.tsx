@@ -9,7 +9,6 @@ import { Button } from '../ui/button'
 import { AIReportDialog } from '../reporting/AIReportDialog'
 import { useReportStore } from '@/store/use-report-store'
 import { useToast } from '@/hooks/use-toast'
-import type { FinalReportPayload, ReportPatchSegment } from '@/reporting/DocxReportGenerator'
 import { Progress } from '../ui/progress'
 import { Slider } from '../ui/slider'
 import { Label } from '../ui/label'
@@ -17,28 +16,24 @@ import { Tooltip, TooltipProvider, TooltipTrigger, TooltipContent } from '../ui/
 import type { ThreeDeeViewRef } from './three-dee-view-tab'
 import type { TwoDeeViewRef } from './two-dee-heatmap-tab'
 import { ScrollArea } from '../ui/scroll-area'
-import { Camera, Download, Edit, FileText, Info, Loader2, Lock, Pencil, UploadCloud } from 'lucide-react'
+import { Camera, Download, Edit, FileText, Info, Loader2, Lock, Pencil } from 'lucide-react'
 import ReportList from '../reporting/ReportList'
 import { PatchVault } from '@/vaults/patchVault'
 import { generatePatchSummary } from '@/ai/flows/generate-patch-summary'
-import { canvasToArrayBuffer, downloadFile } from '@/lib/utils'
-import { useFirebase } from '@/firebase'
-import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
+import { canvasToArrayBuffer } from '@/lib/utils'
 import { pickTopPatches, type PatchMeta } from '@/utils/patchSelection'
-import { generateDocxFromSelectedPatches } from '@/utils/docxClientGenerator'
-
+import html2canvas from 'html2canvas';
+import { jsPDF } from 'jspdf';
+import { urlToBase64 } from '@/lib/image-to-base64';
 
 interface ReportTabProps {
   threeDViewRef: React.RefObject<ThreeDeeViewRef>;
   twoDViewRef: React.RefObject<TwoDeeViewRef>;
 }
 
-
 export function ReportTab({ threeDViewRef, twoDViewRef }: ReportTabProps) {
   const { inspectionResult, segments } = useInspectionStore();
   const { toast } = useToast();
-  const { app: firebaseApp } = useFirebase();
-  const storage = firebaseApp ? getStorage(firebaseApp) : null;
   
   const threshold = useInspectionStore((s) => s.defectThreshold);
   const setThreshold = useInspectionStore((s) => s.setDefectThreshold);
@@ -71,7 +66,6 @@ export function ReportTab({ threeDViewRef, twoDViewRef }: ReportTabProps) {
     if (inspectionResult) {
       setSegmentsForThreshold(threshold);
     }
-    // Cleanup worker and vault on unmount
     return () => {
        PatchVault.clearAll();
     }
@@ -88,7 +82,7 @@ export function ReportTab({ threeDViewRef, twoDViewRef }: ReportTabProps) {
   }
 
   const handleGenerateAndCapture = async () => {
-    if (!isCaptureReady || !captureFunctions3D || !captureFunctions2D) {
+    if (!isCaptureReady || !captureFunctions3D || !captureFunctions2D || !inspectionResult) {
       toast({
         variant: "destructive",
         title: "Views Not Ready",
@@ -110,20 +104,8 @@ export function ReportTab({ threeDViewRef, twoDViewRef }: ReportTabProps) {
     const totalSteps = segments.length;
     setGenerationProgress({ current: 0, total: totalSteps, task: 'Starting Capture Sequence...' });
     
-    // Clear previous captures
     PatchVault.clearAll();
-    const finalSegments: ReportPatchSegment[] = [];
-
-    const captureAndConvert = async (captureFn: () => string | HTMLCanvasElement): Promise<ArrayBuffer> => {
-        const result = captureFn();
-        if (typeof result === 'string') {
-             // It's a data URL, fetch and convert
-            const res = await fetch(result);
-            return await res.arrayBuffer();
-        }
-        // It's a canvas element
-        return canvasToArrayBuffer(result);
-    };
+    const finalSegments = [];
 
     for (let i = 0; i < segments.length; i++) {
         const segment = segments[i];
@@ -133,23 +115,22 @@ export function ReportTab({ threeDViewRef, twoDViewRef }: ReportTabProps) {
         await new Promise(resolve => setTimeout(resolve, 250));
 
         captureFunctions3D.setView('iso');
-        await new Promise(resolve => setTimeout(resolve, 250));
-        const isoViewBuffer = await captureAndConvert(captureFunctions3D.capture);
+        await new Promise(resolve => setTimeout(resolve, 100));
+        const isoViewBuffer = await canvasToArrayBuffer(captureFunctions3D.capture() as any);
 
         captureFunctions3D.setView('top');
-        await new Promise(resolve => setTimeout(resolve, 250));
-        const topViewBuffer = await captureAndConvert(captureFunctions3D.capture);
+        await new Promise(resolve => setTimeout(resolve, 100));
+        const topViewBuffer = await canvasToArrayBuffer(captureFunctions3D.capture() as any);
 
         captureFunctions3D.setView('side');
-        await new Promise(resolve => setTimeout(resolve, 250));
-        const sideViewBuffer = await captureAndConvert(captureFunctions3D.capture);
+        await new Promise(resolve => setTimeout(resolve, 100));
+        const sideViewBuffer = await canvasToArrayBuffer(captureFunctions3D.capture() as any);
         
-        const heatmapBuffer = await captureAndConvert(captureFunctions2D.capture);
+        const heatmapBuffer = await canvasToArrayBuffer(captureFunctions2D.capture() as any);
         
-        const aiObservation = await generatePatchSummary(segment, inspectionResult?.nominalThickness || 0, inspectionResult?.assetType || 'N/A', threshold);
+        const aiObservation = await generatePatchSummary(segment, inspectionResult.nominalThickness, inspectionResult.assetType, threshold);
 
-        const enrichedSegment: ReportPatchSegment = { ...segment, aiObservation };
-        finalSegments.push(enrichedSegment);
+        finalSegments.push({ ...segment, aiObservation });
         
          PatchVault.set(String(segment.id), {
             buffers: [
@@ -161,6 +142,7 @@ export function ReportTab({ threeDViewRef, twoDViewRef }: ReportTabProps) {
             meta: {
                 title: `Patch #${segment.id}`,
                 summary: `${segment.tier} | Min: ${segment.worstThickness.toFixed(2)}mm`,
+                shortInsight: aiObservation,
                 ...segment
             }
         });
@@ -172,95 +154,140 @@ export function ReportTab({ threeDViewRef, twoDViewRef }: ReportTabProps) {
     setGenerationProgress(null);
     toast({
       title: "Visual Assets Captured",
-      description: `Captured ${finalSegments.length} patches with 4 views each. Please fill in report details.`,
+      description: `Captured ${finalSegments.length} patches. You can now generate the PDF report.`,
     });
   };
   
  const handleGenerateFinalReport = async () => {
     if (!enrichedSegments || enrichedSegments.length === 0 || !reportMetadata || !inspectionResult) {
-        toast({
-            variant: "destructive",
-            title: "Cannot Generate Report",
-            description: "Please capture assets and submit report details.",
-        });
-        return;
+      toast({
+        variant: "destructive",
+        title: "Cannot Generate Report",
+        description: "Please capture assets and submit report details.",
+      });
+      return;
     }
 
     setIsGenerating(true);
-    setGenerationProgress({percent:0, message:'Selecting top patches...'});
-    
+    setGenerationProgress({ current: 0, total: 100, task: 'Preparing PDF data...' });
+
     try {
-        const allMetas: PatchMeta[] = enrichedSegments.map((s, i) => ({
-            id: String(s.id),
-            severity: s.tier,
-            maxDepth_mm: (inspectionResult.nominalThickness || 0) - s.worstThickness,
-            avgDepth_mm: (inspectionResult.nominalThickness || 0) - s.avgThickness,
-            area_m2: s.pointCount / 1_000_000,
-            detectionIndex: i,
-        }));
-        
-        const topPatchesMeta = pickTopPatches(allMetas, 10);
-        setGenerationProgress({percent:5, message:`Gathering images for top ${topPatchesMeta.length} patches...`});
+      const LOGO_URL = 'https://www.sigmandt.com/images/logo.png';
+      
+      setGenerationProgress({ current: 3, total: 100, task: 'Fetching logo...' });
+      const logoBase64 = await urlToBase64(LOGO_URL);
 
-        const selectedPatches = topPatchesMeta.map(t => {
-            const entry = PatchVault.get(t.id);
-            const segment = enrichedSegments.find(s => String(s.id) === t.id);
-            return {
-                id: t.id,
-                meta: entry?.meta || {},
-                shortInsight: segment?.aiObservation || '',
-                buffers: entry?.buffers || [],
+      setGenerationProgress({ current: 5, total: 100, task: 'Selecting top patches...' });
+      const allMetas: PatchMeta[] = enrichedSegments.map((s, i) => ({
+        id: String(s.id),
+        severity: s.tier,
+        maxDepth_mm: (inspectionResult.nominalThickness || 0) - s.worstThickness,
+        avgDepth_mm: (inspectionResult.nominalThickness || 0) - s.avgThickness,
+        area_m2: s.pointCount / 1_000_000,
+        detectionIndex: i,
+      }));
+      const topPatchesMeta = pickTopPatches(allMetas, 10);
+      
+      const preparedPatches = [];
+      for (const meta of topPatchesMeta) {
+        const entry = PatchVault.get(meta.id);
+        const images: string[] = [];
+        if (entry?.buffers) {
+          const preferred = ['top', 'side', 'iso', 'heat', 'heatmap'];
+          for (const name of preferred) {
+            const bufferEntry = entry.buffers.find(b => b.name === name);
+            if (bufferEntry) {
+              const blob = new Blob([bufferEntry.buffer], { type: bufferEntry.mime });
+              images.push(await urlToBase64(URL.createObjectURL(blob)));
             }
-        });
-
-        setGenerationProgress({percent:20, message:'Preparing global data...'});
-
-        const metadata = {
-            title: reportMetadata.projectName,
-            assetId: reportMetadata.assetName,
-            inspectionDate: reportMetadata.scanDate?.toISOString().slice(0, 10),
-            inspector: reportMetadata.operatorName,
-            globalStats: {
-                totalPatches: segments?.length,
-                totalCorrodedArea_m2: inspectionResult.stats.scannedArea,
-            },
-            recommendations: [inspectionResult.aiInsight?.recommendation || 'Review findings and schedule maintenance as required.'],
-            globalImages: [], // This can be populated if global images are captured
-        };
-
-        setGenerationProgress({percent:30, message:'Generating DOCX in worker...'});
-
-        const files = await generateDocxFromSelectedPatches(metadata, selectedPatches, (p) => setGenerationProgress(p));
-        
-        setGenerationProgress({percent:100, message:'Done. Triggering download...'});
-
-        for (const f of files) {
-          const url = URL.createObjectURL(f.blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = f.name;
-          document.body.appendChild(a);
-          a.click();
-          setTimeout(() => {
-            URL.revokeObjectURL(url);
-            try { a.remove(); } catch(e){}
-          }, 2000);
+             if (images.length >= 4) break;
+          }
         }
+        preparedPatches.push({ id: meta.id, meta: entry?.meta, shortInsight: entry?.meta?.shortInsight || '', images });
+      }
+
+      setGenerationProgress({ current: 10, total: 100, task: 'Building report pages...' });
+
+      const container = document.createElement('div');
+      container.style.position = 'fixed';
+      container.style.left = '-9999px';
+      container.style.top = '0';
+      container.style.width = '800px';
+      container.style.zIndex = '-1000';
+      document.body.appendChild(container);
+
+      const pageStyle = `box-sizing: border-box; width: 794px; min-height: 1123px; padding: 28px; background: white; color: #111; font-family: Arial, Helvetica, sans-serif; position: relative; border-bottom: 1px solid #ccc;`;
+      const watermarkStyle = `position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%) rotate(-12deg); opacity: 0.06; pointer-events: none; width: 240px; filter: grayscale(100%);`;
+      
+      const addWatermark = (el: HTMLElement) => {
+        const wm = document.createElement('img');
+        wm.src = logoBase64;
+        wm.setAttribute('style', watermarkStyle);
+        el.appendChild(wm);
+      };
+
+      const cover = document.createElement('div');
+      cover.setAttribute('style', pageStyle);
+      cover.innerHTML = `<div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%;"><img src="${logoBase64}" style="width:320px; height:auto; margin-bottom:24px;" /><h1 style="font-size:28px; margin: 8px 0 6px;">Corrosion Inspection Report</h1><div style="font-size:14px; color:#444; margin-bottom:4px;">Asset: ${reportMetadata.assetName}</div><div style="font-size:13px; color:#444; margin-bottom:20px;">Inspector: ${reportMetadata.operatorName} — Date: ${new Date().toISOString().slice(0,10)}</div><div style="width:60%; text-align:center; color:#333; font-size:13px;"><p>Executive Summary: This report contains the top ${preparedPatches.length} patches selected for assessment. Full dataset retained in Vault for audit.</p></div></div>`;
+      addWatermark(cover);
+      container.appendChild(cover);
+      
+      setGenerationProgress({ current: 15, total: 100, task: 'Generating cover page...' });
+
+      preparedPatches.forEach((p, idx) => {
+        const pg = document.createElement('div');
+        pg.setAttribute('style', pageStyle);
+        let html = `<h2 style="margin-top:0; font-size: 1.5rem;">Patch ${p.id} — Rank ${idx+1}</h2>`;
+        html += `<div style="display:flex; gap:12px; align-items:flex-start;">`;
+        html += `<div style="width:36%; font-size:13px; color:#333;"><div><strong>Area:</strong> ${Number(p.meta?.area_m2 ?? 0).toFixed(4)} m²</div><div><strong>Avg Thickness:</strong> ${p.meta?.avgThickness?.toFixed(2) ?? '-'} mm</div><div><strong>Min Thickness:</strong> ${p.meta?.worstThickness?.toFixed(2) ?? '-'} mm</div><div style="margin-top:8px;"><strong>AI Observation:</strong><div style="margin-top:6px; font-style: italic; color:#555">${p.shortInsight || '-'}</div></div></div>`;
+        html += `<div style="flex:1; display:grid; grid-template-columns:1fr 1fr; gap:8px;">`;
+        for (let i = 0; i < 4; i++) {
+          html += `<div style="min-height:120px; border:1px solid #eee; display:flex; align-items:center; justify-content:center; padding:6px;">${p.images[i] ? `<img src="${p.images[i]}" style="width:100%; height:100%; object-fit:contain;" />` : `<div style="color:#999; font-size:12px;">(no image)</div>`}</div>`;
+        }
+        html += `</div></div>`;
+        pg.innerHTML = html;
+        addWatermark(pg);
+        container.appendChild(pg);
+      });
+      
+      await new Promise(r => setTimeout(r, 50));
+
+      const pages = Array.from(container.children) as HTMLElement[];
+      const pdf = new jsPDF('p', 'pt', 'a4');
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = pdf.internal.pageSize.getHeight();
+
+      for (let i = 0; i < pages.length; i++) {
+        setGenerationProgress({ current: Math.round(50 + (i / pages.length) * 45), total: 100, task: `Rendering page ${i + 1} of ${pages.length}...` });
+        const canvas = await html2canvas(pages[i], { scale: 2, useCORS: true, allowTaint: true });
+        const imgData = canvas.toDataURL('image/jpeg', 0.9);
+        const ratio = Math.min(pdfWidth / canvas.width, pdfHeight / canvas.height);
+        if (i > 0) pdf.addPage();
+        pdf.addImage(imgData, 'JPEG', 0, 0, canvas.width * ratio, canvas.height * ratio);
+      }
+
+      setGenerationProgress({ current: 95, total: 100, task: 'Finalizing PDF...' });
+      const blob = pdf.output('blob');
+      const fileName = `SigmaReport-${reportMetadata.assetName || 'asset'}-${new Date().toISOString().slice(0,10)}.pdf`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      
+      document.body.removeChild(container);
+      setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 2000);
 
     } catch (error: any) {
-        console.error("Report generation failed:", error);
-        toast({
-            variant: "destructive",
-            title: "Report Generation Failed",
-            description: error.message || "An unknown error occurred in the worker.",
-        });
+      console.error("PDF Generation Failed:", error);
+      toast({ variant: "destructive", title: "PDF Generation Failed", description: error.message || "An unknown error occurred." });
     } finally {
-        setIsGenerating(false);
-        setGenerationProgress(null);
+      setIsGenerating(false);
+      setGenerationProgress(null);
     }
-};
+  };
 
-  
   const hasImages = enrichedSegments && enrichedSegments.length > 0;
 
   return (
@@ -270,11 +297,10 @@ export function ReportTab({ threeDViewRef, twoDViewRef }: ReportTabProps) {
           <CardHeader>
             <CardTitle className="font-headline flex items-center gap-2">
               <FileText className="text-primary"/>
-              DOCX Report Generation
+              PDF Report Generation
             </CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-8">
-            {/* --- STEP 1: THRESHOLD --- */}
             <div className="space-y-4 border p-4 rounded-lg">
                 <h3 className="font-semibold flex items-center">
                     <span className="flex items-center justify-center w-6 h-6 rounded-full font-bold bg-primary text-primary-foreground mr-3">1</span>
@@ -323,13 +349,12 @@ export function ReportTab({ threeDViewRef, twoDViewRef }: ReportTabProps) {
                 </div>
             </div>
 
-            {/* --- STEP 2: CAPTURE --- */}
             <div className="space-y-4 border p-4 rounded-lg">
                 <h3 className="font-semibold flex items-center">
                      <span className={`flex items-center justify-center w-6 h-6 rounded-full font-bold ${hasImages ? 'bg-green-500' : 'bg-primary'} text-primary-foreground mr-3`}>2</span>
                     Capture Visual Assets
                 </h3>
-                 {generationProgress && isGenerating && generationProgress.task.includes('Capturing') && (
+                 {isGenerating && generationProgress && generationProgress.task.includes('Capturing') && (
                   <div className="space-y-2">
                     <Progress value={(generationProgress.current / generationProgress.total) * 100} />
                     <p className="text-xs text-muted-foreground text-center">{generationProgress.task}</p>
@@ -346,7 +371,6 @@ export function ReportTab({ threeDViewRef, twoDViewRef }: ReportTabProps) {
             </div>
             
             <div className="grid md:grid-cols-2 gap-8">
-                {/* --- STEP 3: DETAILS --- */}
                 <div className="space-y-4 border p-4 rounded-lg">
                     <h3 className="font-semibold flex items-center">
                        <span className={`flex items-center justify-center w-6 h-6 rounded-full font-bold ${detailsSubmitted ? 'bg-green-500' : 'bg-primary'} text-primary-foreground mr-3`}>3</span>
@@ -363,7 +387,6 @@ export function ReportTab({ threeDViewRef, twoDViewRef }: ReportTabProps) {
                     </Button>
                 </div>
                 
-                {/* --- IMAGE PREVIEW --- */}
                 <div className="space-y-4 border p-4 rounded-lg min-h-[300px]">
                     <h3 className="font-semibold">Image Preview (Top 10 Patches)</h3>
                     {hasImages ? (
@@ -374,16 +397,15 @@ export function ReportTab({ threeDViewRef, twoDViewRef }: ReportTabProps) {
                 </div>
             </div>
 
-            {/* --- STEP 4: DOWNLOAD --- */}
             <div className="space-y-4 border p-4 rounded-lg">
                 <h3 className="font-semibold flex items-center">
                    <span className={`flex items-center justify-center w-6 h-6 rounded-full font-bold bg-primary text-primary-foreground mr-3`}>4</span>
-                   Create and Download DOCX (Client-Side)
+                   Create and Download PDF Report
                 </h3>
-                 {generationProgress && isGenerating && !generationProgress.task.includes('Capturing') && (
+                 {isGenerating && generationProgress && !generationProgress.task.includes('Capturing') && (
                   <div className="space-y-2">
-                    <Progress value={generationProgress.percent} />
-                    <p className="text-xs text-muted-foreground text-center">{generationProgress.message}</p>
+                    <Progress value={generationProgress.current} />
+                    <p className="text-xs text-muted-foreground text-center">{generationProgress.task}</p>
                   </div>
                  )}
                 <Button 
@@ -392,7 +414,7 @@ export function ReportTab({ threeDViewRef, twoDViewRef }: ReportTabProps) {
                   disabled={!hasImages || !detailsSubmitted || isGenerating}
                 >
                   {isGenerating && generationProgress ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2" />}
-                  {isGenerating && generationProgress ? 'Generating...' : 'Generate Top-10 Report'}
+                  {isGenerating && generationProgress ? 'Generating...' : 'Generate PDF Report'}
                 </Button>
             </div>
 

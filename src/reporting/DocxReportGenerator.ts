@@ -1,4 +1,5 @@
 
+
 // This file is now a placeholder for type definitions used by the client
 // and the server-side API route. The actual DOCX generation logic has
 // been moved to `src/app/api/generate-report/route.ts`.
