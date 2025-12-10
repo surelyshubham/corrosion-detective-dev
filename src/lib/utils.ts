@@ -30,19 +30,3 @@ export const getConditionClass = (condition: Condition) => {
       return 'text-muted-foreground';
   }
 };
-
-export function canvasToArrayBuffer(canvas: HTMLCanvasElement, mime = 'image/png', quality?: any): Promise<ArrayBuffer> {
-  return new Promise((resolve, reject) => {
-    if (!canvas || typeof canvas.toBlob !== 'function') {
-      return reject(new Error('Invalid canvas object provided.'));
-    }
-    
-    canvas.toBlob((blob) => {
-      if (!blob) return reject(new Error('toBlob returned null'));
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as ArrayBuffer);
-      reader.onerror = (e) => reject(e);
-      reader.readAsArrayBuffer(blob);
-    }, mime, quality);
-  });
-}
