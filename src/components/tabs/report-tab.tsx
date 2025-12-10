@@ -123,11 +123,12 @@ export function ReportTab({ threeDViewRef, twoDViewRef }: ReportTabProps) {
         const sideViewDataUrl = captureFunctions3D.capture();
         
         // --- Capture 2D View ---
+        setGenerationProgress({ current: progressBase + 4, total: totalSteps, task: `Capturing 2D Heatmap for Patch #${segment.id}` });
         // TODO: Implement focus on 2D view before capture if possible
         const heatmapDataUrl = captureFunctions2D.capture();
         
         // --- Generate AI Insight ---
-        setGenerationProgress({ current: progressBase + 4, total: totalSteps, task: `Generating AI insight for Patch #${segment.id}` });
+        setGenerationProgress({ current: progressBase + 5, total: totalSteps, task: `Generating AI insight for Patch #${segment.id}` });
         const aiObservation = await generatePatchSummary(segment, inspectionResult?.nominalThickness || 0, inspectionResult?.assetType || 'N/A', threshold);
 
         const enrichedSegment: ReportPatchSegment = {
