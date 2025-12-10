@@ -17,31 +17,25 @@ import { Tooltip, TooltipProvider, TooltipTrigger, TooltipContent } from '../ui/
 import type { ThreeDeeViewRef } from './three-dee-view-tab'
 import type { TwoDeeViewRef } from './two-dee-heatmap-tab'
 import { ScrollArea } from '../ui/scroll-area'
-import { Camera, Download, Edit, FileText, Info, Loader2, Lock, Pencil } from 'lucide-react'
+import { Camera, Download, Edit, FileText, Info, Loader2, Lock, Pencil, UploadCloud } from 'lucide-react'
 import ReportList from '../reporting/ReportList'
 import { PatchVault } from '@/vaults/patchVault'
 import { generatePatchSummary } from '@/ai/flows/generate-patch-summary'
+import { canvasToArrayBuffer, downloadFile } from '@/lib/utils'
+import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
+import { useFirebase } from '@/firebase'
 
 interface ReportTabProps {
   threeDViewRef: React.RefObject<ThreeDeeViewRef>;
   twoDViewRef: React.RefObject<TwoDeeViewRef>;
 }
 
-let docxWorker: Worker | null = null;
-if (typeof window !== 'undefined') {
-    docxWorker = new Worker(new URL('../../workers/docx.worker.ts', import.meta.url), { type: 'module' });
-}
-
-// Helper to convert data URL to ArrayBuffer
-async function dataUrlToArrayBuffer(dataUrl: string): Promise<ArrayBuffer> {
-    const res = await fetch(dataUrl);
-    return res.arrayBuffer();
-}
-
 
 export function ReportTab({ threeDViewRef, twoDViewRef }: ReportTabProps) {
   const { inspectionResult, segments } = useInspectionStore();
   const { toast } = useToast();
+  const { app: firebaseApp } = useFirebase();
+  const storage = firebaseApp ? getStorage(firebaseApp) : null;
   
   const threshold = useInspectionStore((s) => s.defectThreshold);
   const setThreshold = useInspectionStore((s) => s.setDefectThreshold);
@@ -117,6 +111,14 @@ export function ReportTab({ threeDViewRef, twoDViewRef }: ReportTabProps) {
     PatchVault.clearAll();
     const finalSegments: ReportPatchSegment[] = [];
 
+    const captureAndConvert = async (captureFn: () => string | HTMLCanvasElement): Promise<ArrayBuffer> => {
+        const result = captureFn();
+        if (typeof result === 'string') {
+             const res = await fetch(result);
+             return await res.arrayBuffer();
+        }
+        return canvasToArrayBuffer(result);
+    };
 
     for (let i = 0; i < segments.length; i++) {
         const segment = segments[i];
@@ -129,23 +131,19 @@ export function ReportTab({ threeDViewRef, twoDViewRef }: ReportTabProps) {
         // --- Capture 3D Views ---
         captureFunctions3D.setView('iso');
         await new Promise(resolve => setTimeout(resolve, 250));
-        const isoViewDataUrl = captureFunctions3D.capture();
-        const isoViewBuffer = await dataUrlToArrayBuffer(isoViewDataUrl);
+        const isoViewBuffer = await captureAndConvert(captureFunctions3D.capture);
 
 
         captureFunctions3D.setView('top');
         await new Promise(resolve => setTimeout(resolve, 250));
-        const topViewDataUrl = captureFunctions3D.capture();
-        const topViewBuffer = await dataUrlToArrayBuffer(topViewDataUrl);
+        const topViewBuffer = await captureAndConvert(captureFunctions3D.capture);
 
         captureFunctions3D.setView('side');
         await new Promise(resolve => setTimeout(resolve, 250));
-        const sideViewDataUrl = captureFunctions3D.capture();
-        const sideViewBuffer = await dataUrlToArrayBuffer(sideViewDataUrl);
+        const sideViewBuffer = await captureAndConvert(captureFunctions3D.capture);
         
         // --- Capture 2D View ---
-        const heatmapDataUrl = captureFunctions2D.capture();
-        const heatmapBuffer = await dataUrlToArrayBuffer(heatmapDataUrl);
+        const heatmapBuffer = await captureAndConvert(captureFunctions2D.capture);
         
         // --- Generate AI Insight ---
         const aiObservation = await generatePatchSummary(segment, inspectionResult?.nominalThickness || 0, inspectionResult?.assetType || 'N/A', threshold);
@@ -179,35 +177,54 @@ export function ReportTab({ threeDViewRef, twoDViewRef }: ReportTabProps) {
     });
   };
   
-  const handleGenerateFinalReport = async () => {
-      if (!enrichedSegments || enrichedSegments.length === 0 || !reportMetadata || !inspectionResult) {
+ const handleGenerateFinalReport = async () => {
+    if (!enrichedSegments || enrichedSegments.length === 0 || !reportMetadata || !inspectionResult || !storage) {
         toast({
             variant: "destructive",
             title: "Cannot Generate Report",
-            description: "Please capture assets and submit report details first.",
+            description: "Please capture assets, submit report details, and ensure you are connected to Firebase.",
         });
         return;
-      }
-      
-      if (!docxWorker) {
-        toast({ variant: 'destructive', title: 'Worker Not Ready', description: 'The report generator worker is not available.' });
-        return;
-      }
+    }
 
-      setIsGenerating(true);
-      setGenerationProgress({ current: 0, total: 1, task: 'Generating DOCX file...'});
+    setIsGenerating(true);
+    const reportId = `report_${Date.now()}`;
+    const totalUploads = enrichedSegments.length * 4;
+    setGenerationProgress({ current: 0, total: totalUploads, task: 'Uploading visual assets...' });
 
-      const transferList: ArrayBuffer[] = [];
-      const payloadSegments = enrichedSegments.map(seg => {
-          const vaultEntry = PatchVault.get(String(seg.id));
-          const images = vaultEntry?.buffers.map(b => {
-              transferList.push(b.buffer);
-              return { name: b.name, mime: b.mime, buffer: b.buffer };
-          }) || [];
-          return { ...seg, images };
-      });
+    try {
+        const patchesWithUrls = await Promise.all(enrichedSegments.map(async (segment, patchIndex) => {
+            const vaultEntry = PatchVault.get(String(segment.id));
+            if (!vaultEntry) throw new Error(`Could not find vault entry for patch ${segment.id}`);
 
-      const payload: FinalReportPayload = {
+            const imageUrls: { [key: string]: string } = {};
+
+            for (let i = 0; i < vaultEntry.buffers.length; i++) {
+                const { name, buffer } = vaultEntry.buffers[i];
+                const imagePath = `temp_reports/${reportId}/patch_${segment.id}/${name}.png`;
+                const imageRef = storageRef(storage, imagePath);
+                await uploadBytes(imageRef, buffer);
+                const downloadURL = await getDownloadURL(imageRef);
+                imageUrls[name] = downloadURL;
+                setGenerationProgress({
+                    current: patchIndex * 4 + i + 1,
+                    total: totalUploads,
+                    task: `Uploading ${name} for patch #${segment.id}...`
+                });
+            }
+
+            return {
+                ...segment,
+                isoViewUrl: imageUrls.iso,
+                topViewUrl: imageUrls.top,
+                sideViewUrl: imageUrls.side,
+                heatmapUrl: imageUrls.heat,
+            };
+        }));
+
+        setGenerationProgress({ current: totalUploads, total: totalUploads, task: 'Generating DOCX on server...' });
+
+        const apiPayload = {
             global: {
                 assetName: reportMetadata.assetName || 'N/A',
                 projectName: reportMetadata.projectName,
@@ -220,41 +237,38 @@ export function ReportTab({ threeDViewRef, twoDViewRef }: ReportTabProps) {
                 corrodedAreaBelow70: Number(inspectionResult.stats.areaBelow70),
                 corrodedAreaBelow60: Number(inspectionResult.stats.areaBelow60),
             },
-            segments: payloadSegments,
+            segments: patchesWithUrls,
             remarks: reportMetadata.remarks,
         };
 
-        docxWorker.onmessage = (ev) => {
-            const { ok, buffer, error } = ev.data;
-             setIsGenerating(false);
-             setGenerationProgress(null);
+        const response = await fetch('/api/generate-report', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(apiPayload),
+        });
 
-            if (!ok || !buffer) {
-                console.error("DOCX Worker Error:", error);
-                toast({ variant: 'destructive', title: 'Report Generation Failed', description: error || 'An unknown worker error occurred.' });
-                return;
-            }
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Server failed to generate report: ${errorText}`);
+        }
 
-            const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `Report_${reportMetadata.assetName || 'Asset'}.docx`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-        };
-        
-        docxWorker.onerror = (err) => {
-             setIsGenerating(false);
-             setGenerationProgress(null);
-             console.error("DOCX Worker crashed:", err);
-             toast({ variant: 'destructive', title: 'Report Worker Crashed', description: err.message });
-        };
-        
-        docxWorker.postMessage({ cmd: 'generate_report', payload }, transferList);
-  };
+        const blob = await response.blob();
+        downloadFile(blob, `Report_${reportMetadata.assetName || 'Asset'}.docx`);
+
+    } catch (error: any) {
+        console.error("Report generation failed:", error);
+        toast({
+            variant: "destructive",
+            title: "Report Generation Failed",
+            description: error.message || "An unknown error occurred.",
+        });
+    } finally {
+        setIsGenerating(false);
+        setGenerationProgress(null);
+        // TODO: Add cleanup for temp files in storage
+    }
+};
+
   
   const hasImages = enrichedSegments && enrichedSegments.length > 0;
 
@@ -324,7 +338,7 @@ export function ReportTab({ threeDViewRef, twoDViewRef }: ReportTabProps) {
                      <span className={`flex items-center justify-center w-6 h-6 rounded-full font-bold ${hasImages ? 'bg-green-500' : 'bg-primary'} text-primary-foreground mr-3`}>2</span>
                     Capture Visual Assets
                 </h3>
-                 {generationProgress && isGenerating && (
+                 {generationProgress && isGenerating && generationProgress.task.includes('Capturing') && (
                   <div className="space-y-2">
                     <Progress value={(generationProgress.current / generationProgress.total) * 100} />
                     <p className="text-xs text-muted-foreground text-center">{generationProgress.task}</p>
@@ -335,8 +349,8 @@ export function ReportTab({ threeDViewRef, twoDViewRef }: ReportTabProps) {
                   onClick={handleGenerateAndCapture}
                   disabled={!isThresholdLocked || isGenerating}
                 >
-                  {isGenerating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Camera className="mr-2" />}
-                  {isGenerating ? 'Generating...' : (hasImages ? 'Re-Capture All Assets' : 'Start Capture Sequence')}
+                  {isGenerating && generationProgress?.task.includes('Capturing') ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Camera className="mr-2" />}
+                  {isGenerating && generationProgress?.task.includes('Capturing') ? 'Generating...' : (hasImages ? 'Re-Capture All Assets' : 'Start Capture Sequence')}
                 </Button>
             </div>
             
@@ -373,15 +387,21 @@ export function ReportTab({ threeDViewRef, twoDViewRef }: ReportTabProps) {
             <div className="space-y-4 border p-4 rounded-lg">
                 <h3 className="font-semibold flex items-center">
                    <span className={`flex items-center justify-center w-6 h-6 rounded-full font-bold bg-primary text-primary-foreground mr-3`}>4</span>
-                   Create and Download DOCX
+                   Create and Download DOCX (Cloud)
                 </h3>
+                 {generationProgress && isGenerating && !generationProgress.task.includes('Capturing') && (
+                  <div className="space-y-2">
+                    <Progress value={(generationProgress.current / generationProgress.total) * 100} />
+                    <p className="text-xs text-muted-foreground text-center">{generationProgress.task}</p>
+                  </div>
+                 )}
                 <Button 
                   className="w-full" 
                   onClick={handleGenerateFinalReport}
                   disabled={!hasImages || !detailsSubmitted || isGenerating}
                 >
-                  {isGenerating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2" />}
-                  {isGenerating ? 'Generating...' : 'Generate DOCX Report'}
+                  {isGenerating && !generationProgress?.task.includes('Capturing') ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2" />}
+                  {isGenerating && !generationProgress?.task.includes('Capturing') ? 'Generating...' : 'Generate DOCX Report'}
                 </Button>
             </div>
 
