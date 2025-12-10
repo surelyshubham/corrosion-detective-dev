@@ -44,7 +44,7 @@ export async function captureAssetPatches(scene: THREE.Scene, camera: THREE.Came
         const patchMid = (patchStart + patchEnd) / 2;
 
         // A. Set Clipping Planes (Scissors)
-        let planes = [];
+        let planes: THREE.Plane[] = [];
         if (isVertical) {
             // Tank: Cut Top and Bottom
             planes = [
@@ -89,9 +89,8 @@ export async function captureAssetPatches(scene: THREE.Scene, camera: THREE.Came
         );
         camera.lookAt(target);
         views.iso = await takeSnapshot(renderer, scene, camera);
-
-        // -- View 4: "2D Map" (Reuse Top for now, or implement separate shader capture) --
-        views.map = views.top;
+        
+        // -- View 4: "2D Map" is now handled separately with a full overview
 
         patches.push({ id: i + 1, views });
         console.log(`Captured Patch ${i+1}`);
@@ -106,9 +105,10 @@ export async function captureAssetPatches(scene: THREE.Scene, camera: THREE.Came
 }
 
 
-export function generatePDF(assetName: string, fullAssetImage: string, patches: {id: number, views: any}[]) {
+export function generatePDF(assetName: string, fullAssetImage: string, twoDHeatmapImage: string, patches: {id: number, views: any}[]) {
     const doc = new jsPDF();
     const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
 
     // --- PAGE 1: TITLE & OVERVIEW ---
     doc.setFontSize(22);
@@ -119,59 +119,54 @@ export function generatePDF(assetName: string, fullAssetImage: string, patches: 
     doc.text(`Inspector: Sigma NDT`, 14, 42);
     doc.text(`Date: ${new Date().toLocaleDateString()}`, 14, 49);
 
-    // Full Asset Image
     if (fullAssetImage) {
-        doc.addImage(fullAssetImage, 'PNG', 14, 60, 180, 100);
-        doc.text("Figure 1: Full Asset Overview", 14, 165);
+        doc.text("Figure 1: Full Asset 3D Overview", 14, 70);
+        doc.addImage(fullAssetImage, 'PNG', 14, 75, 180, 100);
+    }
+    
+    if (twoDHeatmapImage) {
+        doc.text("Figure 2: Full Asset 2D Heatmap", 14, 190);
+        doc.addImage(twoDHeatmapImage, 'PNG', 14, 195, 180, 100);
     }
 
-    // --- PATCH PAGES (1 Patch per Block, maybe 2 per page) ---
-    let yPos = 20;
-    
-    patches.forEach((patch, index) => {
-        // Add new page every 2 patches to avoid clutter
-        if (index > 0 && index % 2 === 0) {
-            doc.addPage();
-            yPos = 20; // Reset Y
-        } else if (index > 0) {
-            yPos += 140; // Move down for second patch
-        } else if (index === 0) {
-            doc.addPage();
-             yPos = 20; // Reset Y for first patch on new page
-        }
-
+    // --- PATCH PAGES (1 Patch per page) ---
+    patches.forEach((patch) => {
+        doc.addPage();
+        const yPos = 20;
 
         // Header
-        doc.setFontSize(14);
-        doc.setFillColor(230, 230, 230); // Light gray background
-        doc.rect(10, yPos - 10, pageWidth - 20, 10, 'F');
+        doc.setFontSize(16);
+        doc.setFillColor(230, 230, 230);
+        doc.rect(10, yPos - 10, pageWidth - 20, 12, 'F');
         doc.setTextColor(0);
-        doc.text(`Patch ${patch.id}`, 14, yPos - 3);
+        doc.text(`Corrosion Patch Detail: Patch ${patch.id}`, 14, yPos);
 
-        // Data Table Simulation
-        doc.setFontSize(10);
-        doc.text(`Area: 10% (Coverage)`, 14, yPos + 10);
-        doc.text(`Min Thickness: 3.60 mm`, 14, yPos + 16);
-        doc.text(`Severity: Critical`, 14, yPos + 22);
+        const dataY = yPos + 25;
+        doc.setFontSize(11);
+        doc.text(`Area: 10% (Coverage)`, 14, dataY);
+        doc.text(`Min Thickness: 3.60 mm`, 14, dataY + 7);
+        doc.text(`Severity: Critical`, 14, dataY + 14);
 
-        // Images Grid (2x2)
-        const imgSize = 40;
-        const gap = 5;
-        const startX = 70;
+        // Images
+        const imgWidth = 80;
+        const imgHeight = 60;
+        const imgY = dataY + 30;
+
+        if (patch.views.iso) {
+             doc.addImage(patch.views.iso, 'PNG', 15, imgY, imgWidth, imgHeight);
+             doc.text("Isometric View", 15 + imgWidth / 2, imgY + imgHeight + 5, { align: 'center'});
+        }
         
-        // Top Row
-        doc.addImage(patch.views.top, 'PNG', startX, yPos, imgSize, imgSize);
-        doc.text("Top View", startX + imgSize/2 - 5, yPos + imgSize + 5);
-
-        doc.addImage(patch.views.side, 'PNG', startX + imgSize + gap, yPos, imgSize, imgSize);
-        doc.text("Side View", startX + imgSize + gap + imgSize/2 - 5, yPos + imgSize + 5);
-
-        // Bottom Row
-        doc.addImage(patch.views.iso, 'PNG', startX, yPos + imgSize + 15, imgSize, imgSize);
-        doc.text("Iso View", startX + imgSize/2 - 5, yPos + (imgSize*2) + 20);
-
-        doc.addImage(patch.views.map, 'PNG', startX + imgSize + gap, yPos + imgSize + 15, imgSize, imgSize);
-        doc.text("2D Map", startX + imgSize + gap + imgSize/2 - 5, yPos + (imgSize*2) + 20);
+        if (patch.views.top) {
+            doc.addImage(patch.views.top, 'PNG', pageWidth - imgWidth - 15, imgY, imgWidth, imgHeight);
+            doc.text("Top/Front View", pageWidth - imgWidth / 2 - 15, imgY + imgHeight + 5, { align: 'center'});
+        }
+        
+        if (patch.views.side) {
+            const sideY = imgY + imgHeight + 20;
+            doc.addImage(patch.views.side, 'PNG', 15, sideY, imgWidth, imgHeight);
+            doc.text("Side View", 15 + imgWidth / 2, sideY + imgHeight + 5, { align: 'center'});
+        }
     });
 
     doc.save(`${assetName}_Report.pdf`);

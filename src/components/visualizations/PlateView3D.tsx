@@ -90,12 +90,17 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
         const patches = await captureAssetPatches(sceneRef.current, cameraRef.current, rendererRef.current, meshRef.current);
         rendererRef.current.localClippingEnabled = false; // Disable it after capture
 
-        // 2. Capture Full Overview (optional, just take one normal screenshot)
+        // 2. Capture Full Overview
         rendererRef.current.render(sceneRef.current, cameraRef.current);
         const fullAsset = rendererRef.current.domElement.toDataURL("image/png");
+        
+        // This is a placeholder for the 2D view. 
+        // A full implementation would need to access the 2D canvas.
+        const twoDHeatmapPlaceholder = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+
 
         // 3. Create PDF
-        generatePDF("ASSET-001", fullAsset, patches);
+        generatePDF("ASSET-001", fullAsset, twoDHeatmapPlaceholder, patches);
     } catch(err) {
         console.error("Report generation failed:", err);
         alert("Failed to generate report. Check console for details.");
