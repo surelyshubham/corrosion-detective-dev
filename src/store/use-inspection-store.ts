@@ -86,147 +86,148 @@ interface InspectionState {
 }
 
 let worker: Worker | null = null;
-if (typeof window !== 'undefined') {
-    worker = new Worker(new URL('../workers/data-processor.worker.ts', import.meta.url));
-}
+
 
 export const useInspectionStore = create<InspectionState>()(
     (set, get) => {
-      if (worker) {
-        worker.onmessage = (event: MessageEvent<WorkerOutput>) => {
-          const { type, message, progress, ...data } = event.data;
+      // Initialize worker inside the store setup function
+      if (typeof window !== 'undefined' && !worker) {
+          worker = new Worker(new URL('../workers/data-processor.worker.ts', import.meta.url));
           
-          if (type === 'PROGRESS') {
-             if (get().isFinalizing) {
-                set({ loadingProgress: progress || 0 });
-             } else {
-                set({ isLoading: true, error: null });
-             }
-          } else if (type === 'ERROR') {
-            console.error("Worker Error:", message);
-            toast({ variant: 'destructive', title: 'Processing Error', description: message });
-            set({ isLoading: false, isFinalizing: false, error: message || "An unknown error occurred in the worker." });
-          } else if (type === 'STAGED') {
-            toast({ title: 'File Staged', description: `${get().stagedFiles.slice(-1)[0]?.name} has been added.` });
-            set({ isLoading: false, projectDimensions: data.dimensions || null, thicknessConflict: null });
-          } else if (type === 'THICKNESS_CONFLICT') {
-             set({ isLoading: false, thicknessConflict: data.conflict || null });
-          } else if (type === 'SEGMENTS_UPDATED') {
-            set({ segments: data.segments! });
-             // After updating segments, also save to localStorage
-            const existingResult = get().inspectionResult;
-            if (existingResult && data.segments) {
-                 const patchVault: { [key: string]: any } = {};
-                 data.segments.forEach(seg => {
-                     patchVault[seg.id] = {
-                         meta: { ...seg },
-                         images: {
-                             isoViewDataUrl: seg.isoViewDataUrl,
-                             topViewDataUrl: seg.topViewDataUrl,
-                             sideViewDataUrl: seg.sideViewDataUrl,
-                             heatmapDataUrl: seg.heatmapDataUrl,
-                         }
-                     }
-                 });
-                  try {
-                    const serialized = JSON.stringify(patchVault);
-                    localStorage.setItem("patchVault", serialized);
-                    console.log("PatchVault updated and saved to localStorage");
-                  } catch (err) {
-                    console.error("Failed to save updated PatchVault:", err);
-                  }
-            }
-
-
-          } else if (type === 'FINALIZED') {
-             if (data.displacementBuffer && data.colorBuffer && data.gridMatrix && data.stats && data.condition && data.plates && data.segments) {
-                
-                if (data.stats.totalPoints === 0) {
-                    set({ isFinalizing: false, error: "Processing Failed: No data points found in the project." });
-                    return;
-                }
-
-                DataVault.displacementBuffer = data.displacementBuffer;
-                DataVault.colorBuffer = data.colorBuffer;
-                DataVault.gridMatrix = data.gridMatrix;
-                DataVault.stats = data.stats;
-                
-                const newResult: MergedInspectionResult = {
-                    plates: data.plates,
-                    mergedGrid: data.gridMatrix,
-                    nominalThickness: data.stats.nominalThickness,
-                    stats: data.stats,
-                    condition: data.condition,
-                    aiInsight: null,
-                    assetType: data.plates[0].assetType,
-                    pipeOuterDiameter: data.plates[0].pipeOuterDiameter,
-                    pipeLength: data.plates[0].pipeLength,
-                    segments: data.segments,
-                };
-                
-                set(state => ({
-                    inspectionResult: newResult,
-                    segments: data.segments,
-                    isFinalizing: false,
-                    error: null,
-                    dataVersion: state.dataVersion + 1,
-                }));
-                 
-                // Create and save PatchVault to localStorage
-                 const patchVault: { [key: string]: any } = {};
-                 data.segments.forEach(seg => {
-                     patchVault[seg.id] = {
-                         meta: { ...seg },
-                         images: {
-                             isoViewDataUrl: seg.isoViewDataUrl,
-                             topViewDataUrl: seg.topViewDataUrl,
-                             sideViewDataUrl: seg.sideViewDataUrl,
-                             heatmapDataUrl: seg.heatmapDataUrl,
-                         }
-                     }
-                 });
-                 if (typeof window !== "undefined") {
+          worker.onmessage = (event: MessageEvent<WorkerOutput>) => {
+            const { type, message, progress, ...data } = event.data;
+            
+            if (type === 'PROGRESS') {
+               if (get().isFinalizing) {
+                  set({ loadingProgress: progress || 0 });
+               } else {
+                  set({ isLoading: true, error: null });
+               }
+            } else if (type === 'ERROR') {
+              console.error("Worker Error:", message);
+              toast({ variant: 'destructive', title: 'Processing Error', description: message });
+              set({ isLoading: false, isFinalizing: false, error: message || "An unknown error occurred in the worker." });
+            } else if (type === 'STAGED') {
+              toast({ title: 'File Staged', description: `${get().stagedFiles.slice(-1)[0]?.name} has been added.` });
+              set({ isLoading: false, projectDimensions: data.dimensions || null, thicknessConflict: null });
+            } else if (type === 'THICKNESS_CONFLICT') {
+               set({ isLoading: false, thicknessConflict: data.conflict || null });
+            } else if (type === 'SEGMENTS_UPDATED') {
+              set({ segments: data.segments! });
+               // After updating segments, also save to localStorage
+              const existingResult = get().inspectionResult;
+              if (existingResult && data.segments) {
+                   const patchVault: { [key: string]: any } = {};
+                   data.segments.forEach(seg => {
+                       patchVault[seg.id] = {
+                           meta: { ...seg },
+                           images: {
+                               isoViewDataUrl: seg.isoViewDataUrl,
+                               topViewDataUrl: seg.topViewDataUrl,
+                               sideViewDataUrl: seg.sideViewDataUrl,
+                               heatmapDataUrl: seg.heatmapDataUrl,
+                           }
+                       }
+                   });
                     try {
-                        const serialized = JSON.stringify(patchVault);
-                        localStorage.setItem("patchVault", serialized);
-                        console.log("PatchVault saved to localStorage", patchVault);
+                      const serialized = JSON.stringify(patchVault);
+                      localStorage.setItem("patchVault", serialized);
+                      console.log("PatchVault updated and saved to localStorage");
                     } catch (err) {
-                        console.error("Failed to save PatchVault:", err);
+                      console.error("Failed to save updated PatchVault:", err);
                     }
-                }
+              }
 
-                // Fire off AI insight generation
-                set({ isGeneratingAI: true });
-                const aiInput: CorrosionInsightInput = {
-                    assetType: newResult.assetType,
-                    nominalThickness: Number(newResult.nominalThickness),
-                    minThickness: Number(newResult.stats.minThickness),
-                    maxThickness: Number(newResult.stats.maxThickness),
-                    avgThickness: Number(newResult.stats.avgThickness),
-                    areaBelow80: Number(newResult.stats.areaBelow80),
-                    areaBelow70: Number(newResult.stats.areaBelow70),
-                    areaBelow60: Number(newResult.stats.areaBelow60),
-                    worstLocationX: Number(newResult.stats.worstLocation.x),
-                    worstLocationY: Number(newResult.stats.worstLocation.y),
-                    minPercentage: Number(newResult.stats.minPercentage),
-                };
 
-                generateCorrosionInsight(aiInput)
-                    .then(aiInsight => {
-                        set(state => ({
-                            inspectionResult: state.inspectionResult ? { ...state.inspectionResult, aiInsight } : null,
-                            isGeneratingAI: false,
-                        }));
-                    })
-                    .catch(error => {
-                        console.error("AI Insight generation failed:", error);
-                        set({ isGeneratingAI: false });
-                    });
-            } else {
-                 set({ isFinalizing: false, error: "Worker returned incomplete data after finalization." });
+            } else if (type === 'FINALIZED') {
+               if (data.displacementBuffer && data.colorBuffer && data.gridMatrix && data.stats && data.condition && data.plates && data.segments) {
+                  
+                  if (data.stats.totalPoints === 0) {
+                      set({ isFinalizing: false, error: "Processing Failed: No data points found in the project." });
+                      return;
+                  }
+
+                  DataVault.displacementBuffer = data.displacementBuffer;
+                  DataVault.colorBuffer = data.colorBuffer;
+                  DataVault.gridMatrix = data.gridMatrix;
+                  DataVault.stats = data.stats;
+                  
+                  const newResult: MergedInspectionResult = {
+                      plates: data.plates,
+                      mergedGrid: data.gridMatrix,
+                      nominalThickness: data.stats.nominalThickness,
+                      stats: data.stats,
+                      condition: data.condition,
+                      aiInsight: null,
+                      assetType: data.plates[0].assetType,
+                      pipeOuterDiameter: data.plates[0].pipeOuterDiameter,
+                      pipeLength: data.plates[0].pipeLength,
+                      segments: data.segments,
+                  };
+                  
+                  set(state => ({
+                      inspectionResult: newResult,
+                      segments: data.segments,
+                      isFinalizing: false,
+                      error: null,
+                      dataVersion: state.dataVersion + 1,
+                  }));
+                   
+                  // Create and save PatchVault to localStorage
+                   const patchVault: { [key: string]: any } = {};
+                   data.segments.forEach(seg => {
+                       patchVault[seg.id] = {
+                           meta: { ...seg },
+                           images: {
+                               isoViewDataUrl: seg.isoViewDataUrl,
+                               topViewDataUrl: seg.topViewDataUrl,
+                               sideViewDataUrl: seg.sideViewDataUrl,
+                               heatmapDataUrl: seg.heatmapDataUrl,
+                           }
+                       }
+                   });
+                   if (typeof window !== "undefined") {
+                      try {
+                          const serialized = JSON.stringify(patchVault);
+                          localStorage.setItem("patchVault", serialized);
+                          console.log("PatchVault saved to localStorage", patchVault);
+                      } catch (err) {
+                          console.error("Failed to save PatchVault:", err);
+                      }
+                  }
+
+                  // Fire off AI insight generation
+                  set({ isGeneratingAI: true });
+                  const aiInput: CorrosionInsightInput = {
+                      assetType: newResult.assetType,
+                      nominalThickness: Number(newResult.nominalThickness),
+                      minThickness: Number(newResult.stats.minThickness),
+                      maxThickness: Number(newResult.stats.maxThickness),
+                      avgThickness: Number(newResult.stats.avgThickness),
+                      areaBelow80: Number(newResult.stats.areaBelow80),
+                      areaBelow70: Number(newResult.stats.areaBelow70),
+                      areaBelow60: Number(newResult.stats.areaBelow60),
+                      worstLocationX: Number(newResult.stats.worstLocation.x),
+                      worstLocationY: Number(newResult.stats.worstLocation.y),
+                      minPercentage: Number(newResult.stats.minPercentage),
+                  };
+
+                  generateCorrosionInsight(aiInput)
+                      .then(aiInsight => {
+                          set(state => ({
+                              inspectionResult: state.inspectionResult ? { ...state.inspectionResult, aiInsight } : null,
+                              isGeneratingAI: false,
+                          }));
+                      })
+                      .catch(error => {
+                          console.error("AI Insight generation failed:", error);
+                          set({ isGeneratingAI: false });
+                      });
+              } else {
+                   set({ isFinalizing: false, error: "Worker returned incomplete data after finalization." });
+              }
             }
-          }
-        };
+          };
       }
 
       return {
