@@ -1,4 +1,5 @@
 
+
 import {
   AlignmentType,
   Document,
@@ -19,39 +20,15 @@ type GenerateMessage = {
   payload: FinalReportPayload,
 };
 
-function dataUriToUint8(dataUri?: string): Uint8Array | null {
-  if (!dataUri) return null;
-  try {
-    const commaIndex = dataUri.indexOf(',');
-    if (commaIndex === -1) return null;
-    const base64 = dataUri.substring(commaIndex + 1).trim();
-    if (!base64) return null;
-    const binary = atob(base64);
-    const len = binary.length;
-    const bytes = new Uint8Array(len);
-    for (let i = 0; i < len; i++) {
-      bytes[i] = binary.charCodeAt(i);
-    }
-    return bytes;
-  } catch (err) {
-    console.error('dataUriToUint8 failed', err);
-    return null;
-  }
-}
-
-async function createImageParagraph(dataUrl?: string): Promise<Paragraph> {
+async function createImageParagraph(dataUrl?: ArrayBuffer): Promise<Paragraph> {
     if (!dataUrl) {
         return new Paragraph({ text: "[image unavailable]", italics: true });
-    }
-    const imageBuffer = dataUriToUint8(dataUrl);
-    if (!imageBuffer) {
-        return new Paragraph({ text: "[image processing failed]", italics: true });
     }
     return new Paragraph({
         alignment: AlignmentType.CENTER,
         children: [
             new ImageRun({
-                data: imageBuffer,
+                data: dataUrl,
                 transformation: { width: 550, height: 350 },
             }),
         ],
@@ -165,7 +142,7 @@ function createPatchStatsTable(patch: ReportPatchSegment, nominalThickness: numb
     pushRow('Min Thickness', `${patch.worstThickness.toFixed(2)} mm`);
     pushRow('Avg Thickness', `${patch.avgThickness.toFixed(2)} mm`);
     
-    const minPercentage = (patch.worstThickness / nominalThickness) * 100;
+    const minPercentage = nominalThickness > 0 ? (patch.worstThickness / nominalThickness) * 100 : 0;
     if(!isNaN(minPercentage)) {
         pushRow(
             'Minimum Remaining Wall',
@@ -187,7 +164,7 @@ self.addEventListener('message', async (ev: MessageEvent<GenerateMessage>) => {
 
     try {
         const { global, segments, remarks } = payload;
-        const sections: any[] = [];
+        const docSections: any[] = [];
 
         // Global page
         const globalChildren: (Paragraph | Table)[] = [
@@ -202,31 +179,33 @@ self.addEventListener('message', async (ev: MessageEvent<GenerateMessage>) => {
             globalChildren.push(new Paragraph({ heading: HeadingLevel.HEADING_2, text: 'Inspector Remarks' }));
             globalChildren.push(new Paragraph({ text: remarks }));
         }
-        sections.push({ children: globalChildren });
+        docSections.push({ children: globalChildren });
 
         // Patch pages
         for (const patch of segments) {
+            const findBuffer = (name: string) => patch.images?.find(img => img.name === name)?.buffer;
+            
             const patchChildren: (Paragraph|Table)[] = [
                 createPatchHeader(patch),
                 createPatchStatsTable(patch, global.nominalThickness || 0),
                 new Paragraph({ text: "" }), // Spacer
                 new Paragraph({ text: "Isometric View", alignment: AlignmentType.CENTER, spacing: { before: 100, after: 100 } }),
-                await createImageParagraph(patch.isoViewDataUrl),
+                await createImageParagraph(findBuffer('iso')),
                 new Paragraph({ text: "Top View", alignment: AlignmentType.CENTER, spacing: { before: 100, after: 100 } }),
-                await createImageParagraph(patch.topViewDataUrl),
+                await createImageParagraph(findBuffer('top')),
                 new Paragraph({ text: "Side View", alignment: AlignmentType.CENTER, spacing: { before: 100, after: 100 } }),
-                await createImageParagraph(patch.sideViewDataUrl),
+                await createImageParagraph(findBuffer('side')),
                 new Paragraph({ text: "2D Heatmap", alignment: AlignmentType.CENTER, spacing: { before: 100, after: 100 } }),
-                await createImageParagraph(patch.heatmapDataUrl),
+                await createImageParagraph(findBuffer('heat')),
             ];
             if (patch.aiObservation) {
                 patchChildren.push(new Paragraph({ text: 'AI Observation', heading: HeadingLevel.HEADING_3, spacing: {before: 200, after: 100 } }));
                 patchChildren.push(new Paragraph({ text: patch.aiObservation }));
             }
-            sections.push({ children: patchChildren });
+            docSections.push({ children: patchChildren });
         }
         
-        const doc = new Document({ sections });
+        const doc = new Document({ sections: docSections });
         const buffer = await Packer.toBuffer(doc);
         self.postMessage({ ok: true, buffer }, [buffer]);
 

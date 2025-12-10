@@ -1,4 +1,5 @@
 
+
 "use client"
 
 import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react'
@@ -22,7 +23,7 @@ const ColorLegend = ({ mode, stats, nominalThickness }: { mode: ColorMode, stats
 }
 
 export type PipeView3DRef = {
-  capture: () => string;
+  capture: () => HTMLCanvasElement;
   focus: (x: number, y: number, zoomIn: boolean) => void;
   resetCamera: () => void;
   setView: (view: 'iso' | 'top' | 'side') => void;
@@ -134,7 +135,7 @@ export const PipeView3D = React.forwardRef<PipeView3DRef, PipeView3DProps>((prop
 
 
    useImperativeHandle(ref, () => ({
-    capture: () => rendererRef.current?.domElement.toDataURL('image/png') || '',
+    capture: () => rendererRef.current!.domElement,
     focus: (x, y, zoomIn) => {
         if (!cameraRef.current || !controlsRef.current || !stats || !pipeOuterDiameter || !pipeLength) return;
         const { width, height } = stats.gridSize;
@@ -272,7 +273,7 @@ export const PipeView3D = React.forwardRef<PipeView3DRef, PipeView3DProps>((prop
 
       if ( intersects.length > 0 && intersects[0].uv) {
           const uv = intersects[0].uv;
-          const { width, height } = stats!.gridSize;
+          const { width, height } = stats!;
           const gridX = Math.floor(uv.x * (width - 1));
           const gridY = Math.floor((1 - uv.y) * (height - 1));
           
@@ -436,3 +437,4 @@ PipeView3D.displayName = "PipeView3D";
 
     
     
+

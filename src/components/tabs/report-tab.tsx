@@ -2,7 +2,7 @@
 
 "use client"
 
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, useRef } from 'react'
 import { useInspectionStore } from '@/store/use-inspection-store'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '../ui/button'
@@ -18,9 +18,10 @@ import type { ThreeDeeViewRef } from './three-dee-view-tab'
 import type { TwoDeeViewRef } from './two-dee-heatmap-tab'
 import { ScrollArea } from '../ui/scroll-area'
 import { Camera, Download, Edit, FileText, Info, Loader2, Lock, Pencil } from 'lucide-react'
-import { Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious } from '../ui/carousel'
-import Image from 'next/image'
+import ReportList from '../reporting/ReportList'
+import { PatchVault } from '@/vaults/patchVault'
 import { generatePatchSummary } from '@/ai/flows/generate-patch-summary'
+import { canvasToArrayBuffer } from '@/lib/utils'
 
 interface ReportTabProps {
   threeDViewRef: React.RefObject<ThreeDeeViewRef>;
@@ -30,11 +31,6 @@ interface ReportTabProps {
 let docxWorker: Worker | null = null;
 if (typeof window !== 'undefined') {
     docxWorker = new Worker(new URL('../../workers/docx.worker.ts', import.meta.url), { type: 'module' });
-
-    // Initialize the PatchVault
-    if (!(window as any).PatchVault) {
-        (window as any).PatchVault = {};
-    }
 }
 
 
@@ -62,6 +58,7 @@ export function ReportTab({ threeDViewRef, twoDViewRef }: ReportTabProps) {
   } = useReportStore();
   
   const [isReportDialogOpen, setIsReportDialogOpen] = useState(false);
+  const patchIds = enrichedSegments?.map(s => String(s.id)) || [];
   
   const captureFunctions3D = threeDViewRef.current;
   const captureFunctions2D = twoDViewRef.current;
@@ -74,16 +71,7 @@ export function ReportTab({ threeDViewRef, twoDViewRef }: ReportTabProps) {
     }
     // Cleanup worker and vault on unmount
     return () => {
-        if ((window as any).PatchVault) {
-            const vault = (window as any).PatchVault;
-            Object.keys(vault).forEach(key => {
-                const item = vault[key];
-                if (item.previewUrls) {
-                    Object.values(item.previewUrls).forEach(url => URL.revokeObjectURL(url as string));
-                }
-            });
-            (window as any).PatchVault = {};
-        }
+       PatchVault.clearAll();
     }
   }, [inspectionResult, resetReportState, setSegmentsForThreshold, threshold]);
 
@@ -117,52 +105,58 @@ export function ReportTab({ threeDViewRef, twoDViewRef }: ReportTabProps) {
     }
     
     setIsGenerating(true);
-    const totalSteps = segments.length * 5; // 4 views + 1 AI insight per segment
+    const totalSteps = segments.length;
     setGenerationProgress({ current: 0, total: totalSteps, task: 'Starting Capture Sequence...' });
-
+    
+    // Clear previous captures
+    PatchVault.clearAll();
     const finalSegments: ReportPatchSegment[] = [];
+
 
     for (let i = 0; i < segments.length; i++) {
         const segment = segments[i];
-        const progressBase = i * 5;
-
+        setGenerationProgress({ current: i + 1, total: totalSteps, task: `Capturing views for Patch #${segment.id}` });
+        
         // --- Focus on the segment in both views
         captureFunctions3D.focus(segment.center.x, segment.center.y, true);
         await new Promise(resolve => setTimeout(resolve, 250));
 
         // --- Capture 3D Views ---
-        setGenerationProgress({ current: progressBase + 1, total: totalSteps, task: `Capturing ISO view for Patch #${segment.id}` });
         captureFunctions3D.setView('iso');
         await new Promise(resolve => setTimeout(resolve, 250));
-        const isoViewDataUrl = captureFunctions3D.capture();
+        const isoViewBuffer = await canvasToArrayBuffer(captureFunctions3D.capture());
 
-        setGenerationProgress({ current: progressBase + 2, total: totalSteps, task: `Capturing TOP view for Patch #${segment.id}` });
         captureFunctions3D.setView('top');
         await new Promise(resolve => setTimeout(resolve, 250));
-        const topViewDataUrl = captureFunctions3D.capture();
+        const topViewBuffer = await canvasToArrayBuffer(captureFunctions3D.capture());
 
-        setGenerationProgress({ current: progressBase + 3, total: totalSteps, task: `Capturing SIDE view for Patch #${segment.id}` });
         captureFunctions3D.setView('side');
         await new Promise(resolve => setTimeout(resolve, 250));
-        const sideViewDataUrl = captureFunctions3D.capture();
+        const sideViewBuffer = await canvasToArrayBuffer(captureFunctions3D.capture());
         
         // --- Capture 2D View ---
-        setGenerationProgress({ current: progressBase + 4, total: totalSteps, task: `Capturing 2D Heatmap for Patch #${segment.id}` });
-        const heatmapDataUrl = captureFunctions2D.capture();
+        const heatmapBuffer = await canvasToArrayBuffer(captureFunctions2D.capture());
         
         // --- Generate AI Insight ---
-        setGenerationProgress({ current: progressBase + 5, total: totalSteps, task: `Generating AI insight for Patch #${segment.id}` });
         const aiObservation = await generatePatchSummary(segment, inspectionResult?.nominalThickness || 0, inspectionResult?.assetType || 'N/A', threshold);
 
-        const enrichedSegment: ReportPatchSegment = {
-            ...segment,
-            isoViewDataUrl,
-            topViewDataUrl,
-            sideViewDataUrl,
-            heatmapDataUrl,
-            aiObservation,
-        };
+        const enrichedSegment: ReportPatchSegment = { ...segment, aiObservation };
         finalSegments.push(enrichedSegment);
+        
+        // --- Store buffers in PatchVault ---
+         PatchVault.set(String(segment.id), {
+            buffers: [
+                { name: 'iso', buffer: isoViewBuffer, mime: 'image/png' },
+                { name: 'top', buffer: topViewBuffer, mime: 'image/png' },
+                { name: 'side', buffer: sideViewBuffer, mime: 'image/png' },
+                { name: 'heat', buffer: heatmapBuffer, mime: 'image/png' },
+            ],
+            meta: {
+                title: `Patch #${segment.id}`,
+                summary: `${segment.tier} | Min: ${segment.worstThickness.toFixed(2)}mm`,
+                ...segment
+            }
+        });
     }
       
     captureFunctions3D.resetCamera();
@@ -193,6 +187,16 @@ export function ReportTab({ threeDViewRef, twoDViewRef }: ReportTabProps) {
       setIsGenerating(true);
       setGenerationProgress({ current: 0, total: 1, task: 'Generating DOCX file...'});
 
+      const transferList: ArrayBuffer[] = [];
+      const payloadSegments = enrichedSegments.map(seg => {
+          const vaultEntry = PatchVault.get(String(seg.id));
+          const images = vaultEntry?.buffers.map(b => {
+              transferList.push(b.buffer);
+              return { name: b.name, mime: b.mime, buffer: b.buffer };
+          }) || [];
+          return { ...seg, images };
+      });
+
       const payload: FinalReportPayload = {
             global: {
                 assetName: reportMetadata.assetName || 'N/A',
@@ -206,7 +210,7 @@ export function ReportTab({ threeDViewRef, twoDViewRef }: ReportTabProps) {
                 corrodedAreaBelow70: Number(inspectionResult.stats.areaBelow70),
                 corrodedAreaBelow60: Number(inspectionResult.stats.areaBelow60),
             },
-            segments: enrichedSegments,
+            segments: payloadSegments,
             remarks: reportMetadata.remarks,
         };
 
@@ -239,10 +243,10 @@ export function ReportTab({ threeDViewRef, twoDViewRef }: ReportTabProps) {
              toast({ variant: 'destructive', title: 'Report Worker Crashed', description: err.message });
         };
         
-        docxWorker.postMessage({ cmd: 'generate_report', payload });
+        docxWorker.postMessage({ cmd: 'generate_report', payload }, transferList);
   };
   
-  const hasImages = !!enrichedSegments && enrichedSegments.length > 0;
+  const hasImages = enrichedSegments && enrichedSegments.length > 0;
 
   return (
     <ScrollArea className="h-full">
@@ -345,18 +349,10 @@ export function ReportTab({ threeDViewRef, twoDViewRef }: ReportTabProps) {
                 </div>
                 
                 {/* --- IMAGE PREVIEW --- */}
-                <div className="space-y-4 border p-4 rounded-lg">
+                <div className="space-y-4 border p-4 rounded-lg min-h-[300px]">
                     <h3 className="font-semibold">Image Preview</h3>
                     {hasImages ? (
-                      <Carousel className="w-full max-w-sm mx-auto">
-                        <CarouselContent>
-                          {enrichedSegments?.map((seg) => (
-                             <CarouselItem key={seg.id}><Card><CardHeader className="p-2 pb-0"><CardTitle className="text-sm">Segment #{seg.id} (ISO)</CardTitle></CardHeader><CardContent className="p-2">{seg.isoViewDataUrl && <Image src={seg.isoViewDataUrl} alt={`Segment ${seg.id}`} width={300} height={200} className="rounded-md" />}</CardContent></Card></CarouselItem>
-                          ))}
-                        </CarouselContent>
-                        <CarouselPrevious />
-                        <CarouselNext />
-                      </Carousel>
+                        <ReportList patchIds={patchIds} />
                     ) : (
                       <div className="text-sm text-center text-muted-foreground py-10">No visual assets captured yet.</div>
                     )}
@@ -386,5 +382,3 @@ export function ReportTab({ threeDViewRef, twoDViewRef }: ReportTabProps) {
     </ScrollArea>
   )
 }
-
-    

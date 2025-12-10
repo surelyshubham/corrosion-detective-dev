@@ -1,4 +1,5 @@
 
+
 "use client"
 
 import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react'
@@ -22,7 +23,7 @@ const ColorLegend = ({ mode, stats, nominalThickness }: { mode: ColorMode, stats
 }
 
 export type PlateView3DRef = {
-  capture: () => string;
+  capture: () => HTMLCanvasElement;
   focus: (x: number, y: number, zoomIn: boolean) => void;
   resetCamera: () => void;
   setView: (view: 'iso' | 'top' | 'side') => void;
@@ -107,7 +108,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
 
 
    useImperativeHandle(ref, () => ({
-    capture: () => rendererRef.current?.domElement.toDataURL('image/png') || '',
+    capture: () => rendererRef.current!.domElement,
     focus: (x, y, zoomIn) => {
         if (!cameraRef.current || !controlsRef.current || !stats) return;
 
@@ -440,3 +441,4 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
   )
 });
 PlateView3D.displayName = "PlateView3D";
+
