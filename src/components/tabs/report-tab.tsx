@@ -169,7 +169,7 @@ export function ReportTab({ threeDViewRef, twoDViewRef }: ReportTabProps) {
     }
 
     setIsGenerating(true);
-    setGenerationProgress({ current: 0, total: 100, task: 'Preparing PDF data...' });
+    setGenerationProgress({ current: 1, total: 100, task: 'Preparing PDF data...' });
 
     try {
       const LOGO_URL = 'https://www.sigmandt.com/images/logo.png';
