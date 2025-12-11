@@ -13,7 +13,7 @@ import { Switch } from '@/components/ui/switch'
 import { Expand, Pin, RefreshCw, LocateFixed, Loader2, FileText } from 'lucide-react'
 import { useImperativeHandle } from 'react'
 import { generateFinalReport } from '@/report/ReportGenerator'
-import { capturePatchImagesForSegment } from '@/utils/capturePatchImages' 
+import { captureAssetPatches } from '@/report/ReportGenerator' 
 import { Input } from '../ui/input'
 import { Textarea } from '../ui/textarea'
 import { ColorLegend } from './ColorLegend'
@@ -77,7 +77,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     try {
         // 1. Run the Robot (Capture Images)
         rendererRef.current.localClippingEnabled = true;
-        const patchImages = await capturePatchImagesForSegment(String(segments[0]?.id));
+        const patchImages = await captureAssetPatches(sceneRef.current, cameraRef.current, rendererRef.current, meshRef.current);
         rendererRef.current.localClippingEnabled = false; 
 
         // 2. Gather User Input
@@ -91,7 +91,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
         };
 
         // 3. Create PDF
-        await generateFinalReport(metadata, [patchImages]); // Assuming generateFinalReport can handle the structure
+        await generateFinalReport(metadata, patchImages);
 
     } catch(err) {
         console.error("Report generation failed:", err);
@@ -162,7 +162,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     }
     
     const currentStats = DataVault.stats;
-    if (!currentStats || !currentStats.gridSize || currentStats.gridSize.width === 0 || currentStats.gridSize.height === 0) {
+    if (!currentStats || !currentStats.gridSize || currentStats.gridSize.width === 0 || currentStats.gridSize.height === 0 || !DataVault.displacementBuffer) {
         return;
     }
     
@@ -214,7 +214,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
 
     const material = new THREE.MeshStandardMaterial({
         side: THREE.DoubleSide,
-        displacementScale: zScale,
+        displacementScale: 1, // Displacement is now actual units
         map: colorTextureRef.current,
         displacementMap: displacementTextureRef.current,
         color: 0x808080,
@@ -326,11 +326,8 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
               if (object instanceof THREE.Mesh) {
                   if (object.geometry) object.geometry.dispose();
                   if (object.material) {
-                      if (Array.isArray(object.material)) {
-                        (object.material as THREE.Material[]).forEach(m => m.dispose());
-                      } else {
-                        (object.material as THREE.Material).dispose();
-                      }
+                      if (Array.isArray(object.material)) (object.material as THREE.Material[]).forEach(m => m.dispose());
+                      else (object.material as THREE.Material).dispose();
                   }
               }
           });
@@ -508,5 +505,3 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
   )
 });
 PlateView3D.displayName = "PlateView3D";
-
-    
