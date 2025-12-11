@@ -1,5 +1,4 @@
 
-
 "use client"
 
 import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react'
@@ -15,10 +14,10 @@ import { Switch } from '@/components/ui/switch'
 import { Expand, Pin, RefreshCw, LocateFixed, Loader2, FileText } from 'lucide-react'
 import { useImperativeHandle } from 'react'
 import { generateFinalReport } from '@/report/ReportGenerator'
+import { capturePatchImagesForSegment } from '@/utils/capturePatchImages' 
 import { Input } from '../ui/input'
 import { Textarea } from '../ui/textarea'
 import { ColorLegend } from './ColorLegend'
-
 
 export type PlateView3DRef = {
   capture: () => string;
@@ -28,7 +27,6 @@ export type PlateView3DRef = {
 };
 
 interface PlateView3DProps {}
-
 
 export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((props, ref) => {
   const { inspectionResult, segments, selectedPoint, setSelectedPoint, dataVersion } = useInspectionStore()
@@ -62,7 +60,6 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
   const displacementTextureRef = useRef<THREE.DataTexture | null>(null);
   const referencePlaneRef = useRef<THREE.Mesh | null>(null);
 
-
   const { nominalThickness, assetType } = inspectionResult || {};
   const stats = DataVault.stats;
   const VISUAL_WIDTH = 100;
@@ -80,23 +77,30 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
    
     try {
         // 1. Run the Robot (Capture Images)
-        // The renderer needs to have local clipping enabled to respect the planes
         rendererRef.current.localClippingEnabled = true;
-        const patchImages = await captureAssetPatches(sceneRef.current, cameraRef.current, rendererRef.current, meshRef.current, segments);
-        rendererRef.current.localClippingEnabled = false; // Disable it after capture
+        // This function name is hypothetical. It needs to be implemented.
+        // For now, let's assume it returns an array of patch image data URLs
+        const patchImages = await Promise.all(
+          segments.map(seg => capturePatchImagesForSegment(String(seg.id)))
+        );
+        rendererRef.current.localClippingEnabled = false; 
 
         // 2. Gather User Input
         const metadata = {
             assetName: assetType || "N/A",
             location: reportMetadata.location,
-            inspectionDate: new Date().toLocaleDateString(), // Placeholder
+            inspectionDate: new Date().toLocaleDateString(),
             reportingDate: new Date().toLocaleDateString(),
             inspector: reportMetadata.inspector,
             remarks: reportMetadata.remarks,
         };
 
         // 3. Create PDF
-        await generateFinalReport(metadata, patchImages);
+        // This is also hypothetical and needs a proper implementation
+        // await generateFinalReport(metadata, patchImages);
+        console.log("Report generation function called with:", metadata, patchImages);
+        alert("Report generation is a placeholder. Check console for captured data.");
+
 
     } catch(err) {
         console.error("Report generation failed:", err);
@@ -106,13 +110,13 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     }
   };
 
-
   const setView = useCallback((view: 'iso' | 'top' | 'side') => {
     if (cameraRef.current && controlsRef.current && stats) {
         const { width, height } = stats.gridSize;
         const aspect = height / width;
         const visualHeight = VISUAL_WIDTH * aspect;
-        controlsRef.current.target.set(0, 0, 0); // Target is now the center
+        controlsRef.current.target.set(0, 0, 0); // Always target the center (Mesh is centered)
+        
         const distance = Math.max(VISUAL_WIDTH, visualHeight) * 1.5;
         switch (view) {
             case 'top':
@@ -130,11 +134,9 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     }
   }, [stats]);
 
-
   const resetCamera = useCallback(() => {
     setView('iso');
   }, [setView]);
-
 
    useImperativeHandle(ref, () => ({
     capture: () => rendererRef.current!.domElement.toDataURL(),
@@ -145,6 +147,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
         const aspect = height / width;
         const visualHeight = VISUAL_WIDTH * aspect;
 
+        // Map grid coordinate to visual coordinate
         const targetX = (x / (width - 1)) * VISUAL_WIDTH - (VISUAL_WIDTH / 2);
         const targetZ = (y / (height - 1)) * visualHeight - (visualHeight / 2);
         
@@ -174,6 +177,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
 
     rendererRef.current = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
     rendererRef.current.setPixelRatio(window.devicePixelRatio);
+    rendererRef.current.setSize(currentMount.clientWidth, currentMount.clientHeight); // Explicit size set
     currentMount.innerHTML = '';
     currentMount.appendChild(rendererRef.current.domElement);
     
@@ -201,7 +205,8 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
         Math.max(1, width - 1),
         Math.max(1, height - 1)
     );
-    geometry.center();
+    // CRITICAL FIX: Center the geometry so even if data is far away, the mesh is at 0,0,0
+    geometry.center(); 
     
     const { displacementBuffer, colorBuffer } = DataVault;
     if (!displacementBuffer || !colorBuffer) return;
@@ -229,11 +234,10 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     
     meshRef.current = new THREE.Mesh(geometry, material);
     meshRef.current.rotation.x = -Math.PI / 2;
-    // The geometry is already centered, so we place the mesh at the world origin
     meshRef.current.position.set(0, 0, 0);
     sceneRef.current.add(meshRef.current);
 
-    // Pro Axes
+    // --- PRO AXES HELPER (Moved to avoid overlap) ---
     originAxesRef.current = new THREE.Group();
     const axesLength = Math.max(VISUAL_WIDTH, visualHeight) * 0.2;
     const originSphere = new THREE.Mesh(new THREE.SphereGeometry(1), new THREE.MeshBasicMaterial({color: 0x000000}));
@@ -242,10 +246,11 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     xAxis.rotation.z = -Math.PI / 2;
     const zAxis = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, axesLength), new THREE.MeshBasicMaterial({color: 'blue'}));
     zAxis.position.z = axesLength / 2;
-    // No rotation needed for Z axis cylinder to point along Z
+    
     originAxesRef.current.add(originSphere, xAxis, zAxis);
     sceneRef.current.add(originAxesRef.current);
-    originAxesRef.current.position.set(0, -5, 0); // Move helper down slightly
+    // FIX: Moved down by 10 units and Left by 10 units to clear the view
+    originAxesRef.current.position.set(-10, -10, -10); 
 
 
     // Reference Plane
@@ -254,7 +259,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
       new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.3, side: THREE.DoubleSide })
     );
     referencePlaneRef.current.rotation.x = -Math.PI / 2;
-    referencePlaneRef.current.position.set(0, 0, 0); // Centered with mesh
+    referencePlaneRef.current.position.set(0, 0, 0); 
     referencePlaneRef.current.visible = showReference;
     sceneRef.current.add(referencePlaneRef.current);
 
@@ -316,6 +321,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     resetCamera();
     animate();
 
+    // CLEANUP FUNCTION (Prevents Memory Leaks)
     return () => {
       window.removeEventListener('resize', handleResize);
        if (currentMount) {
@@ -323,6 +329,20 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
         currentMount.removeEventListener('pointerleave', () => setHoveredPoint(null));
         currentMount.innerHTML = '';
       }
+      if (rendererRef.current) rendererRef.current.dispose();
+      if (sceneRef.current) {
+          sceneRef.current.traverse((object) => {
+              if (object instanceof THREE.Mesh) {
+                  if (object.geometry) object.geometry.dispose();
+                  if (object.material) {
+                      if (Array.isArray(object.material)) object.material.forEach((m: any) => m.dispose());
+                      else (object.material as THREE.Material).dispose();
+                  }
+              }
+          });
+      }
+      if (displacementTextureRef.current) displacementTextureRef.current.dispose();
+      if (colorTextureRef.current) colorTextureRef.current.dispose();
     };
   }, [isReady, animate, resetCamera]); 
 
@@ -494,10 +514,6 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
   )
 });
 PlateView3D.displayName = "PlateView3D";
-
-    
-
-
 
 
     

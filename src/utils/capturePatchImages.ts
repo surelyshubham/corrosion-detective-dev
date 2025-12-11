@@ -1,3 +1,4 @@
+
 // src/utils/capturePatchImages.ts
 
 type ViewKind = "iso" | "top" | "side" | "heatmap";
@@ -66,3 +67,5 @@ export async function capturePatchImagesForSegment(_segId: string) {
 
   return result;
 }
+
+    

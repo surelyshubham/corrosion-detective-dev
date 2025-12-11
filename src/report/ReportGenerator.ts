@@ -34,7 +34,7 @@ async function takeSnapshot(renderer: THREE.WebGLRenderer, scene: THREE.Scene, c
     return renderer.domElement.toDataURL("image/png");
 }
 
-export async function captureAssetPatches(scene: THREE.Scene, camera: THREE.Camera, renderer: THREE.WebGLRenderer, assetMesh: THREE.Mesh, segments: SegmentBox[]) {
+export async function captureAssetPatches(scene: THREE.Scene, camera: THREE.Camera, renderer: THREE.WebGLRenderer, assetMesh: THREE.Mesh) {
     console.log("Starting Capture Sequence...");
     
     if (!assetMesh.geometry) {
@@ -119,17 +119,13 @@ export async function captureAssetPatches(scene: THREE.Scene, camera: THREE.Came
         // -- View 4: "2D Map" (Reuse Top for now, or implement separate shader capture) --
         views.map = views.top;
         
-        const matchingSegment = segments.find(s => {
-            const segmentMid = isVertical ? s.center.y : s.center.x;
-            // This logic is a placeholder, a more robust solution would be needed
-            return true;
-        });
 
         patches.push({ 
             id: i + 1, 
             views,
-            worstThickness: matchingSegment?.worstThickness ?? 0,
-            tier: matchingSegment?.tier ?? 'Normal',
+            // These are placeholders, they need to be linked to actual segment data
+            worstThickness: 0,
+            tier: 'Normal',
         });
         console.log(`Captured Patch ${i+1}`);
     }
@@ -282,3 +278,5 @@ export async function generateFinalReport(metadata: any, patches: any[]) {
 
     doc.save(`${metadata.assetName}_Report.pdf`);
 }
+
+    
