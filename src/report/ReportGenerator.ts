@@ -1,3 +1,4 @@
+
 import * as THREE from 'three';
 import jsPDF from 'jspdf';
 import type { SegmentBox } from '@/lib/types';
@@ -153,7 +154,14 @@ function getAIInsight(patchId: number, minThickness: number, severity: string) {
 }
 
 
-export async function generateFinalReport(metadata: any, patches: any[]) {
+export async function generateFinalReport(metadata: any, patches: SegmentBox[]) {
+    // FIX: Add a guard to ensure patches is a valid array
+    if (!Array.isArray(patches) || patches.length === 0) {
+        console.warn('No patches available to generate a report.');
+        alert('Report generation failed: No corrosion patches were detected or the data is not ready. Please try again after the analysis is complete.');
+        return;
+    }
+
     const doc = new jsPDF('p', 'mm', 'a4');
     const pageWidth = 210;
     const margin = 15;
@@ -229,27 +237,27 @@ export async function generateFinalReport(metadata: any, patches: any[]) {
         const gap = 10;
         
         // Top Left
-        if(patch.views.top) {
-          doc.addImage(patch.views.top, 'PNG', margin, startY, imgSize, imgSize);
+        if(patch.topViewDataUrl) {
+          doc.addImage(patch.topViewDataUrl, 'PNG', margin, startY, imgSize, imgSize);
           doc.setFontSize(9);
           doc.text("Top View", margin, startY + imgSize + 5);
         }
 
         // Top Right
-        if (patch.views.side) {
-          doc.addImage(patch.views.side, 'PNG', margin + imgSize + gap, startY, imgSize, imgSize);
+        if (patch.sideViewDataUrl) {
+          doc.addImage(patch.sideViewDataUrl, 'PNG', margin + imgSize + gap, startY, imgSize, imgSize);
           doc.text("Side View", margin + imgSize + gap, startY + imgSize + 5);
         }
 
         // Bottom Left
-        if (patch.views.iso) {
-          doc.addImage(patch.views.iso, 'PNG', margin, startY + imgSize + 15, imgSize, imgSize);
+        if (patch.isoViewDataUrl) {
+          doc.addImage(patch.isoViewDataUrl, 'PNG', margin, startY + imgSize + 15, imgSize, imgSize);
           doc.text("Isometric View", margin, startY + (imgSize*2) + 20);
         }
 
         // Bottom Right
-        if (patch.views.map) {
-          doc.addImage(patch.views.map, 'PNG', margin + imgSize + gap, startY + imgSize + 15, imgSize, imgSize);
+        if (patch.heatmapDataUrl) {
+          doc.addImage(patch.heatmapDataUrl, 'PNG', margin + imgSize + gap, startY + imgSize + 15, imgSize, imgSize);
           doc.text("2D C-Scan Map", margin + imgSize + gap, startY + (imgSize*2) + 20);
         }
 
