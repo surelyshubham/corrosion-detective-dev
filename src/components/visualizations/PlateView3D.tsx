@@ -1,3 +1,4 @@
+
 "use client"
 
 import React, { useRef, useEffect, useState, useCallback } from 'react'
@@ -59,25 +60,21 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
   const colorTextureRef = useRef<THREE.DataTexture | null>(null);
   const displacementTextureRef = useRef<THREE.DataTexture | null>(null);
   const referencePlaneRef = useRef<THREE.Mesh | null>(null);
-  
-  // *** FIX 1: Animation Frame ID Ref (The Kill Switch) ***
   const reqRef = useRef<number>(0);
 
   const { nominalThickness, assetType } = inspectionResult || {};
   const stats = DataVault.stats;
   const VISUAL_WIDTH = 100;
   
-  // Animation Loop - Defined stable to avoid closure issues
+  // Animation Loop
   const animate = useCallback(() => {
     if (!rendererRef.current || !sceneRef.current || !cameraRef.current || !controlsRef.current) return;
-    
-    // Store ID so we can cancel it later
     reqRef.current = requestAnimationFrame(animate);
-    
     controlsRef.current.update();
     rendererRef.current.render(sceneRef.current, cameraRef.current);
   }, []);
   
+  // Report Generation
   const handleGenerateReport = async () => {
     if (!sceneRef.current || !cameraRef.current || !rendererRef.current || !meshRef.current) return;
     setIsGeneratingReport(true);
@@ -106,6 +103,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     }
   };
 
+  // Camera Controls
   const setView = useCallback((view: 'iso' | 'top' | 'side') => {
     if (cameraRef.current && controlsRef.current && stats) {
         const { width, height } = stats.gridSize;
@@ -140,7 +138,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     
     const currentMount = mountRef.current;
 
-    // 1. Init Renderer
+    // 1. Renderer
     rendererRef.current = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
     rendererRef.current.setPixelRatio(window.devicePixelRatio);
     rendererRef.current.setSize(currentMount.clientWidth, currentMount.clientHeight); 
@@ -151,7 +149,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     raycasterRef.current = new THREE.Raycaster();
     pointerRef.current = new THREE.Vector2();
 
-    // 2. Init Camera (Far Plane 100k)
+    // 2. Camera (High Vision Limit)
     cameraRef.current = new THREE.PerspectiveCamera(60, currentMount.clientWidth / currentMount.clientHeight, 0.1, 100000);
     controlsRef.current = new OrbitControls(cameraRef.current, rendererRef.current.domElement);
     controlsRef.current.enableDamping = true;
@@ -162,42 +160,43 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     dirLight.position.set(50, 100, 75);
     sceneRef.current.add(dirLight);
 
-    // 4. Geometry & Mesh
+    // 4. Geometry
     const { width, height } = currentStats.gridSize;
     const aspect = height / width;
     const visualHeight = VISUAL_WIDTH * aspect;
     const geometry = new THREE.PlaneGeometry(VISUAL_WIDTH, visualHeight, Math.max(1, width - 1), Math.max(1, height - 1));
     geometry.center(); // Center geometry
     
+    // 5. Materials & Textures
     const { displacementBuffer, colorBuffer } = DataVault;
-    if (!displacementBuffer || !colorBuffer) return;
+    if (displacementBuffer && colorBuffer) {
+        displacementTextureRef.current = new THREE.DataTexture(displacementBuffer, width, height, THREE.RedFormat, THREE.FloatType);
+        displacementTextureRef.current.minFilter = THREE.NearestFilter;
+        displacementTextureRef.current.magFilter = THREE.NearestFilter;
+        displacementTextureRef.current.needsUpdate = true;
 
-    displacementTextureRef.current = new THREE.DataTexture(displacementBuffer, width, height, THREE.RedFormat, THREE.FloatType);
-    displacementTextureRef.current.minFilter = THREE.NearestFilter;
-    displacementTextureRef.current.magFilter = THREE.NearestFilter;
-    displacementTextureRef.current.needsUpdate = true;
+        colorTextureRef.current = new THREE.DataTexture(colorBuffer, width, height, THREE.RGBAFormat, THREE.UnsignedByteType);
+        colorTextureRef.current.minFilter = THREE.NearestFilter;
+        colorTextureRef.current.magFilter = THREE.NearestFilter;
+        colorTextureRef.current.needsUpdate = true;
 
-    colorTextureRef.current = new THREE.DataTexture(colorBuffer, width, height, THREE.RGBAFormat, THREE.UnsignedByteType);
-    colorTextureRef.current.minFilter = THREE.NearestFilter;
-    colorTextureRef.current.magFilter = THREE.NearestFilter;
-    colorTextureRef.current.needsUpdate = true;
+        const material = new THREE.MeshStandardMaterial({
+            side: THREE.DoubleSide,
+            displacementScale: zScale,
+            map: colorTextureRef.current,
+            displacementMap: displacementTextureRef.current,
+            color: 0x808080,
+            metalness: 0.2,
+            roughness: 0.3
+        });
+        
+        meshRef.current = new THREE.Mesh(geometry, material);
+        meshRef.current.rotation.x = -Math.PI / 2;
+        meshRef.current.position.set(0, 0, 0);
+        sceneRef.current.add(meshRef.current);
+    }
 
-    const material = new THREE.MeshStandardMaterial({
-        side: THREE.DoubleSide,
-        displacementScale: zScale,
-        map: colorTextureRef.current,
-        displacementMap: displacementTextureRef.current,
-        color: 0x808080,
-        metalness: 0.2,
-        roughness: 0.3
-    });
-    
-    meshRef.current = new THREE.Mesh(geometry, material);
-    meshRef.current.rotation.x = -Math.PI / 2;
-    meshRef.current.position.set(0, 0, 0);
-    sceneRef.current.add(meshRef.current);
-
-    // 5. Helpers
+    // 6. Helpers
     originAxesRef.current = new THREE.Group();
     const axesLength = Math.max(VISUAL_WIDTH, visualHeight) * 0.1;
     const xAxis = new THREE.Mesh(new THREE.CylinderGeometry(axesLength/40, axesLength/40, axesLength), new THREE.MeshBasicMaterial({color: 'red'}));
@@ -209,7 +208,6 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     sceneRef.current.add(originAxesRef.current);
     originAxesRef.current.position.set(-VISUAL_WIDTH / 2 - 5, 0, -visualHeight / 2 - 5);
 
-    // Reference Plane
     referencePlaneRef.current = new THREE.Mesh(
       new THREE.PlaneGeometry(VISUAL_WIDTH, visualHeight),
       new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.3, side: THREE.DoubleSide })
@@ -219,17 +217,13 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     referencePlaneRef.current.visible = showReference;
     sceneRef.current.add(referencePlaneRef.current);
 
-    // Min/Max Markers
     const markerGeo = new THREE.ConeGeometry(2, 8, 8);
-    const minMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
-    const maxMat = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
-    minMarkerRef.current = new THREE.Mesh(markerGeo, minMat);
-    maxMarkerRef.current = new THREE.Mesh(markerGeo, maxMat);
+    minMarkerRef.current = new THREE.Mesh(markerGeo, new THREE.MeshBasicMaterial({ color: 0xff0000 }));
+    maxMarkerRef.current = new THREE.Mesh(markerGeo, new THREE.MeshBasicMaterial({ color: 0x00ff00 }));
     sceneRef.current.add(minMarkerRef.current);
     sceneRef.current.add(maxMarkerRef.current);
 
-    // 6. Event Handlers
-    // *** FIX 2: Defined BEFORE use ***
+    // 7. Event Handlers (Defined before usage)
     const handleResize = () => {
       if (rendererRef.current && cameraRef.current && currentMount) {
         cameraRef.current.aspect = currentMount.clientWidth / currentMount.clientHeight;
@@ -240,7 +234,8 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     window.addEventListener('resize', handleResize);
 
     const onPointerMove = ( event: PointerEvent ) => {
-      if (!pointerRef.current || !mountRef.current || !raycasterRef.current || !cameraRef.current || !meshRef.current || !DataVault.gridMatrix) {
+      // Relaxed check: removed DataVault.gridMatrix from early return to allow mouse to move even if matrix is lazy loaded
+      if (!pointerRef.current || !mountRef.current || !raycasterRef.current || !cameraRef.current || !meshRef.current) {
           setHoveredPoint(null);
           return;
       }
@@ -251,7 +246,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
       raycasterRef.current.setFromCamera( pointerRef.current, cameraRef.current );
       const intersects = raycasterRef.current.intersectObject( meshRef.current );
 
-      if ( intersects.length > 0 && intersects[0].uv) {
+      if ( intersects.length > 0 && intersects[0].uv && DataVault.gridMatrix) {
           const uv = intersects[0].uv;
           const { width, height } = currentStats.gridSize;
           const gridX = Math.floor(uv.x * width);
@@ -272,16 +267,14 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     currentMount.addEventListener('pointermove', onPointerMove);
     currentMount.addEventListener('pointerleave', () => setHoveredPoint(null));
 
-    // 7. Start Loop
+    // 8. Start
     handleResize();
     resetCamera();
     animate();
 
-    // 8. CLEANUP (Crucial for preventing zombie loops)
+    // 9. Cleanup
     return () => {
-      // *** FIX 3: Cancel Animation Frame ***
-      cancelAnimationFrame(reqRef.current);
-      
+      cancelAnimationFrame(reqRef.current); // Stop the loop
       window.removeEventListener('resize', handleResize);
       if (currentMount) {
         currentMount.removeEventListener('pointermove', onPointerMove);
@@ -290,7 +283,6 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
       }
       if (rendererRef.current) rendererRef.current.dispose();
       
-      // Dispose Objects
       if (sceneRef.current) {
           sceneRef.current.traverse((object) => {
               if (object instanceof THREE.Mesh) {
@@ -305,9 +297,9 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
       if (displacementTextureRef.current) displacementTextureRef.current.dispose();
       if (colorTextureRef.current) colorTextureRef.current.dispose();
     };
-  }, [isReady]); // *** FIX 4: Stable Dependency Array ***
+  }, [isReady]); // Stable dependency
 
-  // Effect for Z-Scale Updates only
+  // Effects for updates
   useEffect(() => {
     if (isReady && meshRef.current && DataVault.displacementBuffer) {
         const material = meshRef.current.material as THREE.MeshStandardMaterial;
@@ -316,7 +308,6 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     }
   }, [zScale, isReady]);
 
-  // Effect for Toggles
   useEffect(() => {
     if (originAxesRef.current) originAxesRef.current.visible = showOrigin;
     if (minMarkerRef.current) minMarkerRef.current.visible = showMinMax;
@@ -333,9 +324,10 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
           <CardHeader><CardTitle>3D Surface Plot</CardTitle></CardHeader>
           <CardContent className="flex-grow p-0 relative">
             <div ref={mountRef} className="w-full h-full" />
+             {/* FLOATING CURSOR TOOLTIP */}
              {hoveredPoint && (
               <div
-                className="fixed p-2 text-xs rounded-md shadow-lg pointer-events-none bg-popover text-popover-foreground border z-20"
+                className="fixed p-2 text-xs rounded-md shadow-lg pointer-events-none bg-popover text-popover-foreground border z-50"
                 style={{ left: `${hoveredPoint.clientX + 15}px`, top: `${hoveredPoint.clientY - 30}px` }}
               >
                 <div className="font-bold">X: {hoveredPoint.x}, Y: {hoveredPoint.y}</div>
@@ -367,6 +359,20 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
             </div>
           </CardContent>
         </Card>
+
+        {/* --- ADDED BACK: CAMERA CONTROLS CARD --- */}
+        <Card>
+          <CardHeader><CardTitle>Camera</CardTitle></CardHeader>
+          <CardContent className="grid grid-cols-2 gap-2">
+            <Button variant="outline" onClick={resetCamera} className="col-span-2">
+              <RefreshCw className="mr-2 h-4 w-4" /> Reset View
+            </Button>
+            <Button variant="outline" onClick={() => setView('top')}>Top</Button>
+            <Button variant="outline" onClick={() => setView('side')}>Side</Button>
+            <Button variant="outline" onClick={() => setView('iso')}>Isometric</Button>
+          </CardContent>
+        </Card>
+
         <Card>
           <CardHeader><CardTitle>Reporting</CardTitle></CardHeader>
           <CardContent className="space-y-4">
