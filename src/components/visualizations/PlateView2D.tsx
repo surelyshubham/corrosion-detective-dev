@@ -137,7 +137,7 @@ export const PlateView2D = forwardRef<PlateView2DRef, PlateView2DProps>((props, 
 
     if (gridX >= 0 && gridX < gridSize.width && gridY >= 0 && gridY < gridSize.height) {
         const pointData = gridMatrix[gridY]?.[gridX];
-        if(pointData && typeof pointData.rawThickness === 'number' && !isNaN(pointData.rawThickness)) {
+        if(pointData && typeof pointData.rawThickness === 'number' && !isNaN(pointData.rawThickness) && pointData.rawThickness !== 0) {
              setHoveredPoint({ x: gridX, y: gridY, ...pointData, clientX: e.clientX, clientY: e.clientY });
         } else {
             setHoveredPoint(null);

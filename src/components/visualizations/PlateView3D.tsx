@@ -45,23 +45,24 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
       remarks: 'External shell corrosion observed.',
   });
   
-  // ThreeJS Refs
+  // Refs
   const sceneRef = useRef<THREE.Scene | null>(null)
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null)
-  const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
+  const rendererRef = useRef<THREE.WebGLRenderer | null>(null)
   const controlsRef = useRef<OrbitControls | null>(null)
-  const meshRef = useRef<THREE.Mesh | null>(null);
-  const raycasterRef = useRef<THREE.Raycaster | null>(null);
-  const pointerRef = useRef<THREE.Vector2 | null>(null);
-  const originAxesRef = useRef<THREE.Group | null>(null);
-  const minMarkerRef = useRef<THREE.Mesh | null>(null);
-  const maxMarkerRef = useRef<THREE.Mesh | null>(null);
-  const colorTextureRef = useRef<THREE.DataTexture | null>(null);
-  const displacementTextureRef = useRef<THREE.DataTexture | null>(null);
-  const referencePlaneRef = useRef<THREE.Mesh | null>(null);
+  const meshRef = useRef<THREE.Mesh | null>(null)
+  const raycasterRef = useRef<THREE.Raycaster | null>(null)
+  const pointerRef = useRef<THREE.Vector2 | null>(null)
   
-  // Animation Kill Switch
-  const reqRef = useRef<number>(0);
+  // Helpers
+  const originAxesRef = useRef<THREE.Group | null>(null)
+  const minMarkerRef = useRef<THREE.Mesh | null>(null)
+  const maxMarkerRef = useRef<THREE.Mesh | null>(null)
+  const colorTextureRef = useRef<THREE.DataTexture | null>(null)
+  const displacementTextureRef = useRef<THREE.DataTexture | null>(null)
+  const referencePlaneRef = useRef<THREE.Mesh | null>(null)
+  
+  const reqRef = useRef<number>(0)
 
   const { nominalThickness, assetType } = inspectionResult || {};
   const stats = DataVault.stats;
@@ -77,12 +78,10 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
   const handleGenerateReport = async () => {
     if (!sceneRef.current || !cameraRef.current || !rendererRef.current || !meshRef.current) return;
     setIsGeneratingReport(true);
-   
     try {
         rendererRef.current.localClippingEnabled = true;
         const patchImages = await captureAssetPatches(sceneRef.current, cameraRef.current, rendererRef.current, meshRef.current);
         rendererRef.current.localClippingEnabled = false; 
-
         const metadata = {
             assetName: assetType || "N/A",
             location: reportMetadata.location,
@@ -91,9 +90,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
             inspector: reportMetadata.inspector,
             remarks: reportMetadata.remarks,
         };
-
         await generateFinalReport(metadata, patchImages);
-
     } catch(err) {
         console.error("Report generation failed:", err);
         alert("Failed to generate report.");
@@ -123,7 +120,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
 
    useImperativeHandle(ref, () => ({
     capture: () => rendererRef.current!.domElement.toDataURL(),
-    focus: (x, y, zoomIn) => { /* Focus Logic */ },
+    focus: (x: number, y: number, zoomIn: boolean) => {}, 
     resetCamera: resetCamera,
     setView: setView,
   }));
@@ -136,7 +133,6 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     
     const currentMount = mountRef.current;
 
-    // 1. Renderer
     rendererRef.current = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
     rendererRef.current.setPixelRatio(window.devicePixelRatio);
     rendererRef.current.setSize(currentMount.clientWidth, currentMount.clientHeight); 
@@ -147,18 +143,17 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     raycasterRef.current = new THREE.Raycaster();
     pointerRef.current = new THREE.Vector2();
 
-    // 2. Camera (High Vision Limit for long assets)
     cameraRef.current = new THREE.PerspectiveCamera(60, currentMount.clientWidth / currentMount.clientHeight, 0.1, 100000);
     controlsRef.current = new OrbitControls(cameraRef.current, rendererRef.current.domElement);
     controlsRef.current.enableDamping = true;
 
-    // 3. Lights
+    // Lights
     sceneRef.current.add(new THREE.AmbientLight(0xffffff, 1.0));
     const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
     dirLight.position.set(50, 100, 75);
     sceneRef.current.add(dirLight);
 
-    // 4. Geometry
+    // Geometry Calculation
     const { width, height } = currentStats.gridSize;
     const aspect = height / width;
     const visualHeight = VISUAL_WIDTH * aspect;
@@ -193,7 +188,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     meshRef.current.position.set(0, 0, 0);
     sceneRef.current.add(meshRef.current);
 
-    // 5. Helpers
+    // Axis Helper
     originAxesRef.current = new THREE.Group();
     const axesLength = Math.max(VISUAL_WIDTH, visualHeight) * 0.1;
     const xAxis = new THREE.Mesh(new THREE.CylinderGeometry(axesLength/40, axesLength/40, axesLength), new THREE.MeshBasicMaterial({color: 'red'}));
@@ -220,7 +215,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     sceneRef.current.add(minMarkerRef.current);
     sceneRef.current.add(maxMarkerRef.current);
 
-    // 6. Event Handlers
+    // Handlers
     const handleResize = () => {
       if (rendererRef.current && cameraRef.current && currentMount) {
         cameraRef.current.aspect = currentMount.clientWidth / currentMount.clientHeight;
@@ -230,7 +225,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     };
     window.addEventListener('resize', handleResize);
 
-    // *** SMART CURSOR LOGIC: Strict check for valid number ***
+    // *** THE SMART PHYSICS CURSOR FIX ***
     const onPointerMove = ( event: PointerEvent ) => {
       if (!pointerRef.current || !mountRef.current || !raycasterRef.current || !cameraRef.current || !meshRef.current) {
           setHoveredPoint(null);
@@ -243,21 +238,38 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
       raycasterRef.current.setFromCamera( pointerRef.current, cameraRef.current );
       const intersects = raycasterRef.current.intersectObject( meshRef.current );
 
-      if ( intersects.length > 0 && intersects[0].uv && DataVault.gridMatrix) {
-          const uv = intersects[0].uv;
-          const { width, height } = currentStats.gridSize;
-          const gridX = Math.floor(uv.x * width);
-          const gridY = Math.floor((1 - uv.y) * height);
+      if ( intersects.length > 0 && DataVault.gridMatrix) {
+          // Get the physical point where the ray hit the mesh
+          const hitPoint = intersects[0].point;
           
+          // Convert World Point -> Local Mesh Point
+          // (This accounts for geometry.center() shifts automatically!)
+          const localPoint = meshRef.current!.worldToLocal(hitPoint.clone());
+
+          // Map Local X/Z to Grid Coordinates
+          // Local X range: [-VISUAL_WIDTH/2, +VISUAL_WIDTH/2]
+          // Local Y range: [-visualHeight/2, +visualHeight/2] (Note: Y in local space is the plane's height, Z in world)
+          
+          const { width, height } = currentStats.gridSize;
+          
+          // Normalize to 0..1
+          const normX = (localPoint.x + (VISUAL_WIDTH / 2)) / VISUAL_WIDTH;
+          // Note: ThreeJS Plane geometry Y goes Bottom(-H/2) to Top(+H/2)
+          // But our Grid usually goes Top(0) to Bottom(H). So we invert Y.
+          const normY = 1.0 - ((localPoint.y + (visualHeight / 2)) / visualHeight);
+
+          const gridX = Math.floor(normX * width);
+          const gridY = Math.floor(normY * height);
+
           if (gridX >= 0 && gridX < width && gridY >= 0 && gridY < height) {
               const row = DataVault.gridMatrix[gridY];
               const pointData = row ? row[gridX] : null;
               
-              // *** THE FIX: Check if thickness is a real number AND not null ***
-              if (pointData && typeof pointData.rawThickness === 'number' && !isNaN(pointData.rawThickness)) {
+              // *** STRICT FILTER: If value is 0, null, or NaN, it's NOT a plate ***
+              if (pointData && typeof pointData.rawThickness === 'number' && !isNaN(pointData.rawThickness) && pointData.rawThickness !== 0) {
                   setHoveredPoint({ x: gridX, y: gridY, ...pointData, clientX: event.clientX, clientY: event.clientY });
               } else {
-                  setHoveredPoint(null); // Explicitly hide if blank data
+                  setHoveredPoint(null);
               }
           } else {
               setHoveredPoint(null);
@@ -269,12 +281,11 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     currentMount.addEventListener('pointermove', onPointerMove);
     currentMount.addEventListener('pointerleave', () => setHoveredPoint(null));
 
-    // 7. Start
+    // Start
     handleResize();
     resetCamera();
     animate();
 
-    // 8. Cleanup
     return () => {
       cancelAnimationFrame(reqRef.current);
       window.removeEventListener('resize', handleResize);
@@ -361,7 +372,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
           </CardContent>
         </Card>
 
-        {/* --- RESTORED CAMERA BUTTONS --- */}
+        {/* --- CAMERA CONTROLS RESTORED --- */}
         <Card>
           <CardHeader><CardTitle>Camera</CardTitle></CardHeader>
           <CardContent className="grid grid-cols-2 gap-2">
