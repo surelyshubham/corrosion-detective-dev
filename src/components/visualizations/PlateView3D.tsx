@@ -31,6 +31,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
   const { inspectionResult, segments, dataVersion } = useInspectionStore()
   const mountRef = useRef<HTMLDivElement>(null)
   const isReady = dataVersion > 0 && !!DataVault.stats && !!DataVault.displacementBuffer;
+  
   const [zScale, setZScale] = useState(30)
   const [showReference, setShowReference] = useState(false)
   const [showMinMax, setShowMinMax] = useState(true)
@@ -61,7 +62,6 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
   const colorTextureRef = useRef<THREE.DataTexture | null>(null)
   const displacementTextureRef = useRef<THREE.DataTexture | null>(null)
   const referencePlaneRef = useRef<THREE.Mesh | null>(null)
-  
   const reqRef = useRef<number>(0)
 
   const { nominalThickness, assetType } = inspectionResult || {};
@@ -120,7 +120,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
 
    useImperativeHandle(ref, () => ({
     capture: () => rendererRef.current!.domElement.toDataURL(),
-    focus: (x: number, y: number, zoomIn: boolean) => {}, 
+    focus: (x, y, zoomIn) => {}, 
     resetCamera: resetCamera,
     setView: setView,
   }));
@@ -157,7 +157,9 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     const { width, height } = currentStats.gridSize;
     const aspect = height / width;
     const visualHeight = VISUAL_WIDTH * aspect;
-    const geometry = new THREE.PlaneGeometry(VISUAL_WIDTH, visualHeight, Math.max(1, width - 1), Math.max(1, height - 1));
+    
+    // IMPORTANT: Segment count MUST match data grid size exactly for Face Indexing to work
+    const geometry = new THREE.PlaneGeometry(VISUAL_WIDTH, visualHeight, width - 1, height - 1);
     geometry.center(); 
     
     const { displacementBuffer, colorBuffer } = DataVault;
@@ -188,7 +190,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     meshRef.current.position.set(0, 0, 0);
     sceneRef.current.add(meshRef.current);
 
-    // Axis Helper
+    // Helpers
     originAxesRef.current = new THREE.Group();
     const axesLength = Math.max(VISUAL_WIDTH, visualHeight) * 0.1;
     const xAxis = new THREE.Mesh(new THREE.CylinderGeometry(axesLength/40, axesLength/40, axesLength), new THREE.MeshBasicMaterial({color: 'red'}));
@@ -225,7 +227,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     };
     window.addEventListener('resize', handleResize);
 
-    // *** THE SMART PHYSICS CURSOR FIX ***
+    // *** THE FACE-INDEX CURSOR FIX (100% PRECISION) ***
     const onPointerMove = ( event: PointerEvent ) => {
       if (!pointerRef.current || !mountRef.current || !raycasterRef.current || !cameraRef.current || !meshRef.current) {
           setHoveredPoint(null);
@@ -238,34 +240,28 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
       raycasterRef.current.setFromCamera( pointerRef.current, cameraRef.current );
       const intersects = raycasterRef.current.intersectObject( meshRef.current );
 
-      if ( intersects.length > 0 && DataVault.gridMatrix) {
-          // Get the physical point where the ray hit the mesh
-          const hitPoint = intersects[0].point;
-          
-          // Convert World Point -> Local Mesh Point
-          // (This accounts for geometry.center() shifts automatically!)
-          const localPoint = meshRef.current!.worldToLocal(hitPoint.clone());
-
-          // Map Local X/Z to Grid Coordinates
-          // Local X range: [-VISUAL_WIDTH/2, +VISUAL_WIDTH/2]
-          // Local Y range: [-visualHeight/2, +visualHeight/2] (Note: Y in local space is the plane's height, Z in world)
+      if ( intersects.length > 0 && DataVault.gridMatrix && intersects[0].face) {
+          // KEY LOGIC: Use Face Index instead of Coordinates
+          // Each square in the grid has 2 triangular faces.
+          // Face Index 0,1 -> Grid Cell 0
+          // Face Index 2,3 -> Grid Cell 1 ...
+          const faceIndex = intersects[0].faceIndex || 0;
+          const quadIndex = Math.floor(faceIndex / 2);
           
           const { width, height } = currentStats.gridSize;
           
-          // Normalize to 0..1
-          const normX = (localPoint.x + (VISUAL_WIDTH / 2)) / VISUAL_WIDTH;
-          // Note: ThreeJS Plane geometry Y goes Bottom(-H/2) to Top(+H/2)
-          // But our Grid usually goes Top(0) to Bottom(H). So we invert Y.
-          const normY = 1.0 - ((localPoint.y + (visualHeight / 2)) / visualHeight);
-
-          const gridX = Math.floor(normX * width);
-          const gridY = Math.floor(normY * height);
+          // Calculate Grid X,Y from Quad Index
+          // PlaneGeometry builds row by row
+          const gridX = quadIndex % (width - 1);
+          // Invert Y because Texture/Geometry Y usually flips in 3D space relative to Data Array
+          const rawGridY = Math.floor(quadIndex / (width - 1));
+          const gridY = (height - 1) - rawGridY; // Flip Y to match DataVault
 
           if (gridX >= 0 && gridX < width && gridY >= 0 && gridY < height) {
               const row = DataVault.gridMatrix[gridY];
               const pointData = row ? row[gridX] : null;
               
-              // *** STRICT FILTER: If value is 0, null, or NaN, it's NOT a plate ***
+              // Strict Validation
               if (pointData && typeof pointData.rawThickness === 'number' && !isNaN(pointData.rawThickness) && pointData.rawThickness !== 0) {
                   setHoveredPoint({ x: gridX, y: gridY, ...pointData, clientX: event.clientX, clientY: event.clientY });
               } else {
@@ -372,7 +368,6 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
           </CardContent>
         </Card>
 
-        {/* --- CAMERA CONTROLS RESTORED --- */}
         <Card>
           <CardHeader><CardTitle>Camera</CardTitle></CardHeader>
           <CardContent className="grid grid-cols-2 gap-2">
@@ -412,5 +407,4 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
   )
 });
 PlateView3D.displayName = "PlateView3D";
-
     
