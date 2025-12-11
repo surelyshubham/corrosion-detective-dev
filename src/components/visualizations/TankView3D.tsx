@@ -1,5 +1,3 @@
-
-
 "use client"
 
 import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react'
@@ -272,7 +270,7 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>((prop
           
           if (gridX >= 0 && gridX < width && gridY >= 0 && gridY < height) {
               const pointData = DataVault.gridMatrix[gridY]?.[gridX];
-               if(pointData && pointData.plateId) {
+               if(pointData && typeof pointData.rawThickness === 'number' && !isNaN(pointData.rawThickness)) {
                   setHoveredPoint({ x: gridX, y: gridY, ...pointData, clientX: event.clientX, clientY: event.clientY });
               } else {
                   setHoveredPoint(null);
@@ -413,4 +411,6 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>((prop
 TankView3D.displayName = "TankView3D";
 
     
+    
+
     

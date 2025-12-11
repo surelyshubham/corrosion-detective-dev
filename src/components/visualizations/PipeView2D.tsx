@@ -1,4 +1,3 @@
-
 "use client"
 
 import React, { useRef, useEffect, useState, useCallback, useImperativeHandle, forwardRef } from 'react'
@@ -117,7 +116,7 @@ export const PipeView2D = forwardRef<PipeView2DRef, PipeView2DProps>((props, ref
 
     if (gridX >= 0 && gridX < gridSize.width && gridY >= 0 && gridY < gridSize.height) {
         const pointData = gridMatrix[gridY]?.[gridX];
-        if(pointData && pointData.plateId) {
+        if(pointData && typeof pointData.rawThickness === 'number' && !isNaN(pointData.rawThickness)) {
              setHoveredPoint({ x: gridX, y: gridY, ...pointData, clientX: e.clientX, clientY: e.clientY });
         } else {
             setHoveredPoint(null);
@@ -252,3 +251,5 @@ export const PipeView2D = forwardRef<PipeView2DRef, PipeView2DProps>((props, ref
   )
 });
 PipeView2D.displayName = "PipeView2D";
+
+    
