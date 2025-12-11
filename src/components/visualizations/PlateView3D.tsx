@@ -13,7 +13,6 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Expand, Pin, RefreshCw, LocateFixed, Loader2, FileText } from 'lucide-react'
 import { useImperativeHandle } from 'react'
-// IMPORTS FOR REPORTING
 import { generateFinalReport } from '@/report/ReportGenerator'
 import { captureAssetPatches } from '@/utils/capturePatchImages' 
 import { Input } from '../ui/input'
@@ -124,24 +123,19 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
 
    useImperativeHandle(ref, () => ({
     capture: () => rendererRef.current!.domElement.toDataURL(),
-    focus: (x, y, zoomIn) => { /* Focus Logic */ },
+    focus: (x: number, y: number, zoomIn: boolean) => { /* Focus Logic */ },
     resetCamera: resetCamera,
     setView: setView,
   }));
   
   // SETUP SCENE
   useEffect(() => {
-    // 1. Safety Checks
     if (!isReady || !mountRef.current) return;
-    
     const currentStats = DataVault.stats;
-    // Check if dimensions are valid (Fixes crash on empty data)
-    if (!currentStats || !currentStats.gridSize || currentStats.gridSize.width === 0 || currentStats.gridSize.height === 0) {
-        return; 
-    }
+    if (!currentStats || !currentStats.gridSize) return;
     
     const currentMount = mountRef.current;
-    
+
     rendererRef.current = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
     rendererRef.current.setPixelRatio(window.devicePixelRatio);
     rendererRef.current.setSize(currentMount.clientWidth, currentMount.clientHeight); 
@@ -152,7 +146,9 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     raycasterRef.current = new THREE.Raycaster();
     pointerRef.current = new THREE.Vector2();
 
-    cameraRef.current = new THREE.PerspectiveCamera(60, currentMount.clientWidth / currentMount.clientHeight, 0.1, 2000);
+    // *** CRITICAL FIX: Far Plane set to 100,000 (Huge Vision) ***
+    cameraRef.current = new THREE.PerspectiveCamera(60, currentMount.clientWidth / currentMount.clientHeight, 0.1, 100000);
+    
     controlsRef.current = new OrbitControls(cameraRef.current, rendererRef.current.domElement);
     controlsRef.current.enableDamping = true;
 
@@ -168,7 +164,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     const visualHeight = VISUAL_WIDTH * aspect;
     const geometry = new THREE.PlaneGeometry(VISUAL_WIDTH, visualHeight, Math.max(1, width - 1), Math.max(1, height - 1));
     
-    // *** CRITICAL FIX: Center geometry so it is visible at 0,0,0 ***
+    // *** CRITICAL FIX: Center Geometry so it sits at 0,0,0 ***
     geometry.center(); 
     
     // Textures
@@ -202,9 +198,19 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
 
     // Helpers
     originAxesRef.current = new THREE.Group();
-    // Add axes logic here...
+    const axesLength = Math.max(VISUAL_WIDTH, visualHeight) * 0.1;
+    const xAxis = new THREE.Mesh(new THREE.CylinderGeometry(axesLength/40, axesLength/40, axesLength), new THREE.MeshBasicMaterial({color: 'red'}));
+    xAxis.position.x = axesLength / 2;
+    xAxis.rotation.z = -Math.PI / 2;
+    const zAxis = new THREE.Mesh(new THREE.CylinderGeometry(axesLength/40, axesLength/40, axesLength), new THREE.MeshBasicMaterial({color: 'blue'}));
+    zAxis.position.z = axesLength / 2;
+    originAxesRef.current.add(xAxis, zAxis);
     sceneRef.current.add(originAxesRef.current);
-    originAxesRef.current.position.set(-10, -10, -10); // Offset to be clean
+    originAxesRef.current.position.set(-VISUAL_WIDTH / 2 - 5, 0, -visualHeight / 2 - 5);
+
+    handleResize();
+    resetCamera();
+    animate();
 
     const handleResize = () => {
       if (rendererRef.current && cameraRef.current && currentMount) {
@@ -214,11 +220,6 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
       }
     };
     window.addEventListener('resize', handleResize);
-    
-    handleResize();
-    resetCamera();
-    animate();
-
 
     return () => {
       window.removeEventListener('resize', handleResize);
@@ -226,7 +227,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
       if (rendererRef.current) rendererRef.current.dispose();
       // Dispose geometry/materials to prevent leaks
     };
-  }, [isReady, animate, resetCamera]); // Stable dependencies
+  }, [isReady, animate, resetCamera]); 
 
   // Update effect (Z-scale etc)
   useEffect(() => {
@@ -272,46 +273,11 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
             </Button>
           </CardContent>
         </Card>
-        {/* Controls... */}
-         <Card>
-          <CardHeader>
-            <CardTitle className="text-lg font-headline">Controls</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div className="space-y-3">
-              <Label>Z-Axis Scale: {zScale.toFixed(1)}x</Label>
-              <Slider value={[zScale]} onValueChange={([val]) => setZScale(val)} min={1} max={100} step={1} />
-            </div>
-            <div className="flex items-center justify-between">
-              <Label htmlFor="ref-plane-switch" className="flex items-center gap-2"><Expand className="h-4 w-4" />Show Reference Plane</Label>
-              <Switch id="ref-plane-switch" checked={showReference} onCheckedChange={setShowReference} />
-            </div>
-            <div className="flex items-center justify-between">
-              <Label htmlFor="min-max-switch" className="flex items-center gap-2"><Pin className="h-4 w-4" />Show Min/Max Points</Label>
-              <Switch id="min-max-switch" checked={showMinMax} onCheckedChange={setShowMinMax} />
-            </div>
-             <div className="flex items-center justify-between">
-              <Label htmlFor="origin-switch" className="flex items-center gap-2"><LocateFixed className="h-4 w-4" />Show Origin</Label>
-              <Switch id="origin-switch" checked={showOrigin} onCheckedChange={setShowOrigin} />
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg font-headline">Camera</CardTitle>
-          </CardHeader>
-          <CardContent className="grid grid-cols-2 gap-2">
-            <Button variant="outline" onClick={resetCamera} className="col-span-2">
-              <RefreshCw className="mr-2 h-4 w-4" /> Reset View
-            </Button>
-            <Button variant="outline" onClick={() => setView('top')}>Top</Button>
-            <Button variant="outline" onClick={() => setView('side')}>Side</Button>
-            <Button variant="outline" onClick={() => setView('iso')}>Isometric</Button>
-          </CardContent>
-        </Card>
         <ColorLegend />
       </div>
     </div>
   )
 });
 PlateView3D.displayName = "PlateView3D";
+
+    
