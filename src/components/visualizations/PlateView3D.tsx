@@ -1,4 +1,3 @@
-
 "use client"
 
 import React, { useRef, useEffect, useState, useCallback } from 'react'
@@ -136,6 +135,15 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     
     const currentMount = mountRef.current;
 
+    // Define handleResize here, before it's called
+    const handleResize = () => {
+      if (rendererRef.current && cameraRef.current && currentMount) {
+        cameraRef.current.aspect = currentMount.clientWidth / currentMount.clientHeight;
+        cameraRef.current.updateProjectionMatrix();
+        rendererRef.current.setSize(currentMount.clientWidth, currentMount.clientHeight);
+      }
+    };
+
     rendererRef.current = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
     rendererRef.current.setPixelRatio(window.devicePixelRatio);
     rendererRef.current.setSize(currentMount.clientWidth, currentMount.clientHeight); 
@@ -212,13 +220,6 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     resetCamera();
     animate();
 
-    const handleResize = () => {
-      if (rendererRef.current && cameraRef.current && currentMount) {
-        cameraRef.current.aspect = currentMount.clientWidth / currentMount.clientHeight;
-        cameraRef.current.updateProjectionMatrix();
-        rendererRef.current.setSize(currentMount.clientWidth, currentMount.clientHeight);
-      }
-    };
     window.addEventListener('resize', handleResize);
 
     return () => {
