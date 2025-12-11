@@ -158,8 +158,10 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     const aspect = height / width;
     const visualHeight = VISUAL_WIDTH * aspect;
     
-    // IMPORTANT: Segment count MUST match data grid size exactly for Face Indexing to work
-    const geometry = new THREE.PlaneGeometry(VISUAL_WIDTH, visualHeight, width - 1, height - 1);
+    // *** FIX 1: Exact Segment Count Match ***
+    // Use 'width' and 'height' directly (NOT width-1).
+    // This creates 1 face per data point.
+    const geometry = new THREE.PlaneGeometry(VISUAL_WIDTH, visualHeight, width, height);
     geometry.center(); 
     
     const { displacementBuffer, colorBuffer } = DataVault;
@@ -227,7 +229,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     };
     window.addEventListener('resize', handleResize);
 
-    // *** THE FACE-INDEX CURSOR FIX (100% PRECISION) ***
+    // *** FIX 2: Pixel-Perfect Face Mapping ***
     const onPointerMove = ( event: PointerEvent ) => {
       if (!pointerRef.current || !mountRef.current || !raycasterRef.current || !cameraRef.current || !meshRef.current) {
           setHoveredPoint(null);
@@ -241,27 +243,25 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
       const intersects = raycasterRef.current.intersectObject( meshRef.current );
 
       if ( intersects.length > 0 && DataVault.gridMatrix && intersects[0].face) {
-          // KEY LOGIC: Use Face Index instead of Coordinates
-          // Each square in the grid has 2 triangular faces.
-          // Face Index 0,1 -> Grid Cell 0
-          // Face Index 2,3 -> Grid Cell 1 ...
+          // Use Face Index to find exact Square
           const faceIndex = intersects[0].faceIndex || 0;
           const quadIndex = Math.floor(faceIndex / 2);
           
           const { width, height } = currentStats.gridSize;
           
-          // Calculate Grid X,Y from Quad Index
-          // PlaneGeometry builds row by row
-          const gridX = quadIndex % (width - 1);
-          // Invert Y because Texture/Geometry Y usually flips in 3D space relative to Data Array
-          const rawGridY = Math.floor(quadIndex / (width - 1));
-          const gridY = (height - 1) - rawGridY; // Flip Y to match DataVault
+          // Map Square Index to X,Y
+          // Since segments == width, we don't need -1 anymore!
+          const gridX = quadIndex % width;
+          
+          // Invert Y Logic
+          const rawGridY = Math.floor(quadIndex / width);
+          const gridY = (height - 1) - rawGridY;
 
           if (gridX >= 0 && gridX < width && gridY >= 0 && gridY < height) {
               const row = DataVault.gridMatrix[gridY];
               const pointData = row ? row[gridX] : null;
               
-              // Strict Validation
+              // Smart "Ghost" Check
               if (pointData && typeof pointData.rawThickness === 'number' && !isNaN(pointData.rawThickness) && pointData.rawThickness !== 0) {
                   setHoveredPoint({ x: gridX, y: gridY, ...pointData, clientX: event.clientX, clientY: event.clientY });
               } else {
@@ -407,4 +407,3 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
   )
 });
 PlateView3D.displayName = "PlateView3D";
-    
