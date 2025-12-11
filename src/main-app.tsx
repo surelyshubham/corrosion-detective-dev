@@ -22,7 +22,6 @@ const TABS = [
   { value: "info", label: "Info", icon: Info },
   { value: "3d-view", label: "3D View", icon: GanttChartSquare },
   { value: "2d-heatmap", label: "2D Heatmap", icon: Image },
-  { value: "report", label: "Report", icon: FileText },
   { value: "data-table", label: "Data Table", icon: Table },
 ]
 
@@ -98,7 +97,7 @@ export function MainApp() {
   return (
     <>
       <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-grow flex flex-col p-4 md:p-6 gap-6">
-        <TabsList className="grid w-full grid-cols-3 sm:grid-cols-6 h-auto">
+        <TabsList className="grid w-full grid-cols-2 sm:grid-cols-5 h-auto">
           {TABS.map(tab => (
             <TabsTrigger key={tab.value} value={tab.value} disabled={!isDataLoaded && tab.value !== 'setup'} className="flex-col sm:flex-row gap-2 h-14 sm:h-10">
               <tab.icon className="w-4 h-4"/>
@@ -116,9 +115,6 @@ export function MainApp() {
             </div>
             <div style={getTabContentStyle('data-table')}>
               {isDataLoaded ? <DataTableTab /> : <DataPlaceholder />}
-            </div>
-             <div style={getTabContentStyle('report')}>
-              {isDataLoaded ? <ReportTab /> : <DataPlaceholder />}
             </div>
             <div style={twoDViewStyle}>
               {isDataLoaded ? <TwoDeeHeatmapTab ref={twoDeeViewRef} /> : <DataPlaceholder />}
