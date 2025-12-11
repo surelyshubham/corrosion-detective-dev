@@ -13,6 +13,7 @@ import { Switch } from '@/components/ui/switch'
 import { Expand, Pin, RefreshCw, LocateFixed, Loader2, FileText } from 'lucide-react'
 import { useImperativeHandle } from 'react'
 import { generateFinalReport } from '@/report/ReportGenerator'
+import { captureAssetPatches } from '@/utils/capturePatchImages' 
 import { Input } from '../ui/input'
 import { Textarea } from '../ui/textarea'
 import { ColorLegend } from './ColorLegend'
@@ -70,10 +71,16 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
   }, []);
   
   const handleGenerateReport = async () => {
-    if (!rendererRef.current || !inspectionResult || !segments) return;
+    if (!sceneRef.current || !cameraRef.current || !rendererRef.current || !meshRef.current || !inspectionResult || !segments) return;
     setIsGeneratingReport(true);
    
     try {
+        // 1. Run the Robot (Capture Images)
+        rendererRef.current.localClippingEnabled = true;
+        const patchImages = await captureAssetPatches(sceneRef.current, cameraRef.current, rendererRef.current, meshRef.current);
+        rendererRef.current.localClippingEnabled = false; 
+
+        // 2. Gather User Input
         const metadata = {
             assetName: assetType || "N/A",
             location: reportMetadata.location,
@@ -83,8 +90,8 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
             remarks: reportMetadata.remarks,
         };
 
-        // This is the corrected logic, directly calling the final report generator
-        await generateFinalReport(metadata, segments);
+        // 3. Create PDF
+        await generateFinalReport(metadata, patchImages);
 
     } catch(err) {
         console.error("Report generation failed:", err);
@@ -95,29 +102,28 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
   };
 
   const setView = useCallback((view: 'iso' | 'top' | 'side') => {
-    if (!cameraRef.current || !controlsRef.current || !meshRef.current || !meshRef.current.geometry) return;
-    
-    const box = new THREE.Box3().setFromObject(meshRef.current);
-    const center = box.getCenter(new THREE.Vector3());
-    const size = box.getSize(new THREE.Vector3());
-    const maxDim = Math.max(size.x, size.y, size.z);
-    
-    controlsRef.current.target.copy(center);
-    
-    switch (view) {
-        case 'top':
-            cameraRef.current.position.set(center.x, center.y + maxDim * 1.5, center.z); 
-            break;
-        case 'side':
-             cameraRef.current.position.set(center.x + maxDim * 1.5, center.y, center.z);
-            break;
-        case 'iso':
-        default:
-             cameraRef.current.position.set(center.x + maxDim, center.y + maxDim, center.z + maxDim);
-            break;
+    if (cameraRef.current && controlsRef.current && stats) {
+        const { width, height } = stats.gridSize;
+        const aspect = height / width;
+        const visualHeight = VISUAL_WIDTH * aspect;
+        controlsRef.current.target.set(0, 0, 0); // Always target the center (Mesh is centered)
+        
+        const distance = Math.max(VISUAL_WIDTH, visualHeight) * 1.5;
+        switch (view) {
+            case 'top':
+                cameraRef.current.position.set(0, distance, 0.01); 
+                break;
+            case 'side':
+                cameraRef.current.position.set(distance, 0, 0);
+                break;
+            case 'iso':
+            default:
+                 cameraRef.current.position.set(distance / 2, distance / 2, distance / 2);
+                break;
+        }
+        controlsRef.current.update();
     }
-    controlsRef.current.update();
-  }, []);
+  }, [stats]);
 
   const resetCamera = useCallback(() => {
     setView('iso');
@@ -133,8 +139,8 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
         const visualHeight = VISUAL_WIDTH * aspect;
 
         // Map grid coordinate to visual coordinate
-        const targetX = (x / width) * VISUAL_WIDTH;
-        const targetZ = (y / height) * visualHeight;
+        const targetX = (x / (width - 1)) * VISUAL_WIDTH - (VISUAL_WIDTH / 2);
+        const targetZ = (y / (height - 1)) * visualHeight - (visualHeight / 2);
         
         controlsRef.current.target.set(targetX, 0, targetZ);
         
@@ -162,7 +168,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
 
     rendererRef.current = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
     rendererRef.current.setPixelRatio(window.devicePixelRatio);
-    rendererRef.current.setSize(currentMount.clientWidth, currentMount.clientHeight); 
+    rendererRef.current.setSize(currentMount.clientWidth, currentMount.clientHeight); // Explicit size set
     currentMount.innerHTML = '';
     currentMount.appendChild(rendererRef.current.domElement);
     
@@ -170,10 +176,11 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     raycasterRef.current = new THREE.Raycaster();
     pointerRef.current = new THREE.Vector2();
 
-    cameraRef.current = new THREE.PerspectiveCamera(60, currentMount.clientWidth / currentMount.clientHeight, 0.1, 5000);
+    cameraRef.current = new THREE.PerspectiveCamera(60, currentMount.clientWidth / currentMount.clientHeight, 0.1, 2000);
     controlsRef.current = new OrbitControls(cameraRef.current, rendererRef.current.domElement);
     controlsRef.current.enableDamping = true;
 
+    // Engineering Lights
     sceneRef.current.add(new THREE.AmbientLight(0xffffff, 1.0));
     const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
     dirLight.position.set(50, 100, 75);
@@ -186,13 +193,12 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     const geometry = new THREE.PlaneGeometry(
         VISUAL_WIDTH,
         visualHeight,
-        Math.min(256, width > 1 ? width - 1 : 1),
-        Math.min(256, height > 1 ? height - 1 : 1)
+        Math.max(1, width - 1),
+        Math.max(1, height - 1)
     );
+    // CRITICAL FIX: Center the geometry so even if data is far away, the mesh is at 0,0,0
+    geometry.center(); 
     
-    // Position mesh so its top-left corner is at (0,0,0) in the world
-    geometry.translate(VISUAL_WIDTH / 2, -visualHeight / 2, 0);
-
     const { displacementBuffer, colorBuffer } = DataVault;
     if (!displacementBuffer || !colorBuffer) return;
 
@@ -219,8 +225,10 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     
     meshRef.current = new THREE.Mesh(geometry, material);
     meshRef.current.rotation.x = -Math.PI / 2;
+    meshRef.current.position.set(0, 0, 0);
     sceneRef.current.add(meshRef.current);
 
+    // --- PRO AXES HELPER (Moved to avoid overlap) ---
     originAxesRef.current = new THREE.Group();
     const axesLength = Math.max(VISUAL_WIDTH, visualHeight) * 0.2;
     const originSphere = new THREE.Mesh(new THREE.SphereGeometry(1), new THREE.MeshBasicMaterial({color: 0x000000}));
@@ -232,17 +240,21 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     
     originAxesRef.current.add(originSphere, xAxis, zAxis);
     sceneRef.current.add(originAxesRef.current);
-    originAxesRef.current.position.set(0,0,0);
+    // FIX: Moved down by 10 units and Left by 10 units to clear the view
+    originAxesRef.current.position.set(-10, -10, -10); 
 
+
+    // Reference Plane
     referencePlaneRef.current = new THREE.Mesh(
       new THREE.PlaneGeometry(VISUAL_WIDTH, visualHeight),
       new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.3, side: THREE.DoubleSide })
     );
     referencePlaneRef.current.rotation.x = -Math.PI / 2;
-    referencePlaneRef.current.position.set(VISUAL_WIDTH / 2, 0, visualHeight / 2); 
+    referencePlaneRef.current.position.set(0, 0, 0); 
     referencePlaneRef.current.visible = showReference;
     sceneRef.current.add(referencePlaneRef.current);
 
+    // Min/Max Markers
     const markerGeo = new THREE.ConeGeometry(2, 8, 8);
     const minMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
     const maxMat = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
@@ -250,21 +262,6 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     maxMarkerRef.current = new THREE.Mesh(markerGeo, maxMat);
     sceneRef.current.add(minMarkerRef.current);
     sceneRef.current.add(maxMarkerRef.current);
-
-    // DYNAMIC CAMERA FRAMING
-    const box = new THREE.Box3().setFromObject(meshRef.current);
-    const center = box.getCenter(new THREE.Vector3());
-    const size = box.getSize(new THREE.Vector3());
-    const maxDim = Math.max(size.x, size.y, size.z);
-    const fov = cameraRef.current.fov * (Math.PI / 180);
-    const cameraZ = Math.abs(maxDim / 2 / Math.tan(fov / 2));
-
-    cameraRef.current.position.set(center.x, center.y, center.z + cameraZ * 1.5);
-    cameraRef.current.lookAt(center);
-    controlsRef.current.target.copy(center);
-    controlsRef.current.minDistance = maxDim * 0.5;
-    controlsRef.current.maxDistance = maxDim * 3;
-    controlsRef.current.update();
 
     const handleResize = () => {
       if (rendererRef.current && cameraRef.current && currentMount) {
@@ -363,14 +360,14 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
           const visualHeight = VISUAL_WIDTH * aspect;
 
           if (worstLocation) {
-            const minX = (worstLocation.x / gridSize.width) * VISUAL_WIDTH;
-            const minZ = (worstLocation.y / gridSize.height) * visualHeight;
+            const minX = (worstLocation.x / gridSize.width) * VISUAL_WIDTH - (VISUAL_WIDTH / 2);
+            const minZ = (worstLocation.y / gridSize.height) * visualHeight - (visualHeight / 2);
             const minY = (worstLocation.value - nominalThickness) * zScale;
             minMarkerRef.current.position.set(minX, minY + 4, minZ);
           }
           if (bestLocation) {
-            const maxX = (bestLocation.x / gridSize.width) * VISUAL_WIDTH;
-            const maxZ = (bestLocation.y / gridSize.height) * visualHeight;
+            const maxX = (bestLocation.x / gridSize.width) * VISUAL_WIDTH - (VISUAL_WIDTH / 2);
+            const maxZ = (bestLocation.y / gridSize.height) * visualHeight - (visualHeight / 2);
             const maxY = (bestLocation.value - nominalThickness) * zScale;
             maxMarkerRef.current.position.set(maxX, maxY + 4, maxZ);
           }
@@ -508,5 +505,3 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
   )
 });
 PlateView3D.displayName = "PlateView3D";
-
-    
