@@ -335,7 +335,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
       if (displacementTextureRef.current) displacementTextureRef.current.dispose();
       if (colorTextureRef.current) colorTextureRef.current.dispose();
     };
-  }, [isReady, animate, resetCamera]); 
+  }, [isReady]); 
 
   // This effect updates textures and uniforms when data changes, WITHOUT rebuilding the scene
   useEffect(() => {
