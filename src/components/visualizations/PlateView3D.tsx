@@ -122,7 +122,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
 
    useImperativeHandle(ref, () => ({
     capture: () => rendererRef.current!.domElement.toDataURL(),
-    focus: (x: number, y: number, zoomIn: boolean) => { /* Focus Logic */ },
+    focus: (x, y, zoomIn) => { /* Focus Logic */ },
     resetCamera: resetCamera,
     setView: setView,
   }));
@@ -135,15 +135,6 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     
     const currentMount = mountRef.current;
 
-    // Define handleResize here, before it's called
-    const handleResize = () => {
-      if (rendererRef.current && cameraRef.current && currentMount) {
-        cameraRef.current.aspect = currentMount.clientWidth / currentMount.clientHeight;
-        cameraRef.current.updateProjectionMatrix();
-        rendererRef.current.setSize(currentMount.clientWidth, currentMount.clientHeight);
-      }
-    };
-
     rendererRef.current = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
     rendererRef.current.setPixelRatio(window.devicePixelRatio);
     rendererRef.current.setSize(currentMount.clientWidth, currentMount.clientHeight); 
@@ -154,7 +145,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     raycasterRef.current = new THREE.Raycaster();
     pointerRef.current = new THREE.Vector2();
 
-    // *** CRITICAL FIX: Far Plane set to 100,000 (Huge Vision) ***
+    // *** CRITICAL FIX: Far Plane set to 100,000 ***
     cameraRef.current = new THREE.PerspectiveCamera(60, currentMount.clientWidth / currentMount.clientHeight, 0.1, 100000);
     
     controlsRef.current = new OrbitControls(cameraRef.current, rendererRef.current.domElement);
@@ -172,7 +163,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     const visualHeight = VISUAL_WIDTH * aspect;
     const geometry = new THREE.PlaneGeometry(VISUAL_WIDTH, visualHeight, Math.max(1, width - 1), Math.max(1, height - 1));
     
-    // *** CRITICAL FIX: Center Geometry so it sits at 0,0,0 ***
+    // *** CRITICAL FIX: Center Geometry ***
     geometry.center(); 
     
     // Textures
@@ -216,11 +207,20 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     sceneRef.current.add(originAxesRef.current);
     originAxesRef.current.position.set(-VISUAL_WIDTH / 2 - 5, 0, -visualHeight / 2 - 5);
 
+    // *** FIX IS HERE: Defined BEFORE calling it ***
+    const handleResize = () => {
+      if (rendererRef.current && cameraRef.current && currentMount) {
+        cameraRef.current.aspect = currentMount.clientWidth / currentMount.clientHeight;
+        cameraRef.current.updateProjectionMatrix();
+        rendererRef.current.setSize(currentMount.clientWidth, currentMount.clientHeight);
+      }
+    };
+    window.addEventListener('resize', handleResize);
+
+    // Initial call
     handleResize();
     resetCamera();
     animate();
-
-    window.addEventListener('resize', handleResize);
 
     return () => {
       window.removeEventListener('resize', handleResize);
@@ -280,5 +280,3 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
   )
 });
 PlateView3D.displayName = "PlateView3D";
-
-    
