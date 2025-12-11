@@ -131,12 +131,17 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
   
   // SETUP SCENE
   useEffect(() => {
+    // 1. Safety Checks
     if (!isReady || !mountRef.current) return;
+    
     const currentStats = DataVault.stats;
-    if (!currentStats || !currentStats.gridSize) return;
+    // Check if dimensions are valid (Fixes crash on empty data)
+    if (!currentStats || !currentStats.gridSize || currentStats.gridSize.width === 0 || currentStats.gridSize.height === 0) {
+        return; 
+    }
     
     const currentMount = mountRef.current;
-
+    
     rendererRef.current = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
     rendererRef.current.setPixelRatio(window.devicePixelRatio);
     rendererRef.current.setSize(currentMount.clientWidth, currentMount.clientHeight); 

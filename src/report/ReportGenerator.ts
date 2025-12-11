@@ -111,16 +111,29 @@ export async function generateFinalReport(metadata: any, patches: any[]) {
 
         // Ribbon Header
         doc.setFillColor(primaryColor[0], primaryColor[1], primaryColor[2]);
-        doc.rect(5, 5, w - 10, 15, 'F');
+        doc.rect(5, 5, w - 10, 20, 'F'); // Made it slightly taller
+        
+        // Title
         doc.setTextColor(255, 255, 255);
         doc.setFontSize(14);
         doc.setFont("helvetica", "bold");
-        doc.text(`PATCH ${patch.id} ANALYSIS`, 10, 15);
+        doc.text(`PATCH ${patch.id} ANALYSIS`, 10, 14);
+        
+        // --- NEW: LOCATION DATA ---
+        doc.setFontSize(10);
+        doc.setFont("helvetica", "normal");
+        const locText = `Location Center:  X: ${patch.location.x.toFixed(1)} mm   |   Y: ${patch.location.y.toFixed(1)} mm   |   Z: ${patch.location.z.toFixed(1)} mm`;
+        doc.text(locText, 10, 22);
+
+        // Severity Label (Right side)
+        doc.setFont("helvetica", "bold");
+        doc.text("SEVERITY: CRITICAL", w - 50, 15); 
+
 
         // 2x2 GRID
         const imgSize = 92;
         const gap = 6;
-        const startY = 25;
+        const startY = 30; // Adjusted for taller header
         const startX = 10;
 
         const label = (text: string, x: number, y: number) => {
