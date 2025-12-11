@@ -153,16 +153,12 @@ export function ReportTab({ twoDViewRef, threeDeeViewRef }: ReportTabProps) {
         pdf.text(analysisLines, margin, yPos);
         yPos += analysisLines.length * 5 + 10;
         
+        // This is the key change: Use the heatmapDataUrl from the patch object
         if (patch.heatmapDataUrl) {
             pdf.setFont("helvetica", "bold");
             pdf.text("Patch 2D Heatmap:", margin, yPos);
             yPos += 5;
-            pdf.addImage(patch.heatmapDataUrl, 'PNG', margin, yPos, 80, 80);
-        }
-         if (patch.isoViewDataUrl) {
-            pdf.setFont("helvetica", "bold");
-            pdf.text("Patch 3D View:", margin + 95, yPos);
-            pdf.addImage(patch.isoViewDataUrl, 'PNG', margin + 95, yPos + 5, 80, 80);
+            pdf.addImage(patch.heatmapDataUrl, 'PNG', margin, yPos, 80, 80, undefined, 'FAST');
         }
       }
 
@@ -231,12 +227,10 @@ export function ReportTab({ twoDViewRef, threeDeeViewRef }: ReportTabProps) {
                 <ul className="list-disc pl-5 space-y-2 text-sm text-muted-foreground">
                     <li>A cover page with the executive summary and overall asset views.</li>
                     <li>A detailed page for each detected corrosion patch.</li>
-                    <li>Each patch page includes statistics, an AI-generated analysis, and 2D/3D visual snapshots.</li>
+                    <li>Each patch page includes statistics, an AI-generated analysis, and a dedicated 2D heatmap image.</li>
                 </ul>
           </CardContent>
       </Card>
     </div>
   );
 }
-
-    

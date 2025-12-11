@@ -268,7 +268,7 @@ function createBuffers(grid: MergedGrid, nominal: number, min: number, max: numb
             
             let displacementValue = 0;
             if (cell && cell.effectiveThickness !== null) {
-                displacementValue = cell.effectiveThickness - nominal;
+                displacementValue = cell.effectiveThickness;
             }
             displacementBuffer[index] = isFinite(displacementValue) ? displacementValue : 0;
 
@@ -389,7 +389,52 @@ function parseFileToGrid(rows: any[][], fileName: string) {
     return dataGrid;
 }
 
-function segmentAndAnalyze(grid: MergedGrid, nominalInput: number, threshold: number): SegmentBox[] {
+// Function to generate a small heatmap Data URL for a specific segment
+function generatePatchHeatmap(grid: MergedGrid, patch: SegmentBox, overallMin: number, overallMax: number): string {
+    const { xMin, xMax, yMin, yMax } = patch.coordinates;
+    const patchWidth = xMax - xMin + 1;
+    const patchHeight = yMax - yMin + 1;
+
+    // Use OffscreenCanvas for performance if available (in a real worker environment)
+    // For simplicity here, we assume a basic canvas-like structure
+    const canvas = new OffscreenCanvas(patchWidth, patchHeight);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return '';
+    
+    const imageData = ctx.createImageData(patchWidth, patchHeight);
+    const colorRange = overallMax - overallMin;
+
+    for (let y = 0; y < patchHeight; y++) {
+        for (let x = 0; x < patchWidth; x++) {
+            const gridX = xMin + x;
+            const gridY = yMin + y;
+            const cell = grid[gridY]?.[gridX];
+
+            const normalizedColorValue = cell && cell.effectiveThickness !== null && colorRange > 0
+                ? (cell.effectiveThickness - overallMin) / colorRange
+                : null;
+            
+            const rgba = getNormalizedColor(normalizedColorValue);
+            const index = (y * patchWidth + x) * 4;
+            imageData.data[index] = rgba[0];
+            imageData.data[index + 1] = rgba[1];
+            imageData.data[index + 2] = rgba[2];
+            imageData.data[index + 3] = rgba[3];
+        }
+    }
+    
+    ctx.putImageData(imageData, 0, 0);
+    return canvas.convertToBlob({ type: 'image/png' }).then(blob => {
+        return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result as string);
+            reader.readAsDataURL(blob);
+        });
+    }) as Promise<string>;
+}
+
+
+async function segmentAndAnalyze(grid: MergedGrid, nominalInput: number, threshold: number, overallMin: number, overallMax: number): Promise<SegmentBox[]> {
     const nominal = Number(nominalInput) || 0;
     const height = grid.length, width = grid[0]?.length || 0;
     const visited: boolean[][] = Array(height).fill(null).map(() => Array(width).fill(false));
@@ -438,8 +483,8 @@ function segmentAndAnalyze(grid: MergedGrid, nominalInput: number, threshold: nu
                     let tier: SeverityTier = 'Moderate';
                     if (worstPct < 60) tier = 'Critical';
                     else if (worstPct < 70) tier = 'Severe';
-
-                    segments.push({
+                    
+                    const newSegment: SegmentBox = {
                         id: segmentIdCounter++,
                         tier, pointCount: points.length,
                         worstThickness: minThick,
@@ -447,22 +492,31 @@ function segmentAndAnalyze(grid: MergedGrid, nominalInput: number, threshold: nu
                         severityScore: (1 - minThick / nominal) * points.length,
                         coordinates: { xMin, xMax, yMin, yMax },
                         center: { x: Math.round(xMin + (xMax - xMin) / 2), y: Math.round(yMin + (yMax - yMin) / 2) }
-                    });
+                    };
+
+                    segments.push(newSegment);
                 }
             }
         }
     }
-    return segments.sort((a, b) => a.worstThickness - b.worstThickness);
+    
+    // After identifying all segments, generate their heatmaps
+    const segmentsWithImages = await Promise.all(segments.map(async (seg) => {
+        const heatmapDataUrl = await generatePatchHeatmap(grid, seg, overallMin, overallMax);
+        return { ...seg, heatmapDataUrl };
+    }));
+
+    return segmentsWithImages.sort((a, b) => a.worstThickness - b.worstThickness);
 }
 
-function finalizeProcessing(threshold: number) {
+async function finalizeProcessing(threshold: number) {
     if (!MASTER_GRID) throw new Error("Cannot finalize: MASTER_GRID is not initialized.");
     self.postMessage({ type: 'PROGRESS', progress: 50, message: 'Processing merged data...' });
 
     FINAL_GRID = createFinalGrid(MASTER_GRID.points, MASTER_GRID.baseConfig.nominalThickness);
     const { stats, condition } = computeStats(FINAL_GRID, MASTER_GRID.baseConfig.nominalThickness);
     const { displacementBuffer, colorBuffer } = createBuffers(FINAL_GRID, MASTER_GRID.baseConfig.nominalThickness, stats.minThickness, stats.maxThickness);
-    const segments = segmentAndAnalyze(FINAL_GRID, MASTER_GRID.baseConfig.nominalThickness, threshold);
+    const segments = await segmentAndAnalyze(FINAL_GRID, MASTER_GRID.baseConfig.nominalThickness, threshold, stats.minThickness, stats.maxThickness);
     
     const plates = MASTER_GRID.plates.map(p => ({
         id: p.name, fileName: p.name, ...p.config
@@ -554,10 +608,11 @@ self.onmessage = async (event: MessageEvent<any>) => {
         }
 
         if (type === 'FINALIZE') {
-             finalizeProcessing(payload.threshold);
+             await finalizeProcessing(payload.threshold);
         } else if (type === 'RESEGMENT') {
             if (!FINAL_GRID || !MASTER_GRID) return;
-            const segments = segmentAndAnalyze(FINAL_GRID, MASTER_GRID.baseConfig.nominalThickness, payload.threshold);
+             const { stats } = computeStats(FINAL_GRID, MASTER_GRID.baseConfig.nominalThickness);
+            const segments = await segmentAndAnalyze(FINAL_GRID, MASTER_GRID.baseConfig.nominalThickness, payload.threshold, stats.minThickness, stats.maxThickness);
             self.postMessage({ type: 'SEGMENTS_UPDATED', segments: segments });
         } else if (type === 'RECOLOR') {
              if (!FINAL_GRID || !MASTER_GRID) return;
