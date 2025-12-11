@@ -13,7 +13,6 @@ import { Switch } from '@/components/ui/switch'
 import { Expand, Pin, RefreshCw, LocateFixed, Loader2, FileText } from 'lucide-react'
 import { useImperativeHandle } from 'react'
 import { generateFinalReport } from '@/report/ReportGenerator'
-import { capturePatchImagesForSegment } from '@/utils/capturePatchImages' 
 import { Input } from '../ui/input'
 import { Textarea } from '../ui/textarea'
 import { ColorLegend } from './ColorLegend'
@@ -71,16 +70,10 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
   }, []);
   
   const handleGenerateReport = async () => {
-    if (!sceneRef.current || !cameraRef.current || !rendererRef.current || !meshRef.current || !inspectionResult || !segments) return;
+    if (!rendererRef.current || !inspectionResult || !segments) return;
     setIsGeneratingReport(true);
    
     try {
-        // 1. Run the Robot (Capture Images)
-        rendererRef.current.localClippingEnabled = true;
-        const patchImages = await capturePatchImagesForSegment('all');
-        rendererRef.current.localClippingEnabled = false; 
-
-        // 2. Gather User Input
         const metadata = {
             assetName: assetType || "N/A",
             location: reportMetadata.location,
@@ -90,8 +83,8 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
             remarks: reportMetadata.remarks,
         };
 
-        // 3. Create PDF
-        await generateFinalReport(metadata, patchImages as any);
+        // This is the corrected logic, directly calling the final report generator
+        await generateFinalReport(metadata, segments);
 
     } catch(err) {
         console.error("Report generation failed:", err);
@@ -139,8 +132,9 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
         const aspect = height / width;
         const visualHeight = VISUAL_WIDTH * aspect;
 
-        const targetX = (x / (width - 1)) * VISUAL_WIDTH;
-        const targetZ = (y / (height - 1)) * visualHeight;
+        // Map grid coordinate to visual coordinate
+        const targetX = (x / width) * VISUAL_WIDTH;
+        const targetZ = (y / height) * visualHeight;
         
         controlsRef.current.target.set(targetX, 0, targetZ);
         
@@ -196,6 +190,9 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
         Math.min(256, height > 1 ? height - 1 : 1)
     );
     
+    // Position mesh so its top-left corner is at (0,0,0) in the world
+    geometry.translate(VISUAL_WIDTH / 2, -visualHeight / 2, 0);
+
     const { displacementBuffer, colorBuffer } = DataVault;
     if (!displacementBuffer || !colorBuffer) return;
 
@@ -222,7 +219,6 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     
     meshRef.current = new THREE.Mesh(geometry, material);
     meshRef.current.rotation.x = -Math.PI / 2;
-    meshRef.current.position.set(VISUAL_WIDTH / 2, 0, visualHeight / 2);
     sceneRef.current.add(meshRef.current);
 
     originAxesRef.current = new THREE.Group();
@@ -319,6 +315,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     resetCamera();
     animate();
 
+    // CLEANUP FUNCTION (Prevents Memory Leaks)
     return () => {
       window.removeEventListener('resize', handleResize);
        if (currentMount) {
@@ -343,6 +340,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     };
   }, [isReady, animate, resetCamera]); 
 
+  // This effect updates textures and uniforms when data changes, WITHOUT rebuilding the scene
   useEffect(() => {
     if (isReady && dataVersion > 0 && meshRef.current && DataVault.displacementBuffer && DataVault.colorBuffer) {
         
@@ -400,6 +398,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
   
   if (!inspectionResult) return null;
 
+  // Data error or loading placeholder
   if (!isReady) {
     return (
       <div className="w-full h-full flex items-center justify-center bg-muted/30 border-2 border-dashed border-border rounded-lg">
