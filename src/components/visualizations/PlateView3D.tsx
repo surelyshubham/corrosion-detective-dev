@@ -1,3 +1,4 @@
+
 "use client"
 
 import React, { useRef, useEffect, useState, useCallback } from 'react'
@@ -329,7 +330,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
   return (
     <div className="grid md:grid-cols-4 gap-6 h-full">
       <div className="md:col-span-3 h-full relative">
-        <Card className="h-full flex flex-col">
+        <Card className="h-full flex flex-col border">
           <CardHeader><CardTitle>3D Surface Plot</CardTitle></CardHeader>
           <CardContent className="flex-grow p-0 relative">
             <div ref={mountRef} className="w-full h-full" />
@@ -407,3 +408,5 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
   )
 });
 PlateView3D.displayName = "PlateView3D";
+
+    

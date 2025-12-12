@@ -350,7 +350,7 @@ export const PipeView3D = React.forwardRef<PipeView3DRef, PipeView3DProps>((prop
   return (
     <div className="grid md:grid-cols-4 gap-6 h-full">
       <div className="md:col-span-3 h-full relative">
-        <Card className="h-full flex flex-col">
+        <Card className="h-full flex flex-col border">
           <CardHeader>
             <CardTitle className="font-headline">3D Pipe View</CardTitle>
           </CardHeader>
@@ -416,4 +416,7 @@ export const PipeView3D = React.forwardRef<PipeView3DRef, PipeView3DProps>((prop
 PipeView3D.displayName = "PipeView3D";
 
     
+    
+
+
     

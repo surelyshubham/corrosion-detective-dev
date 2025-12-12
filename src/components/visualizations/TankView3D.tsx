@@ -1,3 +1,4 @@
+
 "use client"
 
 import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react'
@@ -346,7 +347,7 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>((prop
   return (
     <div className="grid md:grid-cols-4 gap-6 h-full">
       <div className="md:col-span-3 h-full relative">
-        <Card className="h-full flex flex-col">
+        <Card className="h-full flex flex-col border">
           <CardHeader>
             <CardTitle className="font-headline">3D Tank View</CardTitle>
           </CardHeader>
@@ -411,6 +412,8 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>((prop
 TankView3D.displayName = "TankView3D";
 
     
+    
+
     
 
     
