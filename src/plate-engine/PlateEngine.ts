@@ -24,7 +24,7 @@ export class PlateEngine {
   private raycaster = new THREE.Raycaster();
   
   // --- geometry mapping ---
-  public readonly VISUAL_WIDTH = 100;
+  public readonly VISUAL_WIDTH: number;
   private readonly MAX_SEGMENTS = 250;
   public visualHeight: number;
   private cellWidth: number;
@@ -51,32 +51,31 @@ export class PlateEngine {
     this.stats = params.stats;
     this.nominalThickness = params.nominalThickness;
 
-    const gridW = this.stats.gridSize.width;
-    const gridH = this.stats.gridSize.height;
+    const MAX_VISUAL_SIZE = 100;
+    const plateWidth = this.stats.gridSize.width;
+    const plateHeight = this.stats.gridSize.height;
 
-    // 🔥 REAL physical aspect (not count-based)
-    const physicalWidth = gridW;
-    const physicalHeight = gridH;
+    const scaleFactor = MAX_VISUAL_SIZE / Math.max(plateWidth, plateHeight);
 
-    const aspect = physicalHeight / physicalWidth;
+    this.VISUAL_WIDTH  = plateWidth  * scaleFactor;
+    this.visualHeight = plateHeight * scaleFactor;
 
-    this.visualHeight = this.VISUAL_WIDTH * aspect;
-    this.cellWidth = this.VISUAL_WIDTH / gridW;
-    this.cellHeight = this.visualHeight / gridH;
+    this.cellWidth = this.VISUAL_WIDTH / this.stats.gridSize.width;
+    this.cellHeight = this.visualHeight / this.stats.gridSize.height;
 
     this.createPlate();
     this.createWorldFrame();
   }
-
-  private getAbsColor(percentage: number | null): THREE.Color {
+  
+  private getThresholdColor(percentage: number | null): THREE.Color {
     const c = new THREE.Color();
-    if (percentage === null) c.set(0x888888);        // ND
-    else if (percentage < 70) c.set(0xff0000);       // Red
-    else if (percentage < 80) c.set(0xffff00);       // Yellow
-    else if (percentage < 90) c.set(0x00ff00);       // Green
-    else c.set(0x0000ff);                            // Blue
-    return c;
+    if (percentage === null) return c.set(0x888888);
+    if (percentage < 70) return c.set(0xff0000);
+    if (percentage < 80) return c.set(0xffff00);
+    if (percentage < 90) return c.set(0x00ff00);
+    return c.set(0x0000ff);
   }
+
 
   // ===============================
   // GEOMETRY (FLAT, FAST, IMMUTABLE)
@@ -112,7 +111,7 @@ export class PlateEngine {
         const nominalPercentage = cell && cell.effectiveThickness && this.nominalThickness > 0
           ? (cell.effectiveThickness / this.nominalThickness) * 100
           : null;
-        const color = this.getAbsColor(nominalPercentage);
+        const color = this.getThresholdColor(nominalPercentage);
 
         colors.push(color.r, color.g, color.b);
       }

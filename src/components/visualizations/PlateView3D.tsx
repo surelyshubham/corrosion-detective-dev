@@ -26,10 +26,11 @@ export type PlateView3DRef = {
 interface PlateView3DProps {}
 
 export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((props, ref) => {
-  const { inspectionResult, dataVersion } = useInspectionStore()
+  const { inspectionResult, dataVersion, selectedPoint } = useInspectionStore()
   const mountRef = useRef<HTMLDivElement>(null)
   const isReady = dataVersion > 0 && !!DataVault.stats && !!DataVault.gridMatrix;
   
+  const [showReference, setShowReference] = useState(true);
   const [hoveredPoint, setHoveredPoint] = useState<HoverInfo & { clientX: number, clientY: number } | null>(null);
 
   // Engine and core refs
@@ -40,6 +41,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
   const controlsRef = useRef<OrbitControls | null>(null);
   const reqRef = useRef<number>(0);
   const mouseRef = useRef(new THREE.Vector2());
+  const refPlaneRef = useRef<THREE.Mesh | null>(null);
 
   const { nominalThickness, assetType } = inspectionResult || {};
 
@@ -81,10 +83,23 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
   
     controlsRef.current.update();
   };
+  
+  const resetCamera = useCallback(async () => {
+     if (!engineRef.current || !cameraRef.current || !controlsRef.current) return;
+    
+    const distance = Math.max(engineRef.current.VISUAL_WIDTH, engineRef.current.visualHeight) * 1.2;
 
-  const resetCamera = async () => {
-    await setView("iso");
-  };
+    cameraRef.current.position.set(
+      distance * 0.7,
+      distance * 0.6,
+      distance * 0.7
+    );
+
+    controlsRef.current.target.set(0, 0, 0);
+    controlsRef.current.update();
+
+  }, []);
+
 
    useImperativeHandle(ref, () => ({
     capture: () => rendererRef.current!.domElement.toDataURL(),
@@ -121,6 +136,32 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
         stats: DataVault.stats!,
         nominalThickness: nominalThickness || 0,
     });
+    
+    // Add reference plane
+    const refPlaneGeom = new THREE.PlaneGeometry(
+      engineRef.current.VISUAL_WIDTH,
+      engineRef.current.visualHeight
+    );
+    refPlaneGeom.rotateX(-Math.PI / 2);
+    
+    refPlaneRef.current = new THREE.Mesh(
+      refPlaneGeom,
+      new THREE.MeshBasicMaterial({
+        color: 0x1e90ff,
+        transparent: true,
+        opacity: 0.25,
+        depthWrite: false,
+      })
+    );
+    
+    refPlaneRef.current.position.set(
+      engineRef.current.VISUAL_WIDTH / 2,
+      0,
+      engineRef.current.visualHeight / 2
+    );
+    sceneRef.current.add(refPlaneRef.current);
+    refPlaneRef.current.visible = showReference;
+
 
     engineRef.current.onHover((info) => {
         if(info) {
@@ -153,7 +194,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     currentMount.addEventListener('mouseleave', () => setHoveredPoint(null));
     window.addEventListener('resize', handleResize);
     
-    resetCamera();
+    setView("iso");
     animate();
 
     return () => {
@@ -163,9 +204,17 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
         currentMount.removeEventListener('mouseleave', () => setHoveredPoint(null));
         engineRef.current?.dispose();
         if (rendererRef.current) rendererRef.current.dispose();
+        if (refPlaneRef.current && sceneRef.current) sceneRef.current.remove(refPlaneRef.current);
         currentMount.innerHTML = '';
     };
-}, [isReady, nominalThickness, animate]);
+}, [isReady, nominalThickness, animate, showReference]);
+
+ useEffect(() => {
+    if (refPlaneRef.current) {
+      refPlaneRef.current.visible = showReference;
+    }
+  }, [showReference]);
+
 
   if (!isReady) return <div className="flex items-center justify-center h-full"><Loader2 className="animate-spin" /></div>;
 
@@ -193,6 +242,17 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
       </div>
       <div className="md:col-span-1 space-y-4">
         <Card>
+           <CardHeader>
+            <CardTitle className="text-lg font-headline">Controls</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-6">
+             <div className="flex items-center justify-between">
+              <Label htmlFor="ref-switch" className="flex items-center gap-2"><LocateFixed className="h-4 w-4" />Show Reference Plane</Label>
+              <Switch id="ref-switch" checked={showReference} onCheckedChange={setShowReference} />
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
           <CardHeader>
             <CardTitle className="text-lg font-headline">Camera</CardTitle>
           </CardHeader>
@@ -211,3 +271,4 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
   )
 });
 PlateView3D.displayName = "PlateView3D";
+
