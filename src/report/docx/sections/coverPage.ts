@@ -1,7 +1,7 @@
 import { Paragraph, HeadingLevel } from "docx";
 import type { ReportInput } from "../types";
 
-export function createCoverPage(input: ReportInput) {
+export function buildCoverPage(input: ReportInput) {
   return [
     new Paragraph({
       text: "Corrosion Inspection Report",
