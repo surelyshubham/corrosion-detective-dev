@@ -5,6 +5,7 @@ export interface ReportInput {
   assetInfo: {
     clientName: string;
     assetTag: string;
+    operatorName: string;
     inspectionDate: string;
     method: string;
     reportId: string;

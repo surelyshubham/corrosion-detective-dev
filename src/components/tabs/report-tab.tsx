@@ -14,6 +14,7 @@ import { downloadFile } from "@/lib/utils";
 import { getBase64ImageFromUrl } from "@/lib/image-utils";
 import type { ReportInput, PatchImageSet } from "@/report/docx/types";
 import type { SegmentBox } from "@/lib/types";
+import { DataVault } from "@/store/data-vault";
 
 interface ReportTabProps {
   twoDViewRef: React.RefObject<any>;
@@ -22,7 +23,7 @@ interface ReportTabProps {
 
 const assembleReportInput = async (
   inspectionResult: any,
-  patches: { corrosion: SegmentBox[]; nonInspected: SegmentBox[] },
+  patches: any,
   metadata: any,
   viewRefs: ReportTabProps
 ): Promise<ReportInput> => {
@@ -34,6 +35,7 @@ const assembleReportInput = async (
 
   // Capture full asset views
   await threeDeeViewRef.current.resetCamera();
+  
   const fullView2D = twoDViewRef.current.capture();
 
   await threeDeeViewRef.current.setView('iso');
@@ -47,22 +49,22 @@ const assembleReportInput = async (
 
   const logoBase64 = await getBase64ImageFromUrl('/logo.png');
 
-  const createPatchSet = (patch: SegmentBox, type: 'CORROSION' | 'ND'): PatchImageSet => ({
+  const createPatchSet = (patch: SegmentBox, type: 'CORROSION' | 'NON_INSPECTED'): PatchImageSet => ({
       patchId: `${type === 'CORROSION' ? 'C' : 'ND'}-${patch.id}`,
       type: type,
       meta: {
         xRange: `${patch.coordinates.xMin} - ${patch.coordinates.xMax}`,
         yRange: `${patch.coordinates.yMin} - ${patch.coordinates.yMax}`,
-        area: 'N/A', // Placeholder
+        area: patch.pointCount,
         minThickness: patch.worstThickness?.toFixed(2),
         avgThickness: patch.avgThickness?.toFixed(2),
         severity: patch.tier,
       },
       images: {
           view2D: patch.heatmapDataUrl || '', 
-          view3DTop: 'placeholder', // These would be captured in a real scenario
-          view3DSide: 'placeholder',
-          view3DIso: 'placeholder',
+          view3DTop: DataVault.patchSnapshots.find(s => s.patchId === String(patch.id) && s.patchType === type && s.view === 'TOP')?.image || 'placeholder',
+          view3DSide: DataVault.patchSnapshots.find(s => s.patchId === String(patch.id) && s.patchType === type && s.view === 'SIDE')?.image || 'placeholder',
+          view3DIso: DataVault.patchSnapshots.find(s => s.patchId === String(patch.id) && s.patchType === type && s.view === 'ISO')?.image || 'placeholder',
       }
   });
 
@@ -70,6 +72,7 @@ const assembleReportInput = async (
     assetInfo: {
       clientName: metadata.clientName,
       assetTag: metadata.assetTag,
+      operatorName: metadata.operatorName,
       inspectionDate: new Date().toLocaleDateString(),
       method: metadata.method,
       reportId: `REP-${Date.now()}`,
@@ -83,8 +86,8 @@ const assembleReportInput = async (
     },
     stats: inspectionResult.stats,
     aiSummary: inspectionResult.aiInsight?.recommendation ?? "AI summary not available.",
-    corrosionPatches: patches.corrosion.map(p => createPatchSet(p, 'CORROSION')),
-    ndPatches: patches.nonInspected.map(p => createPatchSet(p, 'ND')),
+    corrosionPatches: patches.corrosion.map((p: SegmentBox) => createPatchSet(p, 'CORROSION')),
+    ndPatches: patches.nonInspected.map((p: SegmentBox) => createPatchSet(p, 'NON_INSPECTED')),
   };
 };
 
@@ -95,6 +98,7 @@ export function ReportTab({ twoDViewRef, threeDeeViewRef }: ReportTabProps) {
   const [reportMetadata, setReportMetadata] = useState({
     clientName: "Firebase Studio",
     assetTag: "ASSET-001",
+    operatorName: "AI Inspector",
     method: "Automated Ultrasonic Testing (AUT)",
   });
 
@@ -158,6 +162,14 @@ export function ReportTab({ twoDViewRef, threeDeeViewRef }: ReportTabProps) {
               id="assetTag"
               value={reportMetadata.assetTag}
               onChange={(e) => setReportMetadata((prev) => ({ ...prev, assetTag: e.target.value }))}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="operatorName">Operator Name</Label>
+            <Input
+              id="operatorName"
+              value={reportMetadata.operatorName}
+              onChange={(e) => setReportMetadata((prev) => ({ ...prev, operatorName: e.target.value }))}
             />
           </div>
           <div className="space-y-2">
