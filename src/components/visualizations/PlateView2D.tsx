@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '../ui/label'
 import { ZoomIn, ZoomOut, RefreshCw } from 'lucide-react'
 import { Button } from '../ui/button'
-import { ColorLegend } from './ColorLegend'
+import { PlatePercentLegend } from './PlatePercentLegend'
 
 
 const getNiceInterval = (range: number, maxTicks: number): number => {
@@ -17,6 +17,14 @@ const getNiceInterval = (range: number, maxTicks: number): number => {
     const step = goodSteps.find(s => s > roughStep) || goodSteps[goodSteps.length - 1];
     return step;
 };
+
+function getColorByPercentage(pct: number | null): string {
+  if (pct === null) return '#888888';
+  if (pct >= 90) return '#0000ff';
+  if (pct >= 80) return '#00ff00';
+  if (pct >= 70) return '#ffff00';
+  return '#ff0000';
+}
 
 export type PlateView2DRef = {
   capture: () => string;
@@ -52,7 +60,7 @@ export const PlateView2D = forwardRef<PlateView2DRef, PlateView2DProps>((props, 
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
-    if (!canvas || !gridSize || !DataVault.colorBuffer) return;
+    if (!canvas || !gridSize || !gridMatrix) return;
     
     const { width, height } = gridSize;
     const canvasWidth = width * scaledCellSize;
@@ -63,18 +71,22 @@ export const PlateView2D = forwardRef<PlateView2DRef, PlateView2DProps>((props, 
 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-
-    // Draw heatmap
-    const imageData = new ImageData(new Uint8ClampedArray(DataVault.colorBuffer), width, height);
-    const tempCanvas = document.createElement('canvas');
-    tempCanvas.width = width;
-    tempCanvas.height = height;
-    const tempCtx = tempCanvas.getContext('2d');
-    if (!tempCtx) return;
-    tempCtx.putImageData(imageData, 0, 0);
-
+    
     ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(tempCanvas, 0, 0, width, height, 0, 0, canvasWidth, canvasHeight);
+
+    // Draw heatmap from grid data
+    for (let y = 0; y < gridSize.height; y++) {
+        for (let x = 0; x < gridSize.width; x++) {
+            const cell = gridMatrix[y][x];
+            ctx.fillStyle = getColorByPercentage(cell?.percentage ?? null);
+            ctx.fillRect(
+                x * scaledCellSize,
+                y * scaledCellSize,
+                scaledCellSize,
+                scaledCellSize
+            );
+        }
+    }
     
     // Draw segment bounding boxes
     if (segments) {
@@ -98,7 +110,7 @@ export const PlateView2D = forwardRef<PlateView2DRef, PlateView2DProps>((props, 
         ctx.strokeRect(selectedPoint.x * scaledCellSize, selectedPoint.y * scaledCellSize, scaledCellSize, scaledCellSize);
     }
     
-  }, [gridSize, dataVersion, zoom, scaledCellSize, selectedPoint, segments]);
+  }, [gridSize, gridMatrix, dataVersion, zoom, scaledCellSize, selectedPoint, segments]);
 
   useEffect(() => {
     draw();
@@ -137,7 +149,7 @@ export const PlateView2D = forwardRef<PlateView2DRef, PlateView2DProps>((props, 
 
     if (gridX >= 0 && gridX < gridSize.width && gridY >= 0 && gridY < gridSize.height) {
         const pointData = gridMatrix[gridY]?.[gridX];
-        if(pointData && typeof pointData.rawThickness === 'number' && !isNaN(pointData.rawThickness) && pointData.rawThickness !== 0) {
+        if(pointData) {
              setHoveredPoint({ x: gridX, y: gridY, ...pointData, clientX: e.clientX, clientY: e.clientY });
         } else {
             setHoveredPoint(null);
@@ -202,7 +214,7 @@ export const PlateView2D = forwardRef<PlateView2DRef, PlateView2DProps>((props, 
         <CardContent className="flex-grow relative p-0 border-t flex flex-col">
             <div className="relative w-full h-full flex">
                 <div className="flex-shrink-0" style={{ width: AXIS_SIZE }}>
-                    <div className='text-xs text-muted-foreground -rotate-90 whitespace-nowrap absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 origin-center'>Y Coordinate (mm)</div>
+                    <div className='text-xs text-muted-foreground -rotate-90 whitespace-nowrap absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 origin-center'>Y Index</div>
                     <div ref={yAxisRef} className="relative h-full pt-1">
                        {renderYAxis()}
                     </div>
@@ -210,7 +222,7 @@ export const PlateView2D = forwardRef<PlateView2DRef, PlateView2DProps>((props, 
 
                 <div className="flex-grow flex flex-col overflow-hidden">
                     <div className="flex-shrink-0" style={{ height: AXIS_SIZE }}>
-                       <div className='text-xs text-muted-foreground absolute bottom-0 left-1/2 -translate-x-1/2 pb-1'>X Coordinate (mm)</div>
+                       <div className='text-xs text-muted-foreground absolute bottom-0 left-1/2 -translate-x-1/2 pb-1'>X Index</div>
                        <div ref={xAxisRef} className="relative h-full pr-1">
                           {renderXAxis()}
                        </div>
@@ -266,7 +278,14 @@ export const PlateView2D = forwardRef<PlateView2DRef, PlateView2DProps>((props, 
                 </div>
             </CardContent>
         </Card>
-        <ColorLegend />
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg font-headline">Legend</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <PlatePercentLegend />
+          </CardContent>
+        </Card>
       </div>
     </div>
   )
