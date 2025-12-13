@@ -15,6 +15,7 @@ export class PlateEngine {
   private grid: MergedGrid;
   private stats: InspectionStats;
   private nominalThickness: number;
+  private colorBuffer: Uint8Array;
 
   // --- three.js ---
   private scene: THREE.Scene;
@@ -37,12 +38,14 @@ export class PlateEngine {
     grid: MergedGrid;
     stats: InspectionStats;
     nominalThickness: number;
+    colorBuffer: Uint8Array;
   }) {
     this.scene = params.scene;
     this.camera = params.camera;
     this.grid = params.grid;
     this.stats = params.stats;
     this.nominalThickness = params.nominalThickness;
+    this.colorBuffer = params.colorBuffer;
 
     const { width, height } = this.stats.gridSize;
     this.visualHeight = this.VISUAL_WIDTH * (height / width);
@@ -59,14 +62,30 @@ export class PlateEngine {
     const geom = new THREE.PlaneGeometry(
       this.VISUAL_WIDTH,
       this.visualHeight,
-      1,
-      1
+      this.stats.gridSize.width - 1,
+      this.stats.gridSize.height - 1
     );
     geom.rotateX(-Math.PI / 2);
 
+    // 🔥 APPLY COLORS ONCE
+    const colors: number[] = [];
+
+    for (let i = 0; i < this.colorBuffer.length; i += 4) {
+      colors.push(
+        this.colorBuffer[i] / 255,
+        this.colorBuffer[i + 1] / 255,
+        this.colorBuffer[i + 2] / 255
+      );
+    }
+
+    geom.setAttribute(
+      "color",
+      new THREE.Float32BufferAttribute(colors, 3)
+    );
+
     const mat = new THREE.MeshBasicMaterial({
-      vertexColors: false,
-      side: THREE.DoubleSide,
+      vertexColors: true,
+      side: THREE.DoubleSide
     });
 
     this.plateMesh = new THREE.Mesh(geom, mat);
