@@ -19,13 +19,13 @@ import {
 
 import type { ReportInput } from "./types";
 import { createCoverPage } from "./sections/coverPage";
-import { createAssetOverview } from "./sections/assetOverview";
+import { buildAssetOverview } from "./sections/assetOverview";
 import { createInspectionSummary } from "./sections/inspectionSummary";
 import { createLegend } from "./sections/legend";
 import { createCorrosionPatchesSection } from "./sections/corrosionPatches";
 import { createNdPatchesSection } from "./sections/ndPatches";
 import { createConclusion } from "./sections/conclusion";
-import { createHeader, createFooter, base64ToUint8Array } from "./styles";
+import { createHeader, createFooter } from "./styles";
 
 export async function generateInspectionReport(
   input: ReportInput
@@ -46,7 +46,7 @@ export async function generateInspectionReport(
           new PageBreak(),
 
           // 2️⃣ ASSET OVERVIEW (FULL 2D + 3D + AI INSIGHT)
-          ...createAssetOverview(input),
+          ...buildAssetOverview(input),
           new PageBreak(),
 
           // 3️⃣ INSPECTION SUMMARY
