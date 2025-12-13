@@ -155,7 +155,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
   return (
     <div className="grid md:grid-cols-4 gap-6 h-full">
       <div className="md:col-span-3 h-full relative">
-        <Card className="h-full flex flex-col border-blue-500/50 border-2">
+        <Card className="h-full flex flex-col border-blue-500/50 border">
           <CardHeader>
               <CardTitle className="font-headline">3D Surface Plot</CardTitle>
           </CardHeader>

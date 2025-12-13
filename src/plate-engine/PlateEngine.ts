@@ -22,9 +22,10 @@ export class PlateEngine {
   private camera: THREE.Camera;
   private plateMesh!: THREE.Mesh;
   private raycaster = new THREE.Raycaster();
-
+  
   // --- geometry mapping ---
   private readonly VISUAL_WIDTH = 100;
+  private readonly MAX_SEGMENTS = 250;
   private visualHeight: number;
   private cellWidth: number;
   private cellHeight: number;
@@ -55,27 +56,49 @@ export class PlateEngine {
     this.createPlate();
   }
 
+  private getAbsColor(percentage: number | null): THREE.Color {
+    const c = new THREE.Color();
+    if (percentage === null) c.set(0x888888);        // ND
+    else if (percentage < 70) c.set(0xff0000);       // Red
+    else if (percentage < 80) c.set(0xffff00);       // Yellow
+    else if (percentage < 90) c.set(0x00ff00);       // Green
+    else c.set(0x0000ff);                            // Blue
+    return c;
+  }
+
   // ===============================
   // GEOMETRY (FLAT, FAST, IMMUTABLE)
   // ===============================
   private createPlate() {
+    const gridW = this.stats.gridSize.width;
+    const gridH = this.stats.gridSize.height;
+
+    const widthSegments  = Math.min(gridW - 1, this.MAX_SEGMENTS);
+    const heightSegments = Math.min(gridH - 1, this.MAX_SEGMENTS);
+
     const geom = new THREE.PlaneGeometry(
       this.VISUAL_WIDTH,
       this.visualHeight,
-      this.stats.gridSize.width - 1,
-      this.stats.gridSize.height - 1
+      widthSegments,
+      heightSegments
     );
+
     geom.rotateX(-Math.PI / 2);
 
-    // 🔥 APPLY COLORS ONCE
     const colors: number[] = [];
+    const xStep = (gridW - 1) / widthSegments;
+    const yStep = (gridH - 1) / heightSegments;
 
-    for (let i = 0; i < this.colorBuffer.length; i += 4) {
-      colors.push(
-        this.colorBuffer[i] / 255,
-        this.colorBuffer[i + 1] / 255,
-        this.colorBuffer[i + 2] / 255
-      );
+    for (let y = 0; y <= heightSegments; y++) {
+      for (let x = 0; x <= widthSegments; x++) {
+        const gridX = Math.round(x * xStep);
+        const gridY = Math.round(y * yStep);
+
+        const cell = this.grid[gridY]?.[gridX];
+        const color = this.getAbsColor(cell?.percentage ?? null);
+
+        colors.push(color.r, color.g, color.b);
+      }
     }
 
     geom.setAttribute(
