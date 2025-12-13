@@ -44,6 +44,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
   const reqRef = useRef<number>(0);
   const mouseRef = useRef(new THREE.Vector2());
   const refPlaneRef = useRef<THREE.Mesh | null>(null);
+  const cameraInitializedRef = useRef(false);
 
   const { nominalThickness, assetType } = inspectionResult || {};
   const stats = DataVault.stats;
@@ -55,12 +56,13 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     rendererRef.current.render(sceneRef.current, cameraRef.current);
   }, []);
 
-  const setView = async (view: "iso" | "top" | "side") => {
+  const setView = useCallback(async (view: "iso" | "top" | "side") => {
     if (!cameraRef.current || !controlsRef.current || !engineRef.current) return;
 
     const distance = Math.max(120, engineRef.current.visualHeight * 1.2);
     const targetX = engineRef.current.VISUAL_WIDTH / 2;
     const targetZ = engineRef.current.visualHeight / 2;
+    
     controlsRef.current.target.set(targetX, 0, targetZ);
 
     switch (view) {
@@ -82,10 +84,12 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
         break;
     }
     controlsRef.current.update();
-  };
+  }, []);
   
   const resetCamera = useCallback(async () => {
+    cameraInitializedRef.current = false;
     await setView("iso");
+    cameraInitializedRef.current = true;
   }, [setView]);
 
 
@@ -126,30 +130,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
         depthExaggeration: depthExaggeration,
     });
     
-    // Create ref plane inside component
-    const refPlaneGeom = new THREE.PlaneGeometry(
-      engineRef.current.VISUAL_WIDTH,
-      engineRef.current.visualHeight
-    );
-    refPlaneGeom.rotateX(-Math.PI / 2);
-    
-    refPlaneRef.current = new THREE.Mesh(
-      refPlaneGeom,
-      new THREE.MeshBasicMaterial({
-        color: 0x1e90ff,
-        transparent: true,
-        opacity: 0.25,
-        depthWrite: false,
-      })
-    );
-    
-    refPlaneRef.current.position.set(
-      engineRef.current.VISUAL_WIDTH / 2,
-      0,
-      engineRef.current.visualHeight / 2
-    );
-    sceneRef.current.add(refPlaneRef.current);
-
+    refPlaneRef.current = engineRef.current.getReferencePlane();
 
     engineRef.current.onHover((info) => {
         if(info) {
@@ -182,7 +163,11 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     currentMount.addEventListener('mouseleave', () => setHoveredPoint(null));
     window.addEventListener('resize', handleResize);
     
-    setView("iso");
+    if (!cameraInitializedRef.current) {
+        setView("iso");
+        cameraInitializedRef.current = true;
+    }
+    
     animate();
 
     return () => {
@@ -192,8 +177,8 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
         currentMount.removeEventListener('mouseleave', () => setHoveredPoint(null));
         engineRef.current?.dispose();
         if (rendererRef.current) rendererRef.current.dispose();
-        if (refPlaneRef.current) sceneRef.current?.remove(refPlaneRef.current);
         currentMount.innerHTML = '';
+        cameraInitializedRef.current = false;
     };
 }, [isReady, nominalThickness, animate, setView, depthExaggeration]);
 
@@ -202,6 +187,12 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
       refPlaneRef.current.visible = showReference;
     }
   }, [showReference]);
+  
+  useEffect(() => {
+    if(engineRef.current) {
+        engineRef.current.setDepthExaggeration(depthExaggeration);
+    }
+  }, [depthExaggeration]);
 
 
   if (!isReady) return <div className="flex items-center justify-center h-full"><Loader2 className="animate-spin" /></div>;
