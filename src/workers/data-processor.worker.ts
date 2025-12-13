@@ -395,8 +395,6 @@ function generatePatchHeatmap(grid: MergedGrid, patch: SegmentBox, overallMin: n
     const patchWidth = xMax - xMin + 1;
     const patchHeight = yMax - yMin + 1;
 
-    // Use OffscreenCanvas for performance if available (in a real worker environment)
-    // For simplicity here, we assume a basic canvas-like structure
     const canvas = new OffscreenCanvas(patchWidth, patchHeight);
     const ctx = canvas.getContext('2d');
     if (!ctx) return Promise.resolve('');
@@ -506,7 +504,7 @@ async function segmentAndAnalyze(grid: MergedGrid, nominalInput: number, thresho
         return { ...seg, heatmapDataUrl };
     }));
 
-    return segmentsWithImages.sort((a, b) => a.worstThickness! - b.worstThickness!);
+    return segmentsWithImages.sort((a, b) => (a.worstThickness ?? Infinity) - (b.worstThickness ?? Infinity));
 }
 
 function segmentNonInspected(grid: MergedGrid): SegmentBox[] {

@@ -6,7 +6,7 @@
 import { ai } from '@/ai/genkit';
 import { z } from 'zod';
 import type { MergedInspectionResult } from '@/lib/types';
-import type { IdentifiedPatch } from '@/reporting/patch-detector';
+import type { SegmentBox } from '@/lib/types';
 
 const ReportSummaryInputSchema = z.object({
   assetType: z.string(),
@@ -23,7 +23,7 @@ const ReportSummaryOutputSchema = z.object({
   summary: z.string().describe('A narrative summary for the report\'s first page. It should be a professional, high-level overview of the inspection findings.')
 });
 
-export async function generateReportSummary(inspection: MergedInspectionResult, patches: IdentifiedPatch[], defectThreshold: number): Promise<string> {
+export async function generateReportSummary(inspection: MergedInspectionResult, patches: SegmentBox[], defectThreshold: number): Promise<string> {
   const input = {
       assetType: inspection.assetType,
       nominalThickness: inspection.nominalThickness,

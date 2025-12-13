@@ -4,11 +4,21 @@
  */
 import type { MergedGrid, InspectionStats } from '@/lib/types';
 
+export type PatchViewType = '2D' | 'TOP' | 'SIDE' | 'ISO';
+
+export interface PatchSnapshot {
+  patchId: string;
+  patchType: 'CORROSION' | 'NON_INSPECTED';
+  view: PatchViewType;
+  image: string; // base64 PNG
+}
+
 interface DataVaultType {
   displacementBuffer: Float32Array | null;
   colorBuffer: Uint8Array | null;
   gridMatrix: MergedGrid | null;
   stats: InspectionStats | null;
+  patchSnapshots: PatchSnapshot[];
 }
 
 export const DataVault: DataVaultType = {
@@ -16,4 +26,5 @@ export const DataVault: DataVaultType = {
   colorBuffer: null,
   gridMatrix: null,
   stats: null,
+  patchSnapshots: [],
 };

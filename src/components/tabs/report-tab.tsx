@@ -3,18 +3,16 @@
 
 import React, { useState, useRef } from "react";
 import jsPDF from "jspdf";
-import html2canvas from "html2canvas";
+import "jspdf-autotable";
 import { useInspectionStore } from "@/store/use-inspection-store";
 import { DataVault } from "@/store/data-vault";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { Loader2, FileText, Download } from "lucide-react";
-import type { SegmentBox, InspectionStats } from "@/lib/types";
-import { TwoDeeViewRef } from "./two-dee-heatmap-tab";
-import { ThreeDeeViewRef } from "./three-dee-view-tab";
+import { Loader2, Download, FileText } from "lucide-react";
+import type { TwoDeeViewRef } from "./two-dee-heatmap-tab";
+import type { ThreeDeeViewRef } from "./three-dee-view-tab";
 import { generateReportSummary } from "@/ai/flows/generate-report-summary";
 import { generateAllPatchSummaries } from "@/ai/flows/generate-all-patch-summaries";
 
@@ -24,7 +22,7 @@ interface ReportTabProps {
 }
 
 export function ReportTab({ twoDViewRef, threeDeeViewRef }: ReportTabProps) {
-  const { inspectionResult, segments, defectThreshold } = useInspectionStore();
+  const { inspectionResult, patches, defectThreshold } = useInspectionStore();
   const [isGenerating, setIsGenerating] = useState(false);
   const [reportMetadata, setReportMetadata] = useState({
     assetId: "ASSET-001",
@@ -33,7 +31,7 @@ export function ReportTab({ twoDViewRef, threeDeeViewRef }: ReportTabProps) {
   });
 
   const generatePdf = async () => {
-    if (!inspectionResult || !segments || !DataVault.stats) {
+    if (!inspectionResult || !patches || !DataVault.stats) {
       alert("No inspection data available to generate a report.");
       return;
     }
@@ -41,22 +39,22 @@ export function ReportTab({ twoDViewRef, threeDeeViewRef }: ReportTabProps) {
 
     try {
       const { assetType, nominalThickness, condition } = inspectionResult;
-      const globalStats = DataVault.stats;
+      const allPatches = [...patches.corrosion, ...patches.nonInspected];
       
       const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
       const margin = 15;
       const pageWidth = pdf.internal.pageSize.getWidth();
-      const pageHeight = pdf.internal.pageSize.getHeight();
+      
       let yPos = 20;
 
       // --- AI Summaries ---
-      const reportSummary = await generateReportSummary(inspectionResult, segments, defectThreshold);
+      const reportSummary = await generateReportSummary({ ...inspectionResult, stats: DataVault.stats }, allPatches, defectThreshold);
       
       const patchAiInput = {
-        patches: segments.map(p => ({
+        patches: patches.corrosion.map(p => ({
           patchId: p.id,
-          minThickness: p.worstThickness.toFixed(2),
-          severity: p.tier,
+          minThickness: p.worstThickness?.toFixed(2) || 'N/A',
+          severity: p.tier || 'N/A',
           xMin: p.coordinates.xMin, xMax: p.coordinates.xMax,
           yMin: p.coordinates.yMin, yMax: p.coordinates.yMax,
         })),
@@ -100,7 +98,7 @@ export function ReportTab({ twoDViewRef, threeDeeViewRef }: ReportTabProps) {
       yPos += summaryLines.length * 5 + 15;
 
       const twoDDataUrl = twoDViewRef.current?.capture();
-      const threeDDataUrl = threeDeeViewRef.current?.capture();
+      const threeDDataUrl = threeDeeViewRef.current?.capture() || '';
 
       if (twoDDataUrl) {
         pdf.addImage(twoDDataUrl, "PNG", margin, yPos, (pageWidth - margin*2)/2 - 5, 100, undefined, 'FAST');
@@ -116,17 +114,18 @@ export function ReportTab({ twoDViewRef, threeDeeViewRef }: ReportTabProps) {
 
 
       // --- PAGE 2+: PATCH DETAILS ---
-      const sortedPatches = [...segments].sort((a, b) => a.worstThickness - b.worstThickness);
+      const sortedPatches = [...allPatches].sort((a, b) => (a.worstThickness ?? Infinity) - (b.worstThickness ?? Infinity));
       
       for (const patch of sortedPatches) {
         pdf.addPage();
         yPos = 20;
+        const idString = `${patch.kind === 'CORROSION' ? 'C' : 'ND'}-${patch.id}`
 
         pdf.setFillColor(240, 240, 240);
         pdf.rect(0, yPos - 10, pageWidth, 15, 'F');
         pdf.setFontSize(16);
         pdf.setTextColor(0);
-        pdf.text(`Patch #${patch.id} - ${patch.tier} Finding`, margin, yPos);
+        pdf.text(`Patch #${idString} - ${patch.tier || 'Non-Inspected'} Finding`, margin, yPos);
         yPos += 15;
 
         const addStat = (label: string, value: string) => {
@@ -137,23 +136,24 @@ export function ReportTab({ twoDViewRef, threeDeeViewRef }: ReportTabProps) {
             yPos += 7;
         };
 
-        addStat("Severity Tier:", patch.tier);
-        addStat("Min. Thickness:", `${patch.worstThickness.toFixed(2)} mm (${(patch.worstThickness / nominalThickness * 100).toFixed(1)}%)`);
-        addStat("Avg. Thickness:", `${patch.avgThickness.toFixed(2)} mm`);
+        if (patch.kind === 'CORROSION') {
+            addStat("Severity Tier:", patch.tier!);
+            addStat("Min. Thickness:", `${patch.worstThickness!.toFixed(2)} mm (${(patch.worstThickness! / nominalThickness * 100).toFixed(1)}%)`);
+            addStat("Avg. Thickness:", `${patch.avgThickness!.toFixed(2)} mm`);
+        }
         addStat("Point Count:", `${patch.pointCount}`);
-        addStat("Bounding Box:", `X: ${patch.coordinates.xMin}-${patch.coordinates.xMax}, Y: ${patch.coordinates.yMin}-${patch.coordinates.yMax}`);
+        addStat("Bounding Box:", `X: ${patch.coordinates.xMin}–${patch.coordinates.xMax}, Y: ${patch.coordinates.yMin}–${patch.coordinates.yMax}`);
         yPos += 5;
         
         pdf.setFont("helvetica", "bold");
         pdf.text("AI-Generated Analysis:", margin, yPos);
         yPos += 6;
         pdf.setFont("helvetica", "normal");
-        const patchSummary = patchSummariesMap.get(patch.id) || "Could not generate AI summary for this patch.";
+        const patchSummary = patch.kind === 'CORROSION' ? (patchSummariesMap.get(patch.id) || "Could not generate AI summary for this patch.") : "This is a non-inspected area. No corrosion data is available.";
         const analysisLines = pdf.splitTextToSize(patchSummary, pageWidth - margin * 2);
         pdf.text(analysisLines, margin, yPos);
         yPos += analysisLines.length * 5 + 10;
         
-        // This is the key change: Use the heatmapDataUrl from the patch object
         if (patch.heatmapDataUrl) {
             pdf.setFont("helvetica", "bold");
             pdf.text("Patch 2D Heatmap:", margin, yPos);
@@ -178,7 +178,7 @@ export function ReportTab({ twoDViewRef, threeDeeViewRef }: ReportTabProps) {
           <CardTitle className="font-headline">Generate PDF Report</CardTitle>
           <CardDescription>
             Configure the report metadata and click generate. The report will include a summary,
-            overall asset views, and detailed pages for each identified corrosion patch.
+            overall asset views, and detailed pages for each identified patch.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -206,7 +206,7 @@ export function ReportTab({ twoDViewRef, threeDeeViewRef }: ReportTabProps) {
               onChange={(e) => setReportMetadata((prev) => ({ ...prev, inspector: e.target.value }))}
             />
           </div>
-          <Button onClick={generatePdf} disabled={isGenerating || !inspectionResult || !segments} className="w-full">
+          <Button onClick={generatePdf} disabled={isGenerating || !inspectionResult || !patches} className="w-full">
             {isGenerating ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             ) : (
@@ -226,7 +226,7 @@ export function ReportTab({ twoDViewRef, threeDeeViewRef }: ReportTabProps) {
           <CardContent>
                 <ul className="list-disc pl-5 space-y-2 text-sm text-muted-foreground">
                     <li>A cover page with the executive summary and overall asset views.</li>
-                    <li>A detailed page for each detected corrosion patch.</li>
+                    <li>A detailed page for each detected corrosion and non-inspected patch.</li>
                     <li>Each patch page includes statistics, an AI-generated analysis, and a dedicated 2D heatmap image.</li>
                 </ul>
           </CardContent>
