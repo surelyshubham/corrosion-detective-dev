@@ -55,14 +55,12 @@ export interface AIInsight {
 }
 
 export type SeverityTier = 'Critical' | 'Severe' | 'Moderate' | 'Normal';
+export type PatchKind = 'CORROSION' | 'NON_INSPECTED';
 
 export interface SegmentBox {
   id: number;
-  tier: SeverityTier;
+  kind: PatchKind;
   pointCount: number;
-  worstThickness: number;
-  avgThickness: number;
-  severityScore: number;
   coordinates: {
     xMin: number;
     xMax: number;
@@ -73,7 +71,13 @@ export interface SegmentBox {
     x: number;
     y: number;
   };
-  // NEW fields for multi-view reporting
+  // Corrosion-specific
+  tier?: SeverityTier;
+  worstThickness?: number;
+  avgThickness?: number;
+  severityScore?: number;
+  
+  // Reporting data
   isoViewDataUrl?: string;
   topViewDataUrl?: string;
   sideViewDataUrl?: string;
@@ -113,7 +117,8 @@ export interface MergedInspectionResult {
   stats: InspectionStats; 
   condition: Condition;
   aiInsight: AIInsight | null;
-  segments: SegmentBox[];
+  corrosionPatches: SegmentBox[];
+  ndPatches: SegmentBox[];
 }
 
 

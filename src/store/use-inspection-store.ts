@@ -30,7 +30,8 @@ export interface WorkerOutput {
   gridMatrix?: MergedGrid;
   stats?: InspectionStats & { nominalThickness: number };
   condition?: MergedInspectionResult['condition'];
-  segments?: SegmentBox[];
+  corrosionPatches?: SegmentBox[];
+  ndPatches?: SegmentBox[];
   
   // CONFLICT output
   conflict?: ThicknessConflict;
@@ -44,10 +45,15 @@ export type ProcessConfig = {
     pipeLength?: number;
 }
 
+export interface PatchState {
+  corrosion: SegmentBox[];
+  nonInspected: SegmentBox[];
+}
+
 interface InspectionState {
   // Final result
   inspectionResult: MergedInspectionResult | null;
-  patches: SegmentBox[] | null; // Changed from segments to patches
+  patches: PatchState | null;
   
   // Staging state
   stagedFiles: StagedFile[];
@@ -79,8 +85,8 @@ interface InspectionState {
   // Interactive state
   selectedPoint: { x: number; y: number } | null;
   setSelectedPoint: (point: { x: number; y: number } | null) => void;
-  selectedPatchId: number | null;
-  selectPatch: (id: number | null) => void;
+  selectedPatchId: string | null; // e.g. "C-1", "ND-5"
+  selectPatch: (id: string | null) => void;
   dataVersion: number;
 }
 
@@ -112,34 +118,11 @@ export const useInspectionStore = create<InspectionState>()(
             } else if (type === 'THICKNESS_CONFLICT') {
                set({ isLoading: false, thicknessConflict: data.conflict || null });
             } else if (type === 'SEGMENTS_UPDATED') {
-              set({ patches: data.segments! }); // Changed from segments to patches
-               // After updating segments, also save to localStorage
-              const existingResult = get().inspectionResult;
-              if (existingResult && data.segments) {
-                   const patchVault: { [key: string]: any } = {};
-                   data.segments.forEach(seg => {
-                       patchVault[seg.id] = {
-                           meta: { ...seg },
-                           images: {
-                               isoViewDataUrl: seg.isoViewDataUrl,
-                               topViewDataUrl: seg.topViewDataUrl,
-                               sideViewDataUrl: seg.sideViewDataUrl,
-                               heatmapDataUrl: seg.heatmapDataUrl,
-                           }
-                       }
-                   });
-                    try {
-                      const serialized = JSON.stringify(patchVault);
-                      localStorage.setItem("patchVault", serialized);
-                      console.log("PatchVault updated and saved to localStorage");
-                    } catch (err) {
-                      console.error("Failed to save updated PatchVault:", err);
-                    }
-              }
-
-
+               if (data.corrosionPatches && data.ndPatches) {
+                    set({ patches: { corrosion: data.corrosionPatches, nonInspected: data.ndPatches } });
+               }
             } else if (type === 'FINALIZED') {
-               if (data.displacementBuffer && data.colorBuffer && data.gridMatrix && data.stats && data.condition && data.plates && data.segments) {
+               if (data.displacementBuffer && data.colorBuffer && data.gridMatrix && data.stats && data.condition && data.plates && data.corrosionPatches && data.ndPatches) {
                   
                   if (data.stats.totalPoints === 0) {
                       set({ isFinalizing: false, error: "Processing Failed: No data points found in the project." });
@@ -161,39 +144,17 @@ export const useInspectionStore = create<InspectionState>()(
                       assetType: data.plates[0].assetType,
                       pipeOuterDiameter: data.plates[0].pipeOuterDiameter,
                       pipeLength: data.plates[0].pipeLength,
-                      segments: data.segments,
+                      corrosionPatches: data.corrosionPatches,
+                      ndPatches: data.ndPatches,
                   };
                   
                   set(state => ({
                       inspectionResult: newResult,
-                      patches: data.segments, // Changed from segments to patches
+                      patches: { corrosion: data.corrosionPatches!, nonInspected: data.ndPatches! },
                       isFinalizing: false,
                       error: null,
                       dataVersion: state.dataVersion + 1,
                   }));
-                   
-                  // Create and save PatchVault to localStorage
-                   const patchVault: { [key: string]: any } = {};
-                   data.segments.forEach(seg => {
-                       patchVault[seg.id] = {
-                           meta: { ...seg },
-                           images: {
-                               isoViewDataUrl: seg.isoViewDataUrl,
-                               topViewDataUrl: seg.topViewDataUrl,
-                               sideViewDataUrl: seg.sideViewDataUrl,
-                               heatmapDataUrl: seg.heatmapDataUrl,
-                           }
-                       }
-                   });
-                   if (typeof window !== "undefined") {
-                      try {
-                          const serialized = JSON.stringify(patchVault);
-                          localStorage.setItem("patchVault", serialized);
-                          console.log("PatchVault saved to localStorage", patchVault);
-                      } catch (err) {
-                          console.error("Failed to save PatchVault:", err);
-                      }
-                  }
 
                   // Fire off AI insight generation
                   set({ isGeneratingAI: true });
@@ -231,7 +192,7 @@ export const useInspectionStore = create<InspectionState>()(
 
       return {
         inspectionResult: null,
-        patches: null, // Changed from segments to patches
+        patches: null,
         stagedFiles: [],
         projectDimensions: null,
         thicknessConflict: null,
@@ -320,7 +281,7 @@ export const useInspectionStore = create<InspectionState>()(
             }
             set({ 
                 inspectionResult: null, 
-                patches: null, // Changed from segments to patches
+                patches: null,
                 stagedFiles: [],
                 projectDimensions: null,
                 selectedPoint: null, 

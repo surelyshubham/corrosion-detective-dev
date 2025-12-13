@@ -1,5 +1,5 @@
 import * as XLSX from 'xlsx';
-import type { MergedGrid, InspectionStats, Condition, Plate, AssetType, SegmentBox, SeverityTier } from '../lib/types';
+import type { MergedGrid, InspectionStats, Condition, Plate, AssetType, SegmentBox, SeverityTier, PatchKind } from '../lib/types';
 import { type MergeFormValues } from '@/components/tabs/merge-alert-dialog';
 import { type ProcessConfig } from '@/store/use-inspection-store';
 
@@ -390,7 +390,7 @@ function parseFileToGrid(rows: any[][], fileName: string) {
 }
 
 // Function to generate a small heatmap Data URL for a specific segment
-function generatePatchHeatmap(grid: MergedGrid, patch: SegmentBox, overallMin: number, overallMax: number): string {
+function generatePatchHeatmap(grid: MergedGrid, patch: SegmentBox, overallMin: number, overallMax: number): Promise<string> {
     const { xMin, xMax, yMin, yMax } = patch.coordinates;
     const patchWidth = xMax - xMin + 1;
     const patchHeight = yMax - yMin + 1;
@@ -399,7 +399,7 @@ function generatePatchHeatmap(grid: MergedGrid, patch: SegmentBox, overallMin: n
     // For simplicity here, we assume a basic canvas-like structure
     const canvas = new OffscreenCanvas(patchWidth, patchHeight);
     const ctx = canvas.getContext('2d');
-    if (!ctx) return '';
+    if (!ctx) return Promise.resolve('');
     
     const imageData = ctx.createImageData(patchWidth, patchHeight);
     const colorRange = overallMax - overallMin;
@@ -430,7 +430,7 @@ function generatePatchHeatmap(grid: MergedGrid, patch: SegmentBox, overallMin: n
             reader.onloadend = () => resolve(reader.result as string);
             reader.readAsDataURL(blob);
         });
-    }) as Promise<string>;
+    });
 }
 
 
@@ -456,7 +456,6 @@ async function segmentAndAnalyze(grid: MergedGrid, nominalInput: number, thresho
                 while (queue.length > 0) {
                     const [curX, curY] = queue.shift()!;
                     const currentCell = grid[curY][curX];
-                     const currentNominalPct = currentCell && currentCell.effectiveThickness && nominal > 0 ? (currentCell.effectiveThickness / nominal) * 100 : 100;
 
                     if (currentCell && currentCell.effectiveThickness !== null) {
                         points.push({ x: curX, y: curY, cell: currentCell });
@@ -486,6 +485,7 @@ async function segmentAndAnalyze(grid: MergedGrid, nominalInput: number, thresho
                     
                     const newSegment: SegmentBox = {
                         id: segmentIdCounter++,
+                        kind: 'CORROSION',
                         tier, pointCount: points.length,
                         worstThickness: minThick,
                         avgThickness: sumThick / points.length,
@@ -506,7 +506,87 @@ async function segmentAndAnalyze(grid: MergedGrid, nominalInput: number, thresho
         return { ...seg, heatmapDataUrl };
     }));
 
-    return segmentsWithImages.sort((a, b) => a.worstThickness - b.worstThickness);
+    return segmentsWithImages.sort((a, b) => a.worstThickness! - b.worstThickness!);
+}
+
+function segmentNonInspected(grid: MergedGrid): SegmentBox[] {
+    const height = grid.length;
+    const width = grid[0]?.length || 0;
+
+    const visited: boolean[][] = Array(height)
+        .fill(null)
+        .map(() => Array(width).fill(false));
+
+    const ndPatches: SegmentBox[] = [];
+    let patchId = 1;
+
+    for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+            const cell = grid[y][x];
+
+            const isND =
+                !cell ||
+                cell.rawThickness === null ||
+                cell.rawThickness === 0 ||
+                cell.effectiveThickness === null;
+
+            if (!isND || visited[y][x]) continue;
+
+            // BFS start
+            const queue: [number, number][] = [[x, y]];
+            visited[y][x] = true;
+
+            let xMin = x, xMax = x, yMin = y, yMax = y;
+            let count = 0;
+
+            while (queue.length) {
+                const [cx, cy] = queue.shift()!;
+                count++;
+
+                xMin = Math.min(xMin, cx);
+                xMax = Math.max(xMax, cx);
+                yMin = Math.min(yMin, cy);
+                yMax = Math.max(yMax, cy);
+
+                const neighbors = [
+                    [cx - 1, cy],
+                    [cx + 1, cy],
+                    [cx, cy - 1],
+                    [cx, cy + 1],
+                ];
+
+                for (const [nx, ny] of neighbors) {
+                    if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+                    if (visited[ny][nx]) continue;
+
+                    const nCell = grid[ny][nx];
+                    const nIsND =
+                        !nCell ||
+                        nCell.rawThickness === null ||
+                        nCell.rawThickness === 0 ||
+                        nCell.effectiveThickness === null;
+
+                    if (nIsND) {
+                        visited[ny][nx] = true;
+                        queue.push([nx, ny]);
+                    }
+                }
+            }
+
+            // Create ND patch (no threshold, no severity)
+            ndPatches.push({
+                id: patchId++,
+                kind: 'NON_INSPECTED',
+                pointCount: count,
+                coordinates: { xMin, xMax, yMin, yMax },
+                center: {
+                    x: Math.round(xMin + (xMax - xMin) / 2),
+                    y: Math.round(yMin + (yMax - yMin) / 2),
+                },
+            });
+        }
+    }
+    return ndPatches;
 }
 
 async function finalizeProcessing(threshold: number) {
@@ -516,7 +596,8 @@ async function finalizeProcessing(threshold: number) {
     FINAL_GRID = createFinalGrid(MASTER_GRID.points, MASTER_GRID.baseConfig.nominalThickness);
     const { stats, condition } = computeStats(FINAL_GRID, MASTER_GRID.baseConfig.nominalThickness);
     const { displacementBuffer, colorBuffer } = createBuffers(FINAL_GRID, MASTER_GRID.baseConfig.nominalThickness, stats.minThickness, stats.maxThickness);
-    const segments = await segmentAndAnalyze(FINAL_GRID, MASTER_GRID.baseConfig.nominalThickness, threshold, stats.minThickness, stats.maxThickness);
+    const corrosionPatches = await segmentAndAnalyze(FINAL_GRID, MASTER_GRID.baseConfig.nominalThickness, threshold, stats.minThickness, stats.maxThickness);
+    const ndPatches = segmentNonInspected(FINAL_GRID);
     
     const plates = MASTER_GRID.plates.map(p => ({
         id: p.name, fileName: p.name, ...p.config
@@ -524,8 +605,16 @@ async function finalizeProcessing(threshold: number) {
     
     self.postMessage({
         type: 'FINALIZED', displacementBuffer, colorBuffer,
-        gridMatrix: FINAL_GRID, stats, condition, plates, segments,
+        gridMatrix: FINAL_GRID, stats, condition, plates, corrosionPatches, ndPatches,
     }, [displacementBuffer.buffer, colorBuffer.buffer]);
+}
+
+async function resegment(threshold: number) {
+    if (!FINAL_GRID || !MASTER_GRID) throw new Error("Cannot resegment: data not finalized.");
+    const { stats } = computeStats(FINAL_GRID, MASTER_GRID.baseConfig.nominalThickness);
+    const corrosionPatches = await segmentAndAnalyze(FINAL_GRID, MASTER_GRID.baseConfig.nominalThickness, threshold, stats.minThickness, stats.maxThickness);
+    const ndPatches = segmentNonInspected(FINAL_GRID); // ND patches don't depend on threshold but good to recalculate
+    self.postMessage({ type: 'SEGMENTS_UPDATED', corrosionPatches, ndPatches });
 }
 
 self.onmessage = async (event: MessageEvent<any>) => {
@@ -610,10 +699,7 @@ self.onmessage = async (event: MessageEvent<any>) => {
         if (type === 'FINALIZE') {
              await finalizeProcessing(payload.threshold);
         } else if (type === 'RESEGMENT') {
-            if (!FINAL_GRID || !MASTER_GRID) return;
-             const { stats } = computeStats(FINAL_GRID, MASTER_GRID.baseConfig.nominalThickness);
-            const segments = await segmentAndAnalyze(FINAL_GRID, MASTER_GRID.baseConfig.nominalThickness, payload.threshold, stats.minThickness, stats.maxThickness);
-            self.postMessage({ type: 'SEGMENTS_UPDATED', segments: segments });
+            await resegment(payload.threshold);
         } else if (type === 'RECOLOR') {
              if (!FINAL_GRID || !MASTER_GRID) return;
              const { stats } = computeStats(FINAL_GRID, MASTER_GRID.baseConfig.nominalThickness);
@@ -627,5 +713,3 @@ self.onmessage = async (event: MessageEvent<any>) => {
 };
 
 export {};
-
-    
