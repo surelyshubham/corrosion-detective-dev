@@ -21,7 +21,7 @@ import type { ReportInput } from "./types";
 import { createCoverPage } from "./sections/coverPage";
 import { buildAssetOverview } from "./sections/assetOverview";
 import { buildInspectionSummary } from "./sections/inspectionSummary";
-import { createLegend } from "./sections/legend";
+import { buildLegend } from "./sections/legend";
 import { createCorrosionPatchesSection } from "./sections/corrosionPatches";
 import { createNdPatchesSection } from "./sections/ndPatches";
 import { createConclusion } from "./sections/conclusion";
@@ -54,7 +54,7 @@ export async function generateInspectionReport(
           new PageBreak(),
 
           // 4️⃣ LEGEND
-          ...createLegend(),
+          ...buildLegend(),
           new PageBreak(),
 
           // 5️⃣ CORROSION PATCHES
