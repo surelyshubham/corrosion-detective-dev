@@ -33,19 +33,26 @@ const assembleReportInput = async (
     throw new Error("View refs are not available");
   }
 
-  // Capture full asset views
+  // 1. DECLARE ALL IMAGE VARIABLES
+  let fullView2D = '';
+  let fullView3DIso = '';
+  let fullView3DTop = '';
+  let fullView3DSide = '';
+
+
+  // 2. CAPTURE IMAGES SEQUENTIALLY
   await threeDeeViewRef.current.resetCamera();
   
-  const fullView2D = twoDViewRef.current.capture();
+  fullView2D = twoDViewRef.current.capture();
 
   await threeDeeViewRef.current.setView('iso');
-  const fullView3DIso = await threeDeeViewRef.current.capture();
+  fullView3DIso = await threeDeeViewRef.current.capture();
 
   await threeDeeViewRef.current.setView('top');
-  const fullView3DTop = await threeDeeViewRef.current.capture();
+  fullView3DTop = await threeDeeViewRef.current.capture();
 
   await threeDeeViewRef.current.setView('side');
-  const fullView3DSide = await threeDeeViewRef.current.capture();
+  fullView3DSide = await threeDeeViewRef.current.capture();
 
   const logoBase64 = await getBase64ImageFromUrl('/logo.png');
 
