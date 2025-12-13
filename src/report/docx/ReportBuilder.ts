@@ -20,7 +20,7 @@ import {
 import type { ReportInput } from "./types";
 import { createCoverPage } from "./sections/coverPage";
 import { buildAssetOverview } from "./sections/assetOverview";
-import { createInspectionSummary } from "./sections/inspectionSummary";
+import { buildInspectionSummary } from "./sections/inspectionSummary";
 import { createLegend } from "./sections/legend";
 import { createCorrosionPatchesSection } from "./sections/corrosionPatches";
 import { createNdPatchesSection } from "./sections/ndPatches";
@@ -50,7 +50,7 @@ export async function generateInspectionReport(
           new PageBreak(),
 
           // 3️⃣ INSPECTION SUMMARY
-          ...createInspectionSummary(input),
+          ...buildInspectionSummary(input),
           new PageBreak(),
 
           // 4️⃣ LEGEND
