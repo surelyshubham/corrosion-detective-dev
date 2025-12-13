@@ -56,7 +56,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
   const pointerRef = useRef<THREE.Vector2 | null>(null)
   
   // Helpers
-  const originAxesRef = useRef<THREE.Group | null>(null)
+  const originAxesRef = useRef<THREE.AxesHelper | null>(null);
   const minMarkerRef = useRef<THREE.Mesh | null>(null)
   const maxMarkerRef = useRef<THREE.Mesh | null>(null)
   const colorTextureRef = useRef<THREE.DataTexture | null>(null)
@@ -78,13 +78,14 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     if (!sceneRef.current || !cameraRef.current || !rendererRef.current || !meshRef.current || !stats) return;
     setIsGeneratingReport(true);
     try {
+        const { width, height } = stats.gridSize;
         rendererRef.current.localClippingEnabled = true;
         const patchImages = await captureAssetPatches({
             scene: sceneRef.current, 
             camera: cameraRef.current, 
             renderer: rendererRef.current, 
-            plateWidth: stats.gridSize.width,
-            plateHeight: stats.gridSize.height,
+            plateWidth: width,
+            plateHeight: height,
         });
         rendererRef.current.localClippingEnabled = false; 
         const metadata = {
@@ -150,15 +151,16 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     controlsRef.current = new OrbitControls(cameraRef.current, rendererRef.current.domElement);
     controlsRef.current.enableDamping = true;
 
+    // Lights
     sceneRef.current.add(new THREE.AmbientLight(0xffffff, 1.0));
     const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
     dirLight.position.set(50, 100, 75);
     sceneRef.current.add(dirLight);
 
+    // --- CORRECT PLATE CREATION (Non-Negotiable) ---
     const { width, height } = currentStats.gridSize;
-    const geometry = new THREE.PlaneGeometry(width, height, width, height);
-    // CRITICAL: Move origin to bottom-left
-    geometry.translate(width / 2, height / 2, 0);
+    const geometry = new THREE.PlaneGeometry(width, height, width - 1, height - 1);
+    geometry.translate(width / 2, height / 2, 0); // Origin at bottom-left
     
     const { displacementBuffer, colorBuffer } = DataVault;
     if (!displacementBuffer || !colorBuffer) return;
@@ -184,14 +186,16 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     });
     
     meshRef.current = new THREE.Mesh(geometry, material);
-    meshRef.current.userData = { type: "plate", width, height };
+    meshRef.current.position.set(0, 0, 0); // No position offset
+    meshRef.current.userData = { width, height, type: "plate" };
     sceneRef.current.add(meshRef.current);
 
-    // Helpers
-    const axesSize = Math.max(width, height) * 0.1;
-    originAxesRef.current = new THREE.AxesHelper(axesSize);
+    // --- AXIS VALIDATION ---
+    originAxesRef.current = new THREE.AxesHelper(Math.max(width, height) * 0.1);
     sceneRef.current.add(originAxesRef.current);
 
+
+    // Handlers
     const handleResize = () => {
       if (rendererRef.current && cameraRef.current && currentMount) {
         cameraRef.current.aspect = currentMount.clientWidth / currentMount.clientHeight;
@@ -201,10 +205,54 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     };
     window.addEventListener('resize', handleResize);
 
-    // Physics-Based Cursor
+    const findNearestInspectionPoint = (x: number, y: number) => {
+        if (!DataVault.gridMatrix) return null;
+        const gridX = Math.round(x);
+        const gridY = Math.round(y);
+        if (gridX >= 0 && gridX < width && gridY >= 0 && gridY < height) {
+            const row = DataVault.gridMatrix[gridY];
+            return row ? row[gridX] : null;
+        }
+        return null;
+    }
+    
+    const hideTooltip = () => setHoveredPoint(null);
+    
+    const showTooltip = (data: any) => {
+        setHoveredPoint(data);
+    }
+    
+    const handlePlateHit = (point: THREE.Vector3, clientX: number, clientY: number) => {
+        if (!meshRef.current) return;
+        const { width, height } = meshRef.current.userData;
+        const x = point.x;
+        const y = point.y;
+
+        if (x < 0 || x > width || y < 0 || y > height) {
+            hideTooltip();
+            return;
+        }
+        
+        const nearest = findNearestInspectionPoint(x, y);
+
+        if (!nearest || nearest.rawThickness === null) {
+            hideTooltip();
+            return;
+        }
+
+        showTooltip({
+            x: Math.round(x),
+            y: Math.round(y),
+            rawThickness: nearest.rawThickness,
+            clientX, 
+            clientY
+        });
+    }
+
     const onPointerMove = ( event: PointerEvent ) => {
       if (!pointerRef.current || !mountRef.current || !raycasterRef.current || !cameraRef.current || !meshRef.current) {
-          setHoveredPoint(null); return;
+          hideTooltip();
+          return;
       }
       const rect = mountRef.current.getBoundingClientRect();
       pointerRef.current.x = ( ( event.clientX - rect.left ) / rect.width ) * 2 - 1;
@@ -213,37 +261,14 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
       raycasterRef.current.setFromCamera( pointerRef.current, cameraRef.current );
       const intersects = raycasterRef.current.intersectObject( meshRef.current );
 
-      if ( intersects.length > 0 && DataVault.gridMatrix) {
-          const hit = intersects[0];
-          const x = hit.point.x;
-          const y = hit.point.y;
-          const { width, height } = meshRef.current.userData;
-
-          // Boundary check
-          if (x < 0 || x > width || y < 0 || y > height) { setHoveredPoint(null); return; }
-
-          // Map to grid (assuming grid points correspond to vertices)
-          const gridX = Math.round(x);
-          const gridY = Math.round(y);
-          
-          if (gridX >= 0 && gridX < width && gridY >= 0 && gridY < height) {
-              const row = DataVault.gridMatrix[gridY];
-              const pointData = row ? row[gridX] : null;
-
-              if (pointData && typeof pointData.rawThickness === 'number' && pointData.rawThickness > 0) {
-                  setHoveredPoint({ x: gridX, y: gridY, ...pointData, clientX: event.clientX, clientY: event.clientY });
-              } else {
-                  setHoveredPoint(null);
-              }
-          } else {
-              setHoveredPoint(null);
-          }
+      if ( intersects.length > 0) {
+          handlePlateHit(intersects[0].point, event.clientX, event.clientY);
       } else {
-          setHoveredPoint(null);
+          hideTooltip();
       }
     };
     currentMount.addEventListener('pointermove', onPointerMove);
-    currentMount.addEventListener('pointerleave', () => setHoveredPoint(null));
+    currentMount.addEventListener('pointerleave', hideTooltip);
 
     // Start
     handleResize();
@@ -255,7 +280,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
       window.removeEventListener('resize', handleResize);
       if (currentMount) {
         currentMount.removeEventListener('pointermove', onPointerMove);
-        currentMount.removeEventListener('pointerleave', () => setHoveredPoint(null));
+        currentMount.removeEventListener('pointerleave', hideTooltip);
         currentMount.innerHTML = '';
       }
       if (rendererRef.current) rendererRef.current.dispose();
@@ -276,8 +301,9 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     };
   }, [isReady]); 
 
+  // Effects
   useEffect(() => {
-    if (isReady && meshRef.current && DataVault.displacementBuffer) {
+    if (isReady && meshRef.current) {
         const material = meshRef.current.material as THREE.MeshStandardMaterial;
         material.displacementScale = zScale;
         material.needsUpdate = true;
@@ -316,6 +342,14 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
             <div className="space-y-3">
               <Label>Z-Axis Scale: {zScale.toFixed(1)}x</Label>
               <Slider value={[zScale]} onValueChange={([val]) => setZScale(val)} min={1} max={100} step={1} />
+            </div>
+            <div className="flex items-center justify-between">
+              <Label htmlFor="ref-plane-switch">Show Reference</Label>
+              <Switch id="ref-plane-switch" checked={showReference} onCheckedChange={setShowReference} />
+            </div>
+            <div className="flex items-center justify-between">
+              <Label htmlFor="min-max-switch">Show Min/Max</Label>
+              <Switch id="min-max-switch" checked={showMinMax} onCheckedChange={setShowMinMax} />
             </div>
              <div className="flex items-center justify-between">
               <Label htmlFor="origin-switch">Show Origin</Label>
@@ -363,3 +397,5 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
   )
 });
 PlateView3D.displayName = "PlateView3D";
+
+    

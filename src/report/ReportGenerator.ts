@@ -1,3 +1,4 @@
+
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 
@@ -106,7 +107,7 @@ export async function generateFinalReport(metadata: any, patches: any[]) {
         `X: ${p.xMin.toFixed(0)}-${p.xMax.toFixed(0)}\nY: ${p.yMin.toFixed(0)}-${p.yMax.toFixed(0)}`,
         p.inspected ? `${p.minThickness.toFixed(2)} mm` : 'N/A',
         p.inspected ? `${p.maxCorrosion.toFixed(1)}%` : 'N/A',
-        p.inspected ? 'Inspected' : 'NOT INSPECTED'
+        p.inspected ? 'INSPECTED' : 'NOT INSPECTED'
     ]);
     
     doc.autoTable({
@@ -123,8 +124,6 @@ export async function generateFinalReport(metadata: any, patches: any[]) {
 
     // --- PATCH PAGES ---
     patches.forEach((patch) => {
-        if (!patch.inspected) return;
-
         doc.addPage();
         addPageStyling();
 
@@ -138,32 +137,42 @@ export async function generateFinalReport(metadata: any, patches: any[]) {
         let sectionY = 25;
         doc.setFontSize(10);
         doc.setTextColor(0,0,0);
+        
+        const status = patch.inspected ? `Min Thickness: ${patch.minThickness.toFixed(2)} mm, Max Corrosion: ${patch.maxCorrosion.toFixed(1)}%` : 'Data not available for this section.';
         doc.text(`Area: X ${patch.xMin.toFixed(0)} - ${patch.xMax.toFixed(0)} mm, Y ${patch.yMin.toFixed(0)} - ${patch.yMax.toFixed(0)} mm`, 10, sectionY);
         sectionY += 7;
-        doc.text(`Findings: Min Thickness: ${patch.minThickness.toFixed(2)} mm, Max Corrosion: ${patch.maxCorrosion.toFixed(1)}%`, 10, sectionY);
+        doc.text(`Findings: ${status}`, 10, sectionY);
         sectionY += 10;
         
-        const imgSize = 92;
-        const gap = 6;
-        const startX = 10;
+        if (patch.inspected) {
+            const imgSize = 92;
+            const gap = 6;
+            const startX = 10;
 
-        const label = (text: string, x: number, y: number) => {
-            doc.setFillColor(0, 0, 0, 0.5);
-            doc.rect(x, y, 25, 5, 'F');
-            doc.setTextColor(255, 255, 255);
-            doc.setFontSize(8);
-            doc.text(text, x + 2, y + 3.5);
-        };
-        
-        if (patch.views.iso) {
-            doc.addImage(patch.views.iso, 'PNG', startX, sectionY, imgSize, imgSize);
-            label("ISO VIEW", startX, sectionY);
-        }
-        if (patch.views.top) {
-            doc.addImage(patch.views.top, 'PNG', startX + imgSize + gap, sectionY, imgSize, imgSize);
-            label("TOP VIEW", startX + imgSize + gap, sectionY);
+            const label = (text: string, x: number, y: number) => {
+                doc.setFillColor(0, 0, 0, 0.5);
+                doc.rect(x, y, 25, 5, 'F');
+                doc.setTextColor(255, 255, 255);
+                doc.setFontSize(8);
+                doc.text(text, x + 2, y + 3.5);
+            };
+            
+            if (patch.views.iso) {
+                doc.addImage(patch.views.iso, 'PNG', startX, sectionY, imgSize, imgSize);
+                label("ISO VIEW", startX, sectionY);
+            }
+            if (patch.views.top) {
+                doc.addImage(patch.views.top, 'PNG', startX + imgSize + gap, sectionY, imgSize, imgSize);
+                label("TOP VIEW", startX + imgSize + gap, sectionY);
+            }
+        } else {
+             doc.setFontSize(12);
+             doc.setTextColor(150, 0, 0);
+             doc.text("This section was marked as NOT INSPECTED due to insufficient data.", w / 2, h / 2, { align: 'center' });
         }
     });
 
     doc.save(`${metadata.assetName}_Section_Report.pdf`);
 }
+
+    
