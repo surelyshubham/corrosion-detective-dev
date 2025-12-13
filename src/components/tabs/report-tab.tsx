@@ -21,83 +21,6 @@ interface ReportTabProps {
   threeDeeViewRef: React.RefObject<any>;
 }
 
-const assembleReportInput = async (
-  inspectionResult: any,
-  patches: any,
-  metadata: any,
-  viewRefs: ReportTabProps
-): Promise<ReportInput> => {
-  const { twoDViewRef, threeDeeViewRef } = viewRefs;
-
-  if (!twoDViewRef.current || !threeDeeViewRef.current) {
-    throw new Error("View refs are not available");
-  }
-
-  // 1. DECLARE ALL IMAGE VARIABLES
-  let fullView2D = '';
-  let fullView3DIso = '';
-  let fullView3DTop = '';
-  let fullView3DSide = '';
-
-
-  // 2. CAPTURE IMAGES SEQUENTIALLY
-  await threeDeeViewRef.current.resetCamera();
-  
-  fullView2D = twoDViewRef.current.capture();
-
-  await threeDeeViewRef.current.setView('iso');
-  fullView3DIso = await threeDeeViewRef.current.capture();
-
-  await threeDeeViewRef.current.setView('top');
-  fullView3DTop = await threeDeeViewRef.current.capture();
-
-  await threeDeeViewRef.current.setView('side');
-  fullView3DSide = await threeDeeViewRef.current.capture();
-
-  const logoBase64 = await getBase64ImageFromUrl('/logo.png');
-
-  const createPatchSet = (patch: SegmentBox, type: 'CORROSION' | 'NON_INSPECTED'): PatchImageSet => ({
-      patchId: `${type === 'CORROSION' ? 'C' : 'ND'}-${patch.id}`,
-      type: type,
-      meta: {
-        xRange: `${patch.coordinates.xMin} - ${patch.coordinates.xMax}`,
-        yRange: `${patch.coordinates.yMin} - ${patch.coordinates.yMax}`,
-        area: patch.pointCount,
-        minThickness: patch.worstThickness?.toFixed(2),
-        avgThickness: patch.avgThickness?.toFixed(2),
-        severity: patch.tier,
-      },
-      images: {
-          view2D: patch.heatmapDataUrl || '', 
-          view3DTop: DataVault.patchSnapshots.find(s => s.patchId === String(patch.id) && s.patchType === type && s.view === 'TOP')?.image || 'placeholder',
-          view3DSide: DataVault.patchSnapshots.find(s => s.patchId === String(patch.id) && s.patchType === type && s.view === 'SIDE')?.image || 'placeholder',
-          view3DIso: DataVault.patchSnapshots.find(s => s.patchId === String(patch.id) && s.patchType === type && s.view === 'ISO')?.image || 'placeholder',
-      }
-  });
-
-  return {
-    assetInfo: {
-      clientName: metadata.clientName,
-      assetTag: metadata.assetTag,
-      operatorName: metadata.operatorName,
-      inspectionDate: new Date().toLocaleDateString(),
-      method: metadata.method,
-      reportId: `REP-${Date.now()}`,
-      logoBase64,
-    },
-    fullAssetImages: {
-      view2D: fullView2D,
-      view3DIso,
-      view3DTop,
-      view3DSide,
-    },
-    stats: inspectionResult.stats,
-    aiSummary: inspectionResult.aiInsight?.recommendation ?? "AI summary not available.",
-    corrosionPatches: patches.corrosion.map((p: SegmentBox) => createPatchSet(p, 'CORROSION')),
-    ndPatches: patches.nonInspected.map((p: SegmentBox) => createPatchSet(p, 'NON_INSPECTED')),
-  };
-};
-
 export function ReportTab({ twoDViewRef, threeDeeViewRef }: ReportTabProps) {
   const { inspectionResult, patches } = useInspectionStore();
   const { toast } = useToast();
@@ -108,6 +31,81 @@ export function ReportTab({ twoDViewRef, threeDeeViewRef }: ReportTabProps) {
     operatorName: "AI Inspector",
     method: "Automated Ultrasonic Testing (AUT)",
   });
+
+  const assembleReportInput = async (
+    inspectionResult: any,
+    patches: any,
+    metadata: any
+  ): Promise<ReportInput> => {
+    if (!twoDViewRef.current || !threeDeeViewRef.current) {
+      throw new Error("View refs are not available");
+    }
+
+    /* ✅ DECLARE FIRST (THIS IS THE FIX) */
+    let view2D = "";
+    let view3DTop = "";
+    let view3DSide = "";
+    let view3DIso = "";
+
+    // 1. CAPTURE IMAGES SEQUENTIALLY
+    await threeDeeViewRef.current.resetCamera();
+    
+    view2D = twoDViewRef.current.capture();
+
+    await threeDeeViewRef.current.setView('iso');
+    view3DIso = await threeDeeViewRef.current.capture();
+
+    await threeDeeViewRef.current.setView('top');
+    view3DTop = await threeDeeViewRef.current.capture();
+
+    await threeDeeViewRef.current.setView('side');
+    view3DSide = await threeDeeViewRef.current.capture();
+
+    console.log("ISO image size:", view3DIso.length); // sanity
+
+    const logoBase64 = await getBase64ImageFromUrl('/logo.png');
+
+    const createPatchSet = (patch: SegmentBox, type: 'CORROSION' | 'NON_INSPECTED'): PatchImageSet => ({
+        patchId: `${type === 'CORROSION' ? 'C' : 'ND'}-${patch.id}`,
+        type: type,
+        meta: {
+          xRange: `${patch.coordinates.xMin} - ${patch.coordinates.xMax}`,
+          yRange: `${patch.coordinates.yMin} - ${patch.coordinates.yMax}`,
+          area: patch.pointCount,
+          minThickness: patch.worstThickness?.toFixed(2),
+          avgThickness: patch.avgThickness?.toFixed(2),
+          severity: patch.tier,
+        },
+        images: {
+            view2D: patch.heatmapDataUrl || '', 
+            view3DTop: DataVault.patchSnapshots.find(s => s.patchId === String(patch.id) && s.patchType === type && s.view === 'TOP')?.image || 'placeholder',
+            view3DSide: DataVault.patchSnapshots.find(s => s.patchId === String(patch.id) && s.patchType === type && s.view === 'SIDE')?.image || 'placeholder',
+            view3DIso: DataVault.patchSnapshots.find(s => s.patchId === String(patch.id) && s.patchType === type && s.view === 'ISO')?.image || 'placeholder',
+        }
+    });
+
+    return {
+      assetInfo: {
+        clientName: metadata.clientName,
+        assetTag: metadata.assetTag,
+        operatorName: metadata.operatorName,
+        inspectionDate: new Date().toLocaleDateString(),
+        method: metadata.method,
+        reportId: `REP-${Date.now()}`,
+        logoBase64,
+      },
+      fullAssetImages: {
+        view2D: view2D,
+        view3DIso,
+        view3DTop,
+        view3DSide,
+      },
+      stats: inspectionResult.stats,
+      aiSummary: inspectionResult.aiInsight?.recommendation ?? "AI summary not available.",
+      corrosionPatches: patches.corrosion.map((p: SegmentBox) => createPatchSet(p, 'CORROSION')),
+      ndPatches: patches.nonInspected.map((p: SegmentBox) => createPatchSet(p, 'NON_INSPECTED')),
+    };
+  };
 
   const generateDocx = async () => {
     if (!inspectionResult || !patches) {
@@ -125,7 +123,7 @@ export function ReportTab({ twoDViewRef, threeDeeViewRef }: ReportTabProps) {
     });
 
     try {
-      const reportInput = await assembleReportInput(inspectionResult, patches, reportMetadata, { twoDViewRef, threeDeeViewRef });
+      const reportInput = await assembleReportInput(inspectionResult, patches, reportMetadata);
       const docxBlob = await generateInspectionReport(reportInput);
       downloadFile(docxBlob, `Inspection_Report_${reportMetadata.assetTag}.docx`);
       toast({
@@ -221,3 +219,5 @@ export function ReportTab({ twoDViewRef, threeDeeViewRef }: ReportTabProps) {
     </div>
   );
 }
+
+    
