@@ -25,7 +25,7 @@ export class PlateEngine {
   // --- geometry mapping ---
   private readonly VISUAL_WIDTH = 100;
   private readonly MAX_SEGMENTS = 250;
-  private visualHeight: number;
+  public visualHeight: number;
   private cellWidth: number;
   private cellHeight: number;
 
@@ -45,10 +45,18 @@ export class PlateEngine {
     this.stats = params.stats;
     this.nominalThickness = params.nominalThickness;
 
-    const { width, height } = this.stats.gridSize;
-    this.visualHeight = this.VISUAL_WIDTH * (height / width);
-    this.cellWidth = this.VISUAL_WIDTH / width;
-    this.cellHeight = this.visualHeight / height;
+    const gridW = this.stats.gridSize.width;
+    const gridH = this.stats.gridSize.height;
+
+    // 🔥 REAL physical aspect (not count-based)
+    const physicalWidth = gridW;
+    const physicalHeight = gridH;
+
+    const aspect = physicalHeight / physicalWidth;
+
+    this.visualHeight = this.VISUAL_WIDTH * aspect;
+    this.cellWidth = this.VISUAL_WIDTH / gridW;
+    this.cellHeight = this.visualHeight / gridH;
 
     this.createPlate();
   }
@@ -162,8 +170,10 @@ export class PlateEngine {
   }
 
   dispose() {
-    this.scene.remove(this.plateMesh);
-    this.plateMesh.geometry.dispose();
-    (this.plateMesh.material as THREE.Material).dispose();
+    if (this.plateMesh) {
+      this.scene.remove(this.plateMesh);
+      this.plateMesh.geometry.dispose();
+      (this.plateMesh.material as THREE.Material).dispose();
+    }
   }
 }

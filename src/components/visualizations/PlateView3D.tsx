@@ -27,7 +27,7 @@ interface PlateView3DProps {}
 export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((props, ref) => {
   const { inspectionResult, dataVersion } = useInspectionStore()
   const mountRef = useRef<HTMLDivElement>(null)
-  const isReady = dataVersion > 0 && !!DataVault.stats && !!DataVault.gridMatrix && !!DataVault.colorBuffer;
+  const isReady = dataVersion > 0 && !!DataVault.stats && !!DataVault.gridMatrix;
   
   const [hoveredPoint, setHoveredPoint] = useState<HoverInfo & { clientX: number, clientY: number } | null>(null);
 
@@ -50,15 +50,13 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
   }, []);
 
   const setView = useCallback((view: 'iso' | 'top' | 'side') => {
-      if (!cameraRef.current || !controlsRef.current || !DataVault.stats) return;
-      const { width, height } = DataVault.stats.gridSize;
-      const aspect = height / width;
-      const VISUAL_WIDTH = 100;
-      const visualHeight = VISUAL_WIDTH * aspect;
+      if (!cameraRef.current || !controlsRef.current || !engineRef.current) return;
 
       controlsRef.current.target.set(0, 0, 0); 
       
-      const distance = Math.max(VISUAL_WIDTH, visualHeight) * 1.5;
+      const VISUAL_WIDTH = 100;
+      const distance = Math.max(VISUAL_WIDTH, engineRef.current.visualHeight) * 1.5;
+      
       switch (view) {
           case 'top': cameraRef.current.position.set(0, 0, distance); cameraRef.current.up.set(0,1,0); break;
           case 'side': cameraRef.current.position.set(-distance, 0, 0); cameraRef.current.up.set(0,0,1); break;
@@ -68,7 +66,21 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
       controlsRef.current.update();
   }, []);
 
-  const resetCamera = useCallback(() => { setView('iso'); }, [setView]);
+  const resetCamera = useCallback(() => { 
+      if (!cameraRef.current || !controlsRef.current || !engineRef.current) return;
+
+      const VISUAL_WIDTH = 100;
+      const distance = Math.max(VISUAL_WIDTH, engineRef.current.visualHeight) * 1.2;
+
+      cameraRef.current.position.set(
+        distance * 0.7,
+        distance * 0.6,
+        distance * 0.7
+      );
+
+      controlsRef.current.target.set(0, 0, 0);
+      controlsRef.current.update();
+  }, []);
 
    useImperativeHandle(ref, () => ({
     capture: () => rendererRef.current!.domElement.toDataURL(),
@@ -124,16 +136,17 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     };
     
     const onMouseMove = (e: MouseEvent) => {
+        if (!engineRef.current || !currentMount) return;
         const rect = currentMount.getBoundingClientRect();
         mouseRef.current.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
         mouseRef.current.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-        engineRef.current?.handleMouseMove(mouseRef.current);
-        if (hoveredPoint) {
-            setHoveredPoint(prev => prev ? {...prev, clientX: e.clientX, clientY: e.clientY} : null);
-        }
+        engineRef.current.handleMouseMove(mouseRef.current);
+        // We update clientX/Y here so the tooltip can follow the cursor
+        setHoveredPoint(prev => prev ? {...prev, clientX: e.clientX, clientY: e.clientY} : null);
     };
     
     currentMount.addEventListener('mousemove', onMouseMove);
+    currentMount.addEventListener('mouseleave', () => setHoveredPoint(null));
     window.addEventListener('resize', handleResize);
     
     resetCamera();
@@ -143,18 +156,19 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
         cancelAnimationFrame(reqRef.current);
         window.removeEventListener('resize', handleResize);
         currentMount.removeEventListener('mousemove', onMouseMove);
+        currentMount.removeEventListener('mouseleave', () => setHoveredPoint(null));
         engineRef.current?.dispose();
         if (rendererRef.current) rendererRef.current.dispose();
         currentMount.innerHTML = '';
     };
-}, [isReady, nominalThickness, animate, resetCamera]);
+}, [isReady, nominalThickness, animate, resetCamera, setView]);
 
   if (!isReady) return <div className="flex items-center justify-center h-full"><Loader2 className="animate-spin" /></div>;
 
   return (
     <div className="grid md:grid-cols-4 gap-6 h-full">
       <div className="md:col-span-3 h-full relative">
-        <Card className="h-full flex flex-col border-blue-500/50 border">
+        <Card className="h-full flex flex-col border">
           <CardHeader>
               <CardTitle className="font-headline">3D Surface Plot</CardTitle>
           </CardHeader>
