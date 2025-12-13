@@ -9,6 +9,8 @@ import { Label } from '../ui/label'
 import { ZoomIn, ZoomOut, RefreshCw } from 'lucide-react'
 import { Button } from '../ui/button'
 import { PlatePercentLegend } from './PlatePercentLegend'
+import { ScrollArea } from '../ui/scroll-area'
+import { PatchTable } from '../patches/PatchTable'
 
 
 const getNiceInterval = (range: number, maxTicks: number): number => {
@@ -90,45 +92,57 @@ export const PlateView2D = forwardRef<PlateView2DRef, PlateView2DProps>((props, 
     }
     
     // Draw patch bounding boxes
-    if (patches?.length) {
-      patches.forEach(patch => {
-        const { xMin, xMax, yMin, yMax } = patch.coordinates
+    if (patches) {
+      const allPatches = [...patches.corrosion, ...patches.nonInspected];
+      allPatches.forEach(patch => {
+        const { xMin, xMax, yMin, yMax } = patch.coordinates;
+        
+        const patchIdString = `${patch.kind === 'CORROSION' ? 'C' : 'ND'}-${patch.id}`;
+        const isSelected = selectedPatchId === patchIdString;
 
-        const isSelected = patch.id === selectedPatchId
-
-        ctx.strokeStyle = isSelected ? '#00ffff' : '#ff00ff'
+        if (patch.kind === 'CORROSION') {
+            ctx.strokeStyle = isSelected ? '#00ffff' : '#ff00ff';
+        } else {
+            ctx.strokeStyle = isSelected ? '#00ffff' : '#ffffff';
+        }
+        
         ctx.lineWidth = isSelected
           ? Math.max(2, 3 * zoom / 10)
-          : Math.max(1, 2 * zoom / 10)
+          : Math.max(1, 2 * zoom / 10);
+          
+        if (patch.kind === 'NON_INSPECTED') {
+            ctx.setLineDash([4, 2]);
+        } else {
+            ctx.setLineDash([]);
+        }
 
         ctx.strokeRect(
           xMin * scaledCellSize,
           yMin * scaledCellSize,
           (xMax - xMin + 1) * scaledCellSize,
           (yMax - yMin + 1) * scaledCellSize
-        )
+        );
 
-        // Optional light fill for selected patch
         if (isSelected) {
-          ctx.fillStyle = 'rgba(0, 255, 255, 0.12)'
+          ctx.fillStyle = 'rgba(0, 255, 255, 0.12)';
           ctx.fillRect(
             xMin * scaledCellSize,
             yMin * scaledCellSize,
             (xMax - xMin + 1) * scaledCellSize,
             (yMax - yMin + 1) * scaledCellSize
-          )
+          );
         }
 
-        // Patch ID label
-        const centerX = (patch.center.x + 0.5) * scaledCellSize
-        const centerY = (patch.center.y + 0.5) * scaledCellSize
+        const centerX = (patch.center.x + 0.5) * scaledCellSize;
+        const centerY = (patch.center.y + 0.5) * scaledCellSize;
 
-        ctx.fillStyle = '#ffffff'
-        ctx.font = `${Math.max(10, 12 * zoom / 10)}px sans-serif`
-        ctx.textAlign = 'center'
-        ctx.textBaseline = 'middle'
-        ctx.fillText(`P${patch.id}`, centerX, centerY)
-      })
+        ctx.fillStyle = '#ffffff';
+        ctx.font = `${Math.max(10, 12 * zoom / 10)}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(patchIdString, centerX, centerY);
+      });
+      ctx.setLineDash([]);
     }
 
     // Draw selected point
@@ -196,8 +210,8 @@ export const PlateView2D = forwardRef<PlateView2DRef, PlateView2DProps>((props, 
     const gridX = Math.floor(x / scaledCellSize);
     const gridY = Math.floor(y / scaledCellSize);
 
-    // 1️⃣ Check patches first (higher priority)
-    const clickedPatch = patches?.find(p =>
+    const allPatches = [...(patches?.corrosion || []), ...(patches?.nonInspected || [])];
+    const clickedPatch = allPatches.find(p =>
         gridX >= p.coordinates.xMin &&
         gridX <= p.coordinates.xMax &&
         gridY >= p.coordinates.yMin &&
@@ -205,11 +219,10 @@ export const PlateView2D = forwardRef<PlateView2DRef, PlateView2DProps>((props, 
     );
 
     if (clickedPatch) {
-        selectPatch(clickedPatch.id);
+        selectPatch(`${clickedPatch.kind === 'CORROSION' ? 'C' : 'ND'}-${clickedPatch.id}`);
         return;
     }
 
-    // 2️⃣ Otherwise select individual point
     if (gridX >= 0 && gridX < gridSize.width && gridY >= 0 && gridY < gridSize.height) {
         selectPatch(null);
         setSelectedPoint({ x: gridX, y: gridY });
@@ -305,32 +318,38 @@ export const PlateView2D = forwardRef<PlateView2DRef, PlateView2DProps>((props, 
             )}
         </CardContent>
       </Card>
-      <div className="md:col-span-1 space-y-4">
-        <Card>
-            <CardHeader>
-                <CardTitle className="font-headline text-lg">Controls</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-                <div className="space-y-2">
-                   <Label>Zoom ({Math.round(zoom*100)}%)</Label>
-                   <div className="flex gap-2">
-                    <Button variant="outline" size="icon" onClick={() => adjustZoom(1.5)}><ZoomIn/></Button>
-                    <Button variant="outline" size="icon" onClick={() => adjustZoom(1/1.5)}><ZoomOut/></Button>
-                    <Button variant="outline" onClick={resetView} className="flex-grow"><RefreshCw className="mr-2"/> Reset</Button>
-                   </div>
-                </div>
-            </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg font-headline">Legend</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <PlatePercentLegend />
-          </CardContent>
-        </Card>
+      <div className="md:col-span-1">
+        <ScrollArea className="h-[calc(100vh-10rem)]">
+          <div className="space-y-4 pr-4">
+            <Card>
+                <CardHeader>
+                    <CardTitle className="font-headline text-lg">Controls</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                    <div className="space-y-2">
+                      <Label>Zoom ({Math.round(zoom*100)}%)</Label>
+                      <div className="flex gap-2">
+                        <Button variant="outline" size="icon" onClick={() => adjustZoom(1.5)}><ZoomIn/></Button>
+                        <Button variant="outline" size="icon" onClick={() => adjustZoom(1/1.5)}><ZoomOut/></Button>
+                        <Button variant="outline" onClick={resetView} className="flex-grow"><RefreshCw className="mr-2"/> Reset</Button>
+                      </div>
+                    </div>
+                </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg font-headline">Legend</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <PlatePercentLegend />
+              </CardContent>
+            </Card>
+            <PatchTable />
+          </div>
+        </ScrollArea>
       </div>
     </div>
   )
 });
 PlateView2D.displayName = "PlateView2D";
+
