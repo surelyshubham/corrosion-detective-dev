@@ -1,3 +1,4 @@
+
 "use client"
 
 import React, { useRef, useEffect, useState, useCallback, useImperativeHandle, forwardRef } from 'react'
@@ -33,7 +34,7 @@ export type PlateView2DRef = {
 interface PlateView2DProps {}
 
 export const PlateView2D = forwardRef<PlateView2DRef, PlateView2DProps>((props, ref) => {
-  const { inspectionResult, selectedPoint, setSelectedPoint, dataVersion, segments } = useInspectionStore()
+  const { inspectionResult, selectedPoint, setSelectedPoint, dataVersion, patches, selectedPatchId, selectPatch } = useInspectionStore()
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const xAxisRef = useRef<HTMLDivElement>(null);
@@ -88,19 +89,46 @@ export const PlateView2D = forwardRef<PlateView2DRef, PlateView2DProps>((props, 
         }
     }
     
-    // Draw segment bounding boxes
-    if (segments) {
-        ctx.strokeStyle = '#ff00ff'; // Magenta for visibility
-        ctx.lineWidth = Math.max(1, 2 * zoom / 10);
-        segments.forEach(segment => {
-            const { xMin, xMax, yMin, yMax } = segment.coordinates;
-            ctx.strokeRect(
-                xMin * scaledCellSize,
-                yMin * scaledCellSize,
-                (xMax - xMin + 1) * scaledCellSize,
-                (yMax - yMin + 1) * scaledCellSize
-            );
-        });
+    // Draw patch bounding boxes
+    if (patches?.length) {
+      patches.forEach(patch => {
+        const { xMin, xMax, yMin, yMax } = patch.coordinates
+
+        const isSelected = patch.id === selectedPatchId
+
+        ctx.strokeStyle = isSelected ? '#00ffff' : '#ff00ff'
+        ctx.lineWidth = isSelected
+          ? Math.max(2, 3 * zoom / 10)
+          : Math.max(1, 2 * zoom / 10)
+
+        ctx.strokeRect(
+          xMin * scaledCellSize,
+          yMin * scaledCellSize,
+          (xMax - xMin + 1) * scaledCellSize,
+          (yMax - yMin + 1) * scaledCellSize
+        )
+
+        // Optional light fill for selected patch
+        if (isSelected) {
+          ctx.fillStyle = 'rgba(0, 255, 255, 0.12)'
+          ctx.fillRect(
+            xMin * scaledCellSize,
+            yMin * scaledCellSize,
+            (xMax - xMin + 1) * scaledCellSize,
+            (yMax - yMin + 1) * scaledCellSize
+          )
+        }
+
+        // Patch ID label
+        const centerX = (patch.center.x + 0.5) * scaledCellSize
+        const centerY = (patch.center.y + 0.5) * scaledCellSize
+
+        ctx.fillStyle = '#ffffff'
+        ctx.font = `${Math.max(10, 12 * zoom / 10)}px sans-serif`
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        ctx.fillText(`P${patch.id}`, centerX, centerY)
+      })
     }
 
     // Draw selected point
@@ -110,7 +138,7 @@ export const PlateView2D = forwardRef<PlateView2DRef, PlateView2DProps>((props, 
         ctx.strokeRect(selectedPoint.x * scaledCellSize, selectedPoint.y * scaledCellSize, scaledCellSize, scaledCellSize);
     }
     
-  }, [gridSize, gridMatrix, dataVersion, zoom, scaledCellSize, selectedPoint, segments]);
+  }, [gridSize, gridMatrix, dataVersion, zoom, scaledCellSize, selectedPoint, patches, selectedPatchId]);
 
   useEffect(() => {
     draw();
@@ -168,7 +196,22 @@ export const PlateView2D = forwardRef<PlateView2DRef, PlateView2DProps>((props, 
     const gridX = Math.floor(x / scaledCellSize);
     const gridY = Math.floor(y / scaledCellSize);
 
+    // 1️⃣ Check patches first (higher priority)
+    const clickedPatch = patches?.find(p =>
+        gridX >= p.coordinates.xMin &&
+        gridX <= p.coordinates.xMax &&
+        gridY >= p.coordinates.yMin &&
+        gridY <= p.coordinates.yMax
+    );
+
+    if (clickedPatch) {
+        selectPatch(clickedPatch.id);
+        return;
+    }
+
+    // 2️⃣ Otherwise select individual point
     if (gridX >= 0 && gridX < gridSize.width && gridY >= 0 && gridY < gridSize.height) {
+        selectPatch(null);
         setSelectedPoint({ x: gridX, y: gridY });
     }
   }
@@ -291,5 +334,3 @@ export const PlateView2D = forwardRef<PlateView2DRef, PlateView2DProps>((props, 
   )
 });
 PlateView2D.displayName = "PlateView2D";
-
-    

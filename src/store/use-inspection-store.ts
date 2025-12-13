@@ -47,7 +47,7 @@ export type ProcessConfig = {
 interface InspectionState {
   // Final result
   inspectionResult: MergedInspectionResult | null;
-  segments: SegmentBox[] | null;
+  patches: SegmentBox[] | null; // Changed from segments to patches
   
   // Staging state
   stagedFiles: StagedFile[];
@@ -79,6 +79,8 @@ interface InspectionState {
   // Interactive state
   selectedPoint: { x: number; y: number } | null;
   setSelectedPoint: (point: { x: number; y: number } | null) => void;
+  selectedPatchId: number | null;
+  selectPatch: (id: number | null) => void;
   dataVersion: number;
 }
 
@@ -110,7 +112,7 @@ export const useInspectionStore = create<InspectionState>()(
             } else if (type === 'THICKNESS_CONFLICT') {
                set({ isLoading: false, thicknessConflict: data.conflict || null });
             } else if (type === 'SEGMENTS_UPDATED') {
-              set({ segments: data.segments! });
+              set({ patches: data.segments! }); // Changed from segments to patches
                // After updating segments, also save to localStorage
               const existingResult = get().inspectionResult;
               if (existingResult && data.segments) {
@@ -164,7 +166,7 @@ export const useInspectionStore = create<InspectionState>()(
                   
                   set(state => ({
                       inspectionResult: newResult,
-                      segments: data.segments,
+                      patches: data.segments, // Changed from segments to patches
                       isFinalizing: false,
                       error: null,
                       dataVersion: state.dataVersion + 1,
@@ -229,7 +231,7 @@ export const useInspectionStore = create<InspectionState>()(
 
       return {
         inspectionResult: null,
-        segments: null,
+        patches: null, // Changed from segments to patches
         stagedFiles: [],
         projectDimensions: null,
         thicknessConflict: null,
@@ -238,6 +240,7 @@ export const useInspectionStore = create<InspectionState>()(
         isGeneratingAI: false,
         loadingProgress: 0,
         selectedPoint: null,
+        selectedPatchId: null,
         dataVersion: 0,
         error: null,
         activeTab: 'setup',
@@ -245,6 +248,7 @@ export const useInspectionStore = create<InspectionState>()(
 
         setActiveTab: (tab) => set({ activeTab: tab }),
         setSelectedPoint: (point) => set({ selectedPoint: point }),
+        selectPatch: (id) => set({ selectedPatchId: id }),
         setThicknessConflict: (conflict) => set({ thicknessConflict: conflict }),
         
         resolveThicknessConflict: (resolution) => {
@@ -316,7 +320,7 @@ export const useInspectionStore = create<InspectionState>()(
             }
             set({ 
                 inspectionResult: null, 
-                segments: null,
+                patches: null, // Changed from segments to patches
                 stagedFiles: [],
                 projectDimensions: null,
                 selectedPoint: null, 
