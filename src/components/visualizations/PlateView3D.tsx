@@ -1,4 +1,3 @@
-
 "use client"
 
 import React, { useRef, useEffect, useState, useCallback } from 'react'
@@ -67,7 +66,6 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
 
   const { nominalThickness, assetType } = inspectionResult || {};
   const stats = DataVault.stats;
-  const VISUAL_WIDTH = 100;
   
   const animate = useCallback(() => {
     if (!rendererRef.current || !sceneRef.current || !cameraRef.current || !controlsRef.current) return;
@@ -77,11 +75,17 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
   }, []);
   
   const handleGenerateReport = async () => {
-    if (!sceneRef.current || !cameraRef.current || !rendererRef.current || !meshRef.current) return;
+    if (!sceneRef.current || !cameraRef.current || !rendererRef.current || !meshRef.current || !stats) return;
     setIsGeneratingReport(true);
     try {
         rendererRef.current.localClippingEnabled = true;
-        const patchImages = await captureAssetPatches(sceneRef.current, cameraRef.current, rendererRef.current, meshRef.current);
+        const patchImages = await captureAssetPatches({
+            scene: sceneRef.current, 
+            camera: cameraRef.current, 
+            renderer: rendererRef.current, 
+            plateWidth: stats.gridSize.width,
+            plateHeight: stats.gridSize.height,
+        });
         rendererRef.current.localClippingEnabled = false; 
         const metadata = {
             assetName: assetType || "N/A",
@@ -103,15 +107,13 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
   const setView = useCallback((view: 'iso' | 'top' | 'side') => {
     if (cameraRef.current && controlsRef.current && stats) {
         const { width, height } = stats.gridSize;
-        const aspect = height / width;
-        const visualHeight = VISUAL_WIDTH * aspect;
-        controlsRef.current.target.set(0, 0, 0); 
+        controlsRef.current.target.set(width / 2, height / 2, 0); 
         
-        const distance = Math.max(VISUAL_WIDTH, visualHeight) * 1.5;
+        const distance = Math.max(width, height) * 1.5;
         switch (view) {
-            case 'top': cameraRef.current.position.set(0, distance, 0.01); break;
-            case 'side': cameraRef.current.position.set(distance, 0, 0); break;
-            case 'iso': default: cameraRef.current.position.set(distance / 2, distance / 2, distance / 2); break;
+            case 'top': cameraRef.current.position.set(width / 2, height/2, distance); break;
+            case 'side': cameraRef.current.position.set(width / 2, -distance, 0); cameraRef.current.lookAt(width/2, height/2, 0); break;
+            case 'iso': default: cameraRef.current.position.set(width + distance/4, height + distance/4, distance/2); break;
         }
         controlsRef.current.update();
     }
@@ -148,22 +150,15 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     controlsRef.current = new OrbitControls(cameraRef.current, rendererRef.current.domElement);
     controlsRef.current.enableDamping = true;
 
-    // Lights
     sceneRef.current.add(new THREE.AmbientLight(0xffffff, 1.0));
     const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
     dirLight.position.set(50, 100, 75);
     sceneRef.current.add(dirLight);
 
-    // Geometry Calculation
     const { width, height } = currentStats.gridSize;
-    const aspect = height / width;
-    const visualHeight = VISUAL_WIDTH * aspect;
-    
-    // *** FIX 1: Exact Segment Count Match ***
-    // Use 'width' and 'height' directly (NOT width-1).
-    // This creates 1 face per data point.
-    const geometry = new THREE.PlaneGeometry(VISUAL_WIDTH, visualHeight, width, height);
-    geometry.center(); 
+    const geometry = new THREE.PlaneGeometry(width, height, width, height);
+    // CRITICAL: Move origin to bottom-left
+    geometry.translate(width / 2, height / 2, 0);
     
     const { displacementBuffer, colorBuffer } = DataVault;
     if (!displacementBuffer || !colorBuffer) return;
@@ -189,38 +184,14 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     });
     
     meshRef.current = new THREE.Mesh(geometry, material);
-    meshRef.current.rotation.x = -Math.PI / 2;
-    meshRef.current.position.set(0, 0, 0);
+    meshRef.current.userData = { type: "plate", width, height };
     sceneRef.current.add(meshRef.current);
 
     // Helpers
-    originAxesRef.current = new THREE.Group();
-    const axesLength = Math.max(VISUAL_WIDTH, visualHeight) * 0.1;
-    const xAxis = new THREE.Mesh(new THREE.CylinderGeometry(axesLength/40, axesLength/40, axesLength), new THREE.MeshBasicMaterial({color: 'red'}));
-    xAxis.position.x = axesLength / 2;
-    xAxis.rotation.z = -Math.PI / 2;
-    const zAxis = new THREE.Mesh(new THREE.CylinderGeometry(axesLength/40, axesLength/40, axesLength), new THREE.MeshBasicMaterial({color: 'blue'}));
-    zAxis.position.z = axesLength / 2;
-    originAxesRef.current.add(xAxis, zAxis);
+    const axesSize = Math.max(width, height) * 0.1;
+    originAxesRef.current = new THREE.AxesHelper(axesSize);
     sceneRef.current.add(originAxesRef.current);
-    originAxesRef.current.position.set(-VISUAL_WIDTH / 2 - 5, 0, -visualHeight / 2 - 5);
 
-    referencePlaneRef.current = new THREE.Mesh(
-      new THREE.PlaneGeometry(VISUAL_WIDTH, visualHeight),
-      new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.3, side: THREE.DoubleSide })
-    );
-    referencePlaneRef.current.rotation.x = -Math.PI / 2;
-    referencePlaneRef.current.position.set(0, 0, 0); 
-    referencePlaneRef.current.visible = showReference;
-    sceneRef.current.add(referencePlaneRef.current);
-
-    const markerGeo = new THREE.ConeGeometry(2, 8, 8);
-    minMarkerRef.current = new THREE.Mesh(markerGeo, new THREE.MeshBasicMaterial({ color: 0xff0000 }));
-    maxMarkerRef.current = new THREE.Mesh(markerGeo, new THREE.MeshBasicMaterial({ color: 0x00ff00 }));
-    sceneRef.current.add(minMarkerRef.current);
-    sceneRef.current.add(maxMarkerRef.current);
-
-    // Handlers
     const handleResize = () => {
       if (rendererRef.current && cameraRef.current && currentMount) {
         cameraRef.current.aspect = currentMount.clientWidth / currentMount.clientHeight;
@@ -230,11 +201,10 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     };
     window.addEventListener('resize', handleResize);
 
-    // *** FIX 2: Pixel-Perfect Face Mapping ***
+    // Physics-Based Cursor
     const onPointerMove = ( event: PointerEvent ) => {
       if (!pointerRef.current || !mountRef.current || !raycasterRef.current || !cameraRef.current || !meshRef.current) {
-          setHoveredPoint(null);
-          return;
+          setHoveredPoint(null); return;
       }
       const rect = mountRef.current.getBoundingClientRect();
       pointerRef.current.x = ( ( event.clientX - rect.left ) / rect.width ) * 2 - 1;
@@ -243,27 +213,24 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
       raycasterRef.current.setFromCamera( pointerRef.current, cameraRef.current );
       const intersects = raycasterRef.current.intersectObject( meshRef.current );
 
-      if ( intersects.length > 0 && DataVault.gridMatrix && intersects[0].face) {
-          // Use Face Index to find exact Square
-          const faceIndex = intersects[0].faceIndex || 0;
-          const quadIndex = Math.floor(faceIndex / 2);
-          
-          const { width, height } = currentStats.gridSize;
-          
-          // Map Square Index to X,Y
-          // Since segments == width, we don't need -1 anymore!
-          const gridX = quadIndex % width;
-          
-          // Invert Y Logic
-          const rawGridY = Math.floor(quadIndex / width);
-          const gridY = (height - 1) - rawGridY;
+      if ( intersects.length > 0 && DataVault.gridMatrix) {
+          const hit = intersects[0];
+          const x = hit.point.x;
+          const y = hit.point.y;
+          const { width, height } = meshRef.current.userData;
 
+          // Boundary check
+          if (x < 0 || x > width || y < 0 || y > height) { setHoveredPoint(null); return; }
+
+          // Map to grid (assuming grid points correspond to vertices)
+          const gridX = Math.round(x);
+          const gridY = Math.round(y);
+          
           if (gridX >= 0 && gridX < width && gridY >= 0 && gridY < height) {
               const row = DataVault.gridMatrix[gridY];
               const pointData = row ? row[gridX] : null;
-              
-              // Smart "Ghost" Check
-              if (pointData && typeof pointData.rawThickness === 'number' && !isNaN(pointData.rawThickness) && pointData.rawThickness !== 0) {
+
+              if (pointData && typeof pointData.rawThickness === 'number' && pointData.rawThickness > 0) {
                   setHoveredPoint({ x: gridX, y: gridY, ...pointData, clientX: event.clientX, clientY: event.clientY });
               } else {
                   setHoveredPoint(null);
@@ -309,7 +276,6 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     };
   }, [isReady]); 
 
-  // Effects
   useEffect(() => {
     if (isReady && meshRef.current && DataVault.displacementBuffer) {
         const material = meshRef.current.material as THREE.MeshStandardMaterial;
@@ -320,10 +286,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
 
   useEffect(() => {
     if (originAxesRef.current) originAxesRef.current.visible = showOrigin;
-    if (minMarkerRef.current) minMarkerRef.current.visible = showMinMax;
-    if (maxMarkerRef.current) maxMarkerRef.current.visible = showMinMax;
-    if (referencePlaneRef.current) referencePlaneRef.current.visible = showReference;
-  }, [showOrigin, showMinMax, showReference]);
+  }, [showOrigin]);
 
   if (!isReady) return <div>Loading...</div>;
 
@@ -353,14 +316,6 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
             <div className="space-y-3">
               <Label>Z-Axis Scale: {zScale.toFixed(1)}x</Label>
               <Slider value={[zScale]} onValueChange={([val]) => setZScale(val)} min={1} max={100} step={1} />
-            </div>
-            <div className="flex items-center justify-between">
-              <Label htmlFor="ref-plane-switch">Show Reference</Label>
-              <Switch id="ref-plane-switch" checked={showReference} onCheckedChange={setShowReference} />
-            </div>
-            <div className="flex items-center justify-between">
-              <Label htmlFor="min-max-switch">Show Min/Max</Label>
-              <Switch id="min-max-switch" checked={showMinMax} onCheckedChange={setShowMinMax} />
             </div>
              <div className="flex items-center justify-between">
               <Label htmlFor="origin-switch">Show Origin</Label>
@@ -408,5 +363,3 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
   )
 });
 PlateView3D.displayName = "PlateView3D";
-
-    
