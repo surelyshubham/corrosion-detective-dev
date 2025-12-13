@@ -1,11 +1,12 @@
-import { SectionType, Paragraph } from "docx";
+import { Paragraph, HeadingLevel } from "docx";
+import type { ReportInput } from "../types";
 
-export function createConclusion() {
-  // Placeholder for conclusion section
-  return {
-    properties: {
-      type: SectionType.NEXT_PAGE,
-    },
-    children: [new Paragraph("Conclusion Section - To be implemented")],
-  };
+export function createConclusion(input: ReportInput) {
+  return [
+    new Paragraph({
+      text: "Conclusion",
+      heading: HeadingLevel.HEADING_1,
+    }),
+    // AI-generated + rule-based recommendations will go here
+  ];
 }

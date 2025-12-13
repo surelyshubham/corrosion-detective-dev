@@ -1,3 +1,5 @@
+import { Header, Paragraph, ImageRun, TextRun, Footer, AlignmentType } from "docx";
+
 export const HEADING_1 = "heading1";
 export const HEADING_2 = "heading2";
 
@@ -29,3 +31,45 @@ export const STYLES = {
     },
   ],
 };
+
+
+export function base64ToUint8Array(base64: string) {
+    const binary_string = window.atob(base64.split(',')[1]);
+    const len = binary_string.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+        bytes[i] = binary_string.charCodeAt(i);
+    }
+    return bytes;
+}
+
+
+export function createHeader(assetInfo: any) {
+  return new Header({
+    children: [
+      new Paragraph({
+        children: [
+          new ImageRun({
+            data: base64ToUint8Array(assetInfo.logoBase64),
+            transformation: { width: 120, height: 40 },
+          }),
+          new TextRun({
+            text: "   Robotic Thickness Survey Report",
+            bold: true,
+          }),
+        ],
+      }),
+    ],
+  });
+}
+
+export function createFooter() {
+  return new Footer({
+    children: [
+      new Paragraph({
+        alignment: AlignmentType.CENTER,
+        children: [new TextRun("Page "), new TextRun({ children: ["PAGE_NUMBER"] })],
+      }),
+    ],
+  });
+}

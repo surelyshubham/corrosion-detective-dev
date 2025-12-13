@@ -1,38 +1,76 @@
-import { Document, Packer, Paragraph, TextRun } from "docx";
-import { saveAs } from "file-saver";
+// src/report/docx/ReportBuilder.ts
+
+import {
+  Document,
+  Packer,
+  Paragraph,
+  TextRun,
+  Table,
+  TableRow,
+  TableCell,
+  HeadingLevel,
+  ImageRun,
+  AlignmentType,
+  WidthType,
+  PageBreak,
+  Header,
+  Footer,
+} from "docx";
+
 import type { ReportInput } from "./types";
 import { createCoverPage } from "./sections/coverPage";
+import { createAssetOverview } from "./sections/assetOverview";
+import { createInspectionSummary } from "./sections/inspectionSummary";
+import { createLegend } from "./sections/legend";
+import { createCorrosionPatchesSection } from "./sections/corrosionPatches";
+import { createNdPatchesSection } from "./sections/ndPatches";
+import { createConclusion } from "./sections/conclusion";
+import { createHeader, createFooter, base64ToUint8Array } from "./styles";
 
-export class ReportBuilder {
-  private doc: Document;
+export async function generateInspectionReport(
+  input: ReportInput
+): Promise<Blob> {
 
-  constructor(private input: ReportInput) {
-    this.doc = new Document({
-      sections: [],
-    });
-  }
+  const doc = new Document({
+    sections: [
+      {
+        headers: {
+          default: createHeader(input.assetInfo),
+        },
+        footers: {
+          default: createFooter(),
+        },
+        children: [
+          // 1️⃣ COVER PAGE
+          ...createCoverPage(input),
+          new PageBreak(),
 
-  private async build() {
-    const coverPage = await createCoverPage(this.input.assetInfo);
-    
-    // This is where we will add all the other sections
-    this.doc.addSection(coverPage);
+          // 2️⃣ ASSET OVERVIEW (FULL 2D + 3D + AI INSIGHT)
+          ...createAssetOverview(input),
+          new PageBreak(),
 
-    // TODO: Add other sections
-    // - Asset Overview
-    // - Inspection Summary
-    // - Legend
-    // - Corrosion Patches
-    // - ND Patches
-    // - Conclusion
-  }
+          // 3️⃣ INSPECTION SUMMARY
+          ...createInspectionSummary(input),
+          new PageBreak(),
 
-  public async generate() {
-    await this.build();
+          // 4️⃣ LEGEND
+          ...createLegend(),
+          new PageBreak(),
 
-    Packer.toBlob(this.doc).then((blob) => {
-      saveAs(blob, `Corrosion_Report_${this.input.assetInfo.assetTag}.docx`);
-      console.log("Document created successfully");
-    });
-  }
+          // 5️⃣ CORROSION PATCHES
+          ...createCorrosionPatchesSection(input.corrosionPatches),
+          ...(input.ndPatches.length > 0 ? [new PageBreak()] : []),
+
+          // 6️⃣ ND PATCHES
+          ...createNdPatchesSection(input.ndPatches),
+
+          // 7️⃣ CONCLUSION
+          new PageBreak(),
+          ...createConclusion(input),
+        ],
+      },
+    ],
+  });
+
+  return await Packer.toBlob(doc);
 }

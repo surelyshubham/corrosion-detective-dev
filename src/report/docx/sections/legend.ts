@@ -1,11 +1,11 @@
-import { SectionType, Paragraph } from "docx";
+import { Paragraph, HeadingLevel } from "docx";
 
 export function createLegend() {
-  // Placeholder for legend section
-  return {
-    properties: {
-      type: SectionType.NEXT_PAGE,
-    },
-    children: [new Paragraph("Legend Section - To be implemented")],
-  };
+  return [
+    new Paragraph({
+      text: "Legend",
+      heading: HeadingLevel.HEADING_1,
+    }),
+    // Legend table/image will go here
+  ];
 }

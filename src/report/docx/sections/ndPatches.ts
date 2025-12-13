@@ -1,12 +1,13 @@
-import { SectionType, Paragraph } from "docx";
-import type { ReportInput } from "../types";
+import { Paragraph, HeadingLevel } from "docx";
+import type { PatchImageSet } from "../types";
 
-export function createNdPatchesSection(patches: ReportInput["ndPatches"]) {
-  // Placeholder for ND patches section
-  return {
-    properties: {
-      type: SectionType.NEXT_PAGE,
-    },
-    children: [new Paragraph("ND Patches Section - To be implemented")],
-  };
+export function createNdPatchesSection(patches: PatchImageSet[]) {
+    if (patches.length === 0) return [];
+  return [
+    new Paragraph({
+      text: "Non-Inspected Area Details",
+      heading: HeadingLevel.HEADING_1,
+    }),
+    // Loop over ND patches and create a section for each
+  ];
 }

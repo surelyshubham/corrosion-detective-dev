@@ -1,16 +1,14 @@
-import { SectionType, Paragraph } from "docx";
+import { Paragraph, HeadingLevel } from "docx";
 import type { ReportInput } from "../types";
 
-export function createAssetOverview(
-  assetInfo: ReportInput["assetInfo"],
-  stats: ReportInput["stats"],
-  aiSummary: ReportInput["aiSummary"]
-) {
-  // Placeholder for asset overview section
-  return {
-    properties: {
-      type: SectionType.NEXT_PAGE,
-    },
-    children: [new Paragraph("Asset Overview Section - To be implemented")],
-  };
+export function createAssetOverview(input: ReportInput) {
+  return [
+    new Paragraph({
+      text: "Asset Overview",
+      heading: HeadingLevel.HEADING_1,
+    }),
+
+    // Image grid will go here (2D + 3D)
+    // AI Insight box will go here
+  ];
 }

@@ -1,14 +1,12 @@
-import { SectionType, Paragraph } from "docx";
+import { Paragraph, HeadingLevel } from "docx";
 import type { ReportInput } from "../types";
 
-export function createInspectionSummary(stats: ReportInput["stats"]) {
-  // Placeholder for inspection summary section
-  return {
-    properties: {
-      type: SectionType.NEXT_PAGE,
-    },
-    children: [
-      new Paragraph("Inspection Summary Section - To be implemented"),
-    ],
-  };
+export function createInspectionSummary(input: ReportInput) {
+  return [
+    new Paragraph({
+      text: "Inspection Summary",
+      heading: HeadingLevel.HEADING_1,
+    }),
+    // Statistics table will go here
+  ];
 }
