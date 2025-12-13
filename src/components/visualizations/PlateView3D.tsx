@@ -1,3 +1,4 @@
+
 "use client"
 
 import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react'
@@ -54,26 +55,30 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
   
     const distance = Math.max(120, engineRef.current.visualHeight * 1.2);
   
+    // The target is now the center of the plate in world coordinates
+    const targetX = engineRef.current.VISUAL_WIDTH / 2;
+    const targetZ = engineRef.current.visualHeight / 2;
+    controlsRef.current.target.set(targetX, 0, targetZ);
+  
     switch (view) {
       case "top":
-        cameraRef.current.position.set(0, distance, 0.001);
+        cameraRef.current.position.set(targetX, distance, targetZ + 0.001);
         break;
   
       case "side":
-        cameraRef.current.position.set(distance, 0, 0);
+        cameraRef.current.position.set(targetX + distance, 0, targetZ);
         break;
   
       case "iso":
       default:
         cameraRef.current.position.set(
-          distance * 0.7,
+          targetX + distance * 0.7,
           distance * 0.6,
-          distance * 0.7
+          targetZ + distance * 0.7
         );
         break;
     }
   
-    controlsRef.current.target.set(0, 0, 0);
     controlsRef.current.update();
   };
 

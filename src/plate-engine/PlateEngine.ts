@@ -1,3 +1,4 @@
+
 import * as THREE from "three";
 import type { MergedGrid, InspectionStats } from "@/lib/types";
 
@@ -23,7 +24,7 @@ export class PlateEngine {
   private raycaster = new THREE.Raycaster();
   
   // --- geometry mapping ---
-  private readonly VISUAL_WIDTH = 100;
+  public readonly VISUAL_WIDTH = 100;
   private readonly MAX_SEGMENTS = 250;
   public visualHeight: number;
   private cellWidth: number;
@@ -95,6 +96,8 @@ export class PlateEngine {
     );
 
     geom.rotateX(-Math.PI / 2);
+    // 🔑 CRITICAL: Move origin to corner
+    geom.translate(this.VISUAL_WIDTH / 2, 0, this.visualHeight / 2);
     
     const colors: number[] = [];
     const xStep = (gridW - 1) / widthSegments;
@@ -106,7 +109,10 @@ export class PlateEngine {
         const gridY = Math.round(y * yStep);
 
         const cell = this.grid[gridY]?.[gridX];
-        const color = this.getAbsColor(cell?.percentage ?? null);
+        const nominalPercentage = cell && cell.effectiveThickness && this.nominalThickness > 0
+          ? (cell.effectiveThickness / this.nominalThickness) * 100
+          : null;
+        const color = this.getAbsColor(nominalPercentage);
 
         colors.push(color.r, color.g, color.b);
       }
@@ -145,6 +151,7 @@ export class PlateEngine {
       this.visualHeight
     );
     planeGeom.rotateX(-Math.PI / 2);
+    planeGeom.translate(this.VISUAL_WIDTH / 2, 0, this.visualHeight / 2);
   
     this.referencePlane = new THREE.Mesh(
       planeGeom,
@@ -174,8 +181,8 @@ export class PlateEngine {
 
     const { x, z } = hit.point;
 
-    const gridX = Math.floor((x + this.VISUAL_WIDTH / 2) / this.cellWidth);
-    const gridY = Math.floor((z + this.visualHeight / 2) / this.cellHeight);
+    const gridX = Math.floor(x / this.cellWidth);
+    const gridY = Math.floor(z / this.cellHeight);
 
     if (
       gridX < 0 ||
@@ -192,6 +199,10 @@ export class PlateEngine {
       this.hoverCallback?.(null);
       return;
     }
+    
+    const nominalPercentage = cell.effectiveThickness && this.nominalThickness > 0
+      ? (cell.effectiveThickness / this.nominalThickness) * 100
+      : null;
 
     this.hoverCallback?.({
       gridX,
@@ -199,7 +210,7 @@ export class PlateEngine {
       worldX: x,
       worldY: z,
       effectiveThickness: cell.effectiveThickness,
-      percentage: cell.percentage,
+      percentage: nominalPercentage,
     });
   }
 
