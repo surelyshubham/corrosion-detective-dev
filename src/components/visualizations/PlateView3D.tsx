@@ -104,7 +104,6 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
         grid: DataVault.gridMatrix!,
         stats: DataVault.stats!,
         nominalThickness: nominalThickness || 0,
-        colorBuffer: DataVault.colorBuffer!,
     });
 
     engineRef.current.onHover((info) => {

@@ -15,7 +15,6 @@ export class PlateEngine {
   private grid: MergedGrid;
   private stats: InspectionStats;
   private nominalThickness: number;
-  private colorBuffer: Uint8Array;
 
   // --- three.js ---
   private scene: THREE.Scene;
@@ -39,14 +38,12 @@ export class PlateEngine {
     grid: MergedGrid;
     stats: InspectionStats;
     nominalThickness: number;
-    colorBuffer: Uint8Array;
   }) {
     this.scene = params.scene;
     this.camera = params.camera;
     this.grid = params.grid;
     this.stats = params.stats;
     this.nominalThickness = params.nominalThickness;
-    this.colorBuffer = params.colorBuffer;
 
     const { width, height } = this.stats.gridSize;
     this.visualHeight = this.VISUAL_WIDTH * (height / width);
