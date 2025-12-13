@@ -49,38 +49,37 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     rendererRef.current.render(sceneRef.current, cameraRef.current);
   }, []);
 
-  const setView = useCallback((view: 'iso' | 'top' | 'side') => {
-      if (!cameraRef.current || !controlsRef.current || !engineRef.current) return;
+  const setView = async (view: "iso" | "top" | "side") => {
+    if (!cameraRef.current || !controlsRef.current || !engineRef.current) return;
+  
+    const distance = Math.max(120, engineRef.current.visualHeight * 1.2);
+  
+    switch (view) {
+      case "top":
+        cameraRef.current.position.set(0, distance, 0.001);
+        break;
+  
+      case "side":
+        cameraRef.current.position.set(distance, 0, 0);
+        break;
+  
+      case "iso":
+      default:
+        cameraRef.current.position.set(
+          distance * 0.7,
+          distance * 0.6,
+          distance * 0.7
+        );
+        break;
+    }
+  
+    controlsRef.current.target.set(0, 0, 0);
+    controlsRef.current.update();
+  };
 
-      controlsRef.current.target.set(0, 0, 0); 
-      
-      const VISUAL_WIDTH = 100;
-      const distance = Math.max(VISUAL_WIDTH, engineRef.current.visualHeight) * 1.5;
-      
-      switch (view) {
-          case 'top': cameraRef.current.position.set(0, 0, distance); cameraRef.current.up.set(0,1,0); break;
-          case 'side': cameraRef.current.position.set(-distance, 0, 0); cameraRef.current.up.set(0,0,1); break;
-          case 'iso': default: cameraRef.current.position.set(-distance / 2, -distance / 2, distance / 2); cameraRef.current.up.set(0,0,1); break;
-      }
-      controlsRef.current.target.set(0,0,0);
-      controlsRef.current.update();
-  }, []);
-
-  const resetCamera = useCallback(() => { 
-      if (!cameraRef.current || !controlsRef.current || !engineRef.current) return;
-
-      const VISUAL_WIDTH = 100;
-      const distance = Math.max(VISUAL_WIDTH, engineRef.current.visualHeight) * 1.2;
-
-      cameraRef.current.position.set(
-        distance * 0.7,
-        distance * 0.6,
-        distance * 0.7
-      );
-
-      controlsRef.current.target.set(0, 0, 0);
-      controlsRef.current.update();
-  }, []);
+  const resetCamera = async () => {
+    await setView("iso");
+  };
 
    useImperativeHandle(ref, () => ({
     capture: () => rendererRef.current!.domElement.toDataURL(),
@@ -161,7 +160,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
         if (rendererRef.current) rendererRef.current.dispose();
         currentMount.innerHTML = '';
     };
-}, [isReady, nominalThickness, animate, resetCamera, setView]);
+}, [isReady, nominalThickness, animate]);
 
   if (!isReady) return <div className="flex items-center justify-center h-full"><Loader2 className="animate-spin" /></div>;
 

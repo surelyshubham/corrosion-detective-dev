@@ -29,6 +29,11 @@ export class PlateEngine {
   private cellWidth: number;
   private cellHeight: number;
 
+  // --- world frame ---
+  private axesHelper!: THREE.AxesHelper;
+  private originMarker!: THREE.Mesh;
+  private referencePlane!: THREE.Mesh;
+
   // --- cursor ---
   private hoverCallback?: (info: HoverInfo | null) => void;
 
@@ -59,6 +64,7 @@ export class PlateEngine {
     this.cellHeight = this.visualHeight / gridH;
 
     this.createPlate();
+    this.createWorldFrame();
   }
 
   private getAbsColor(percentage: number | null): THREE.Color {
@@ -89,7 +95,7 @@ export class PlateEngine {
     );
 
     geom.rotateX(-Math.PI / 2);
-
+    
     const colors: number[] = [];
     const xStep = (gridW - 1) / widthSegments;
     const yStep = (gridH - 1) / heightSegments;
@@ -118,6 +124,41 @@ export class PlateEngine {
 
     this.plateMesh = new THREE.Mesh(geom, mat);
     this.scene.add(this.plateMesh);
+  }
+
+  private createWorldFrame() {
+    // 1️⃣ AXES (X=Red, Y=Green, Z=Blue)
+    this.axesHelper = new THREE.AxesHelper(30);
+    this.scene.add(this.axesHelper);
+  
+    // 2️⃣ ORIGIN MARKER (0,0,0)
+    this.originMarker = new THREE.Mesh(
+      new THREE.SphereGeometry(1.2, 16, 16),
+      new THREE.MeshBasicMaterial({ color: 0xff00ff }) // magenta
+    );
+    this.originMarker.position.set(0, 0, 0);
+    this.scene.add(this.originMarker);
+  
+    // 3️⃣ REFERENCE PLANE (Y = 0)
+    const planeGeom = new THREE.PlaneGeometry(
+      this.VISUAL_WIDTH,
+      this.visualHeight
+    );
+    planeGeom.rotateX(-Math.PI / 2);
+  
+    this.referencePlane = new THREE.Mesh(
+      planeGeom,
+      new THREE.MeshBasicMaterial({
+        color: 0x1e90ff,
+        transparent: true,
+        opacity: 0.25,
+        side: THREE.DoubleSide,
+        depthWrite: false
+      })
+    );
+  
+    this.referencePlane.position.set(0, 0, 0);
+    this.scene.add(this.referencePlane);
   }
 
   // ===============================
@@ -170,10 +211,12 @@ export class PlateEngine {
   }
 
   dispose() {
-    if (this.plateMesh) {
-      this.scene.remove(this.plateMesh);
-      this.plateMesh.geometry.dispose();
-      (this.plateMesh.material as THREE.Material).dispose();
-    }
+    this.scene.remove(this.plateMesh);
+    this.scene.remove(this.axesHelper);
+    this.scene.remove(this.originMarker);
+    this.scene.remove(this.referencePlane);
+  
+    this.plateMesh.geometry.dispose();
+    (this.plateMesh.material as THREE.Material).dispose();
   }
 }
