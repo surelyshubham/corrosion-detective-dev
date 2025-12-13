@@ -67,13 +67,14 @@ export class PlateEngine {
     this.createWorldFrame();
   }
   
-  private getThresholdColor(percentage: number | null): THREE.Color {
+  private getAbsColor(percentage: number | null): THREE.Color {
     const c = new THREE.Color();
-    if (percentage === null) return c.set(0x888888);
-    if (percentage < 70) return c.set(0xff0000);
-    if (percentage < 80) return c.set(0xffff00);
-    if (percentage < 90) return c.set(0x00ff00);
-    return c.set(0x0000ff);
+    if (percentage === null) c.set(0x888888);        // ND
+    else if (percentage < 70) c.set(0xff0000);       // Red
+    else if (percentage < 80) c.set(0xffff00);       // Yellow
+    else if (percentage < 90) c.set(0x00ff00);       // Green
+    else c.set(0x0000ff);                            // Blue
+    return c;
   }
 
 
@@ -95,12 +96,12 @@ export class PlateEngine {
     );
 
     geom.rotateX(-Math.PI / 2);
-    // 🔑 CRITICAL: Move origin to corner
-    geom.translate(this.VISUAL_WIDTH / 2, 0, this.visualHeight / 2);
     
     const colors: number[] = [];
+    const positions = geom.attributes.position;
     const xStep = (gridW - 1) / widthSegments;
     const yStep = (gridH - 1) / heightSegments;
+    const zScale = 10;
 
     for (let y = 0; y <= heightSegments; y++) {
       for (let x = 0; x <= widthSegments; x++) {
@@ -111,9 +112,16 @@ export class PlateEngine {
         const nominalPercentage = cell && cell.effectiveThickness && this.nominalThickness > 0
           ? (cell.effectiveThickness / this.nominalThickness) * 100
           : null;
-        const color = this.getThresholdColor(nominalPercentage);
-
+        const color = this.getAbsColor(nominalPercentage);
         colors.push(color.r, color.g, color.b);
+
+        const wallLoss = cell?.effectiveThickness !== null && this.nominalThickness > 0
+            ? this.nominalThickness - cell.effectiveThickness
+            : 0;
+
+        const i = y * (widthSegments + 1) + x;
+        const z = -wallLoss * zScale;
+        positions.setY(i, z);
       }
     }
 
@@ -121,13 +129,16 @@ export class PlateEngine {
       "color",
       new THREE.Float32BufferAttribute(colors, 3)
     );
+    positions.needsUpdate = true;
+    geom.computeVertexNormals();
 
-    const mat = new THREE.MeshBasicMaterial({
+    const mat = new THREE.MeshStandardMaterial({
       vertexColors: true,
       side: THREE.DoubleSide
     });
 
     this.plateMesh = new THREE.Mesh(geom, mat);
+    this.plateMesh.position.set(this.VISUAL_WIDTH / 2, 0, this.visualHeight / 2);
     this.scene.add(this.plateMesh);
   }
 
@@ -150,7 +161,6 @@ export class PlateEngine {
       this.visualHeight
     );
     planeGeom.rotateX(-Math.PI / 2);
-    planeGeom.translate(this.VISUAL_WIDTH / 2, 0, this.visualHeight / 2);
   
     this.referencePlane = new THREE.Mesh(
       planeGeom,
@@ -163,7 +173,7 @@ export class PlateEngine {
       })
     );
   
-    this.referencePlane.position.set(0, 0, 0);
+    this.referencePlane.position.set(this.VISUAL_WIDTH / 2, 0, this.visualHeight / 2);
     this.scene.add(this.referencePlane);
   }
 
@@ -230,3 +240,5 @@ export class PlateEngine {
     (this.plateMesh.material as THREE.Material).dispose();
   }
 }
+
+    

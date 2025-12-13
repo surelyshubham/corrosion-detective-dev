@@ -14,7 +14,7 @@ import { Switch } from '@/components/ui/switch'
 import { RefreshCw, LocateFixed, Pin, FileText, Loader2 } from 'lucide-react'
 import { useImperativeHandle } from 'react'
 import { PlateEngine, type HoverInfo } from '@/plate-engine'
-import { ColorLegend } from './ColorLegend'
+import { PlatePercentLegend } from './PlatePercentLegend'
 
 export type PlateView3DRef = {
   capture: () => string;
@@ -52,53 +52,38 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     rendererRef.current.render(sceneRef.current, cameraRef.current);
   }, []);
 
-  const setView = async (view: "iso" | "top" | "side") => {
-    if (!cameraRef.current || !controlsRef.current || !engineRef.current) return;
-  
-    const distance = Math.max(120, engineRef.current.visualHeight * 1.2);
-  
-    // The target is now the center of the plate in world coordinates
-    const targetX = engineRef.current.VISUAL_WIDTH / 2;
-    const targetZ = engineRef.current.visualHeight / 2;
-    controlsRef.current.target.set(targetX, 0, targetZ);
-  
-    switch (view) {
-      case "top":
-        cameraRef.current.position.set(targetX, distance, targetZ + 0.001);
-        break;
-  
-      case "side":
-        cameraRef.current.position.set(targetX + distance, 0, targetZ);
-        break;
-  
-      case "iso":
-      default:
-        cameraRef.current.position.set(
-          targetX + distance * 0.7,
-          distance * 0.6,
-          targetZ + distance * 0.7
-        );
-        break;
-    }
-  
-    controlsRef.current.update();
-  };
+const setView = async (view: "iso" | "top" | "side") => {
+  if (!cameraRef.current || !controlsRef.current || !engineRef.current) return;
+
+  const distance = Math.max(120, engineRef.current.visualHeight * 1.2);
+  const targetX = engineRef.current.VISUAL_WIDTH / 2;
+  const targetZ = engineRef.current.visualHeight / 2;
+  controlsRef.current.target.set(targetX, 0, targetZ);
+
+  switch (view) {
+    case "top":
+      cameraRef.current.position.set(targetX, distance, targetZ);
+      break;
+
+    case "side":
+      cameraRef.current.position.set(targetX + distance, 0, targetZ);
+      break;
+
+    case "iso":
+    default:
+      cameraRef.current.position.set(
+        targetX + distance * 0.7,
+        distance * 0.6,
+        targetZ + distance * 0.7
+      );
+      break;
+  }
+  controlsRef.current.update();
+};
   
   const resetCamera = useCallback(async () => {
-     if (!engineRef.current || !cameraRef.current || !controlsRef.current) return;
-    
-    const distance = Math.max(engineRef.current.VISUAL_WIDTH, engineRef.current.visualHeight) * 1.2;
-
-    cameraRef.current.position.set(
-      distance * 0.7,
-      distance * 0.6,
-      distance * 0.7
-    );
-
-    controlsRef.current.target.set(0, 0, 0);
-    controlsRef.current.update();
-
-  }, []);
+    await setView("iso");
+  }, [setView]);
 
 
    useImperativeHandle(ref, () => ({
@@ -109,7 +94,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
   }));
   
   useEffect(() => {
-    if (!isReady || !mountRef.current) return;
+    if (!isReady || !mountRef.current || !DataVault.stats) return;
 
     const currentMount = mountRef.current;
     
@@ -133,11 +118,10 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
         scene: sceneRef.current,
         camera: cameraRef.current,
         grid: DataVault.gridMatrix!,
-        stats: DataVault.stats!,
+        stats: DataVault.stats,
         nominalThickness: nominalThickness || 0,
     });
     
-    // Add reference plane
     const refPlaneGeom = new THREE.PlaneGeometry(
       engineRef.current.VISUAL_WIDTH,
       engineRef.current.visualHeight
@@ -159,9 +143,6 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
       0,
       engineRef.current.visualHeight / 2
     );
-    sceneRef.current.add(refPlaneRef.current);
-    refPlaneRef.current.visible = showReference;
-
 
     engineRef.current.onHover((info) => {
         if(info) {
@@ -204,10 +185,9 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
         currentMount.removeEventListener('mouseleave', () => setHoveredPoint(null));
         engineRef.current?.dispose();
         if (rendererRef.current) rendererRef.current.dispose();
-        if (refPlaneRef.current && sceneRef.current) sceneRef.current.remove(refPlaneRef.current);
         currentMount.innerHTML = '';
     };
-}, [isReady, nominalThickness, animate, showReference]);
+}, [isReady, nominalThickness, animate, setView]);
 
  useEffect(() => {
     if (refPlaneRef.current) {
@@ -265,10 +245,20 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
             <Button variant="outline" onClick={() => setView('iso')}>Isometric</Button>
           </CardContent>
         </Card>
-        <ColorLegend />
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg font-headline">Legend</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <PlatePercentLegend />
+          </CardContent>
+        </Card>
       </div>
     </div>
   )
 });
 PlateView3D.displayName = "PlateView3D";
 
+
+
+    
