@@ -32,6 +32,8 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
   
   const [showReference, setShowReference] = useState(true);
   const [hoveredPoint, setHoveredPoint] = useState<HoverInfo & { clientX: number, clientY: number } | null>(null);
+  const [depthExaggeration, setDepthExaggeration] = useState(10);
+
 
   // Engine and core refs
   const engineRef = useRef<PlateEngine | null>(null);
@@ -44,6 +46,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
   const refPlaneRef = useRef<THREE.Mesh | null>(null);
 
   const { nominalThickness, assetType } = inspectionResult || {};
+  const stats = DataVault.stats;
 
   const animate = useCallback(() => {
     if (!rendererRef.current || !sceneRef.current || !cameraRef.current || !controlsRef.current) return;
@@ -52,34 +55,34 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     rendererRef.current.render(sceneRef.current, cameraRef.current);
   }, []);
 
-const setView = async (view: "iso" | "top" | "side") => {
-  if (!cameraRef.current || !controlsRef.current || !engineRef.current) return;
+  const setView = async (view: "iso" | "top" | "side") => {
+    if (!cameraRef.current || !controlsRef.current || !engineRef.current) return;
 
-  const distance = Math.max(120, engineRef.current.visualHeight * 1.2);
-  const targetX = engineRef.current.VISUAL_WIDTH / 2;
-  const targetZ = engineRef.current.visualHeight / 2;
-  controlsRef.current.target.set(targetX, 0, targetZ);
+    const distance = Math.max(120, engineRef.current.visualHeight * 1.2);
+    const targetX = engineRef.current.VISUAL_WIDTH / 2;
+    const targetZ = engineRef.current.visualHeight / 2;
+    controlsRef.current.target.set(targetX, 0, targetZ);
 
-  switch (view) {
-    case "top":
-      cameraRef.current.position.set(targetX, distance, targetZ);
-      break;
+    switch (view) {
+      case "top":
+        cameraRef.current.position.set(targetX, distance, targetZ);
+        break;
 
-    case "side":
-      cameraRef.current.position.set(targetX + distance, 0, targetZ);
-      break;
+      case "side":
+        cameraRef.current.position.set(targetX + distance, 0, targetZ);
+        break;
 
-    case "iso":
-    default:
-      cameraRef.current.position.set(
-        targetX + distance * 0.7,
-        distance * 0.6,
-        targetZ + distance * 0.7
-      );
-      break;
-  }
-  controlsRef.current.update();
-};
+      case "iso":
+      default:
+        cameraRef.current.position.set(
+          targetX + distance * 0.7,
+          distance * 0.6,
+          targetZ + distance * 0.7
+        );
+        break;
+    }
+    controlsRef.current.update();
+  };
   
   const resetCamera = useCallback(async () => {
     await setView("iso");
@@ -94,7 +97,7 @@ const setView = async (view: "iso" | "top" | "side") => {
   }));
   
   useEffect(() => {
-    if (!isReady || !mountRef.current || !DataVault.stats) return;
+    if (!isReady || !mountRef.current || !DataVault.stats || !nominalThickness) return;
 
     const currentMount = mountRef.current;
     
@@ -119,9 +122,11 @@ const setView = async (view: "iso" | "top" | "side") => {
         camera: cameraRef.current,
         grid: DataVault.gridMatrix!,
         stats: DataVault.stats,
-        nominalThickness: nominalThickness || 0,
+        nominalThickness: nominalThickness,
+        depthExaggeration: depthExaggeration,
     });
     
+    // Create ref plane inside component
     const refPlaneGeom = new THREE.PlaneGeometry(
       engineRef.current.VISUAL_WIDTH,
       engineRef.current.visualHeight
@@ -143,6 +148,8 @@ const setView = async (view: "iso" | "top" | "side") => {
       0,
       engineRef.current.visualHeight / 2
     );
+    sceneRef.current.add(refPlaneRef.current);
+
 
     engineRef.current.onHover((info) => {
         if(info) {
@@ -185,9 +192,10 @@ const setView = async (view: "iso" | "top" | "side") => {
         currentMount.removeEventListener('mouseleave', () => setHoveredPoint(null));
         engineRef.current?.dispose();
         if (rendererRef.current) rendererRef.current.dispose();
+        if (refPlaneRef.current) sceneRef.current?.remove(refPlaneRef.current);
         currentMount.innerHTML = '';
     };
-}, [isReady, nominalThickness, animate, setView]);
+}, [isReady, nominalThickness, animate, setView, depthExaggeration]);
 
  useEffect(() => {
     if (refPlaneRef.current) {
@@ -226,6 +234,10 @@ const setView = async (view: "iso" | "top" | "side") => {
             <CardTitle className="text-lg font-headline">Controls</CardTitle>
           </CardHeader>
           <CardContent className="space-y-6">
+             <div className="space-y-3">
+              <Label>Depth Exaggeration: {depthExaggeration.toFixed(1)}x</Label>
+              <Slider value={[depthExaggeration]} onValueChange={([val]) => setDepthExaggeration(val)} min={1} max={50} step={0.5} />
+            </div>
              <div className="flex items-center justify-between">
               <Label htmlFor="ref-switch" className="flex items-center gap-2"><LocateFixed className="h-4 w-4" />Show Reference Plane</Label>
               <Switch id="ref-switch" checked={showReference} onCheckedChange={setShowReference} />
@@ -258,7 +270,5 @@ const setView = async (view: "iso" | "top" | "side") => {
   )
 });
 PlateView3D.displayName = "PlateView3D";
-
-
 
     

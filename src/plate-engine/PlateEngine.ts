@@ -16,6 +16,7 @@ export class PlateEngine {
   private grid: MergedGrid;
   private stats: InspectionStats;
   private nominalThickness: number;
+  private depthExaggeration: number;
 
   // --- three.js ---
   private scene: THREE.Scene;
@@ -33,7 +34,6 @@ export class PlateEngine {
   // --- world frame ---
   private axesHelper!: THREE.AxesHelper;
   private originMarker!: THREE.Mesh;
-  private referencePlane!: THREE.Mesh;
 
   // --- cursor ---
   private hoverCallback?: (info: HoverInfo | null) => void;
@@ -44,12 +44,14 @@ export class PlateEngine {
     grid: MergedGrid;
     stats: InspectionStats;
     nominalThickness: number;
+    depthExaggeration: number;
   }) {
     this.scene = params.scene;
     this.camera = params.camera;
     this.grid = params.grid;
     this.stats = params.stats;
     this.nominalThickness = params.nominalThickness;
+    this.depthExaggeration = params.depthExaggeration;
 
     const MAX_VISUAL_SIZE = 100;
     const plateWidth = this.stats.gridSize.width;
@@ -57,7 +59,7 @@ export class PlateEngine {
 
     const scaleFactor = MAX_VISUAL_SIZE / Math.max(plateWidth, plateHeight);
 
-    this.VISUAL_WIDTH  = plateWidth  * scaleFactor;
+    this.VISUAL_WIDTH = plateWidth * scaleFactor;
     this.visualHeight = plateHeight * scaleFactor;
 
     this.cellWidth = this.VISUAL_WIDTH / this.stats.gridSize.width;
@@ -96,12 +98,13 @@ export class PlateEngine {
     );
 
     geom.rotateX(-Math.PI / 2);
+    geom.translate(this.VISUAL_WIDTH / 2, 0, this.visualHeight / 2);
     
     const colors: number[] = [];
     const positions = geom.attributes.position;
     const xStep = (gridW - 1) / widthSegments;
     const yStep = (gridH - 1) / heightSegments;
-    const zScale = 10;
+    const zScale = this.depthExaggeration;
 
     for (let y = 0; y <= heightSegments; y++) {
       for (let x = 0; x <= widthSegments; x++) {
@@ -109,13 +112,11 @@ export class PlateEngine {
         const gridY = Math.round(y * yStep);
 
         const cell = this.grid[gridY]?.[gridX];
-        const nominalPercentage = cell && cell.effectiveThickness && this.nominalThickness > 0
-          ? (cell.effectiveThickness / this.nominalThickness) * 100
-          : null;
-        const color = this.getAbsColor(nominalPercentage);
+        const percentage = cell?.percentage ?? null;
+        const color = this.getAbsColor(percentage);
         colors.push(color.r, color.g, color.b);
 
-        const wallLoss = cell?.effectiveThickness !== null && this.nominalThickness > 0
+        const wallLoss = (cell && cell.effectiveThickness !== null)
             ? this.nominalThickness - cell.effectiveThickness
             : 0;
 
@@ -138,7 +139,6 @@ export class PlateEngine {
     });
 
     this.plateMesh = new THREE.Mesh(geom, mat);
-    this.plateMesh.position.set(this.VISUAL_WIDTH / 2, 0, this.visualHeight / 2);
     this.scene.add(this.plateMesh);
   }
 
@@ -154,27 +154,6 @@ export class PlateEngine {
     );
     this.originMarker.position.set(0, 0, 0);
     this.scene.add(this.originMarker);
-  
-    // 3️⃣ REFERENCE PLANE (Y = 0)
-    const planeGeom = new THREE.PlaneGeometry(
-      this.VISUAL_WIDTH,
-      this.visualHeight
-    );
-    planeGeom.rotateX(-Math.PI / 2);
-  
-    this.referencePlane = new THREE.Mesh(
-      planeGeom,
-      new THREE.MeshBasicMaterial({
-        color: 0x1e90ff,
-        transparent: true,
-        opacity: 0.25,
-        side: THREE.DoubleSide,
-        depthWrite: false
-      })
-    );
-  
-    this.referencePlane.position.set(this.VISUAL_WIDTH / 2, 0, this.visualHeight / 2);
-    this.scene.add(this.referencePlane);
   }
 
   // ===============================
@@ -209,17 +188,13 @@ export class PlateEngine {
       return;
     }
     
-    const nominalPercentage = cell.effectiveThickness && this.nominalThickness > 0
-      ? (cell.effectiveThickness / this.nominalThickness) * 100
-      : null;
-
     this.hoverCallback?.({
       gridX,
       gridY,
       worldX: x,
       worldY: z,
       effectiveThickness: cell.effectiveThickness,
-      percentage: nominalPercentage,
+      percentage: cell.percentage,
     });
   }
 
@@ -234,7 +209,6 @@ export class PlateEngine {
     this.scene.remove(this.plateMesh);
     this.scene.remove(this.axesHelper);
     this.scene.remove(this.originMarker);
-    this.scene.remove(this.referencePlane);
   
     this.plateMesh.geometry.dispose();
     (this.plateMesh.material as THREE.Material).dispose();
