@@ -1,7 +1,7 @@
 
 "use client";
 
-import React, { useState, useRef } from "react";
+import React, { useState } from "react";
 import { useInspectionStore } from "@/store/use-inspection-store";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -9,14 +9,84 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Loader2, Download, FileText } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-// Note: The DOCX builder will replace the jsPDF implementation
-// import { ReportBuilder } from "@/report/docx/ReportBuilder";
-// import type { ReportInput } from "@/report/docx/types";
+import { generateInspectionReport } from "@/report/docx/ReportBuilder";
+import { downloadFile } from "@/lib/utils";
+import { getBase64ImageFromUrl } from "@/lib/image-utils";
+import type { ReportInput, PatchImageSet } from "@/report/docx/types";
+import type { SegmentBox } from "@/lib/types";
 
 interface ReportTabProps {
   twoDViewRef: React.RefObject<any>;
   threeDeeViewRef: React.RefObject<any>;
 }
+
+const assembleReportInput = async (
+  inspectionResult: any,
+  patches: { corrosion: SegmentBox[]; nonInspected: SegmentBox[] },
+  metadata: any,
+  viewRefs: ReportTabProps
+): Promise<ReportInput> => {
+  const { twoDViewRef, threeDeeViewRef } = viewRefs;
+
+  if (!twoDViewRef.current || !threeDeeViewRef.current) {
+    throw new Error("View refs are not available");
+  }
+
+  // Capture full asset views
+  await threeDeeViewRef.current.resetCamera();
+  const fullView2D = twoDViewRef.current.capture();
+
+  await threeDeeViewRef.current.setView('iso');
+  const fullView3DIso = await threeDeeViewRef.current.capture();
+
+  await threeDeeViewRef.current.setView('top');
+  const fullView3DTop = await threeDeeViewRef.current.capture();
+
+  await threeDeeViewRef.current.setView('side');
+  const fullView3DSide = await threeDeeViewRef.current.capture();
+
+  const logoBase64 = await getBase64ImageFromUrl('/logo.png');
+
+  const createPatchSet = (patch: SegmentBox, type: 'CORROSION' | 'ND'): PatchImageSet => ({
+      patchId: `${type === 'CORROSION' ? 'C' : 'ND'}-${patch.id}`,
+      type: type,
+      meta: {
+        xRange: `${patch.coordinates.xMin} - ${patch.coordinates.xMax}`,
+        yRange: `${patch.coordinates.yMin} - ${patch.coordinates.yMax}`,
+        area: 'N/A', // Placeholder
+        minThickness: patch.worstThickness?.toFixed(2),
+        avgThickness: patch.avgThickness?.toFixed(2),
+        severity: patch.tier,
+      },
+      images: {
+          view2D: patch.heatmapDataUrl || '', 
+          view3DTop: 'placeholder', // These would be captured in a real scenario
+          view3DSide: 'placeholder',
+          view3DIso: 'placeholder',
+      }
+  });
+
+  return {
+    assetInfo: {
+      clientName: metadata.clientName,
+      assetTag: metadata.assetTag,
+      inspectionDate: new Date().toLocaleDateString(),
+      method: metadata.method,
+      reportId: `REP-${Date.now()}`,
+      logoBase64,
+    },
+    fullAssetImages: {
+      view2D: fullView2D,
+      view3DIso,
+      view3DTop,
+      view3DSide,
+    },
+    stats: inspectionResult.stats,
+    aiSummary: inspectionResult.aiInsight?.recommendation ?? "AI summary not available.",
+    corrosionPatches: patches.corrosion.map(p => createPatchSet(p, 'CORROSION')),
+    ndPatches: patches.nonInspected.map(p => createPatchSet(p, 'ND')),
+  };
+};
 
 export function ReportTab({ twoDViewRef, threeDeeViewRef }: ReportTabProps) {
   const { inspectionResult, patches } = useInspectionStore();
@@ -40,16 +110,27 @@ export function ReportTab({ twoDViewRef, threeDeeViewRef }: ReportTabProps) {
     setIsGenerating(true);
     toast({
       title: "Generating Report...",
-      description: "This feature is not fully implemented yet.",
+      description: "Please wait, this may take a moment.",
     });
 
-    // In a future step, this is where we would assemble the ReportInput
-    // and call the ReportBuilder.
-    // const reportInput: ReportInput = { ... };
-    // const builder = new ReportBuilder(reportInput);
-    // await builder.generate();
-
-    setTimeout(() => setIsGenerating(false), 2000); // Simulate generation
+    try {
+      const reportInput = await assembleReportInput(inspectionResult, patches, reportMetadata, { twoDViewRef, threeDeeViewRef });
+      const docxBlob = await generateInspectionReport(reportInput);
+      downloadFile(docxBlob, `Inspection_Report_${reportMetadata.assetTag}.docx`);
+      toast({
+        title: "Report Generated!",
+        description: "Your DOCX file has been downloaded.",
+      });
+    } catch (error) {
+      console.error("Report generation failed:", error);
+      toast({
+        variant: "destructive",
+        title: "Generation Failed",
+        description: (error as Error).message || "Could not generate the report.",
+      });
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   return (

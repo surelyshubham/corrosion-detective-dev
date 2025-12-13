@@ -1,3 +1,4 @@
+
 import type { InspectionStats } from "@/lib/types";
 
 export interface ReportInput {
