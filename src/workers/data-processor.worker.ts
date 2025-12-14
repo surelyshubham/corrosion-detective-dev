@@ -549,6 +549,34 @@ function segmentNonInspected(grid: MergedGrid): SegmentBox[] {
     return ndPatches.sort((a,b) => b.pointCount - a.pointCount);
 }
 
+function injectNDGapColumns(
+  masterGrid: MasterGrid,
+  newPlateStartX: number,
+  yResolution: number
+) {
+  const prevMaxX = masterGrid.maxXmm;
+  const step = masterGrid.resolutionX;
+
+  // NO GAP -> DO NOTHING
+  if (newPlateStartX <= prevMaxX + step) return;
+
+  // CREATE PHYSICAL ND COLUMNS
+  for (let x = prevMaxX + step; x < newPlateStartX; x += step) {
+    for (let y = 0; y < masterGrid.height; y++) {
+      masterGrid.points[y].push({
+        plateId: null,
+        rawThickness: null,
+        effectiveThickness: null,
+        percentage: null,
+        xMm: x,
+        yMm: y * yResolution,
+        isND: true
+      });
+    }
+    masterGrid.width++;
+  }
+}
+
 async function finalizeProcessing(threshold: number) {
     if (!MASTER_GRID) throw new Error("Cannot finalize: MASTER_GRID is not initialized.");
     self.postMessage({ type: 'PROGRESS', progress: 50, message: 'Processing merged data...' });
@@ -640,29 +668,18 @@ self.onmessage = async (event: MessageEvent<any>) => {
             }
             
             const newPlateData = parseFileToGrid(rows, file.name, indexStart, indexResolution);
-            
-            const prevMaxX = MASTER_GRID.maxXmm;
-            const newStartX = newPlateData.minXmm;
-            const step = MASTER_GRID.resolutionX;
 
-            // Insert ND gap if it exists
-            if (newStartX > prevMaxX + step) {
-                 for (let x = prevMaxX + step; x < newStartX; x += step) {
-                    for (let y = 0; y < MASTER_GRID.height; y++) {
-                        MASTER_GRID.points[y].push({ plateId: null, rawThickness: null, effectiveThickness: null, percentage: null, xMm: x, yMm: y * MASTER_GRID.yResolution, isND: true });
-                    }
-                    MASTER_GRID.width++;
-                 }
-            }
-            
+            // 1. Inject ND gap if it exists
+            injectNDGapColumns(MASTER_GRID, newPlateData.minXmm, MASTER_GRID.yResolution);
+
+            // 2. Now merge the new plate
             const targetHeight = Math.max(MASTER_GRID.height, newPlateData.points.length);
-            const masterWidth = MASTER_GRID.points[0]?.length || 0;
             const newPlateWidth = newPlateData.points[0]?.length || 0;
             
             // Resize master grid height if new plate is taller
             if (targetHeight > MASTER_GRID.height) {
                 for (let y = MASTER_GRID.height; y < targetHeight; y++) {
-                    MASTER_GRID.points.push(Array(masterWidth).fill(null).map((_, i) => ({ plateId: null, rawThickness: null, effectiveThickness: null, percentage: null, xMm: MASTER_GRID.points[0][i].xMm, yMm: y * MASTER_GRID.yResolution, isND: true })));
+                    MASTER_GRID.points.push(Array(MASTER_GRID.width).fill(null).map((_, i) => ({ plateId: null, rawThickness: null, effectiveThickness: null, percentage: null, xMm: MASTER_GRID!.points[0][i].xMm, yMm: y * MASTER_GRID!.yResolution, isND: true })));
                 }
                  MASTER_GRID.height = targetHeight;
             }
@@ -679,8 +696,11 @@ self.onmessage = async (event: MessageEvent<any>) => {
             }
 
             MASTER_GRID.width += newPlateWidth;
-            MASTER_GRID.maxXmm = newPlateData.maxXmm;
+
+            // 3. Update master grid's max X coordinate
+            MASTER_GRID.maxXmm = Math.max(MASTER_GRID.maxXmm, newPlateData.maxXmm);
             MASTER_GRID.plates.push({ name: file.name, config: MASTER_GRID.baseConfig, mergeConfig, detectedNominal: null });
+
             self.postMessage({ type: 'STAGED', dimensions: { width: MASTER_GRID.width, height: MASTER_GRID.height }});
             return;
         }
@@ -695,3 +715,5 @@ self.onmessage = async (event: MessageEvent<any>) => {
 };
 
 export {};
+
+    
