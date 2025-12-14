@@ -112,12 +112,13 @@ function parseFileToPlateData(fileBuffer: ArrayBuffer, fileName: string, config:
       const yMm = yCoords[r];
       const gridRow: GridCell[] = [];
       for (let c = 0; c < xCoords.length; c++) {
-          const xMm = indexStart + xCoords[c] * indexResolution;
+          // The x-coordinate from the excel file is a local index, not a physical measurement
+          const localXIndex = xCoords[c];
           const rawValue = String(row[c + 1]).trim();
           const rawThickness = (rawValue === '' || rawValue === '---' || rawValue === 'ND') ? null : parseFloat(rawValue);
 
           gridRow.push({
-              plateId: fileName, rawThickness, xMm, yMm, isND: rawThickness === null || isNaN(rawThickness),
+              plateId: fileName, rawThickness, xMm: localXIndex, yMm: yMm, isND: rawThickness === null || isNaN(rawThickness),
               effectiveThickness: null, percentage: null,
           });
       }
@@ -203,7 +204,7 @@ function mergePlatesSequentially(plates: PlateData[]): MasterGrid {
     if (plates.length === 0) throw new Error("No plates to merge.");
 
     // Sort plates based on their intended merge position (minXmm as a proxy for sequence)
-    const sortedPlates = [...plates].sort((a,b) => a.minXmm - b.minXmm);
+    const sortedPlates = [...plates].sort((a,b) => (a.mergeConfig?.start ?? 0) - (b.mergeConfig?.start ?? 0));
 
     const maxHeight = Math.max(...sortedPlates.map(p => p.height));
     const firstPlate = sortedPlates[0];
@@ -232,17 +233,37 @@ function mergePlatesSequentially(plates: PlateData[]): MasterGrid {
     return freezeGrid(grid);
 }
 
-// STATS, BUFFERS, AND SEGMENTATION (UNCHANGED LOGIC, OPERATES ON A GRID)
-declare class THREE {
-    static Color: any;
+// Re-implementation of getNormalizedColor without THREE.js
+function hslToRgb(h: number, s: number, l: number): [number, number, number] {
+    let r, g, b;
+    if (s === 0) {
+        r = g = b = l; // achromatic
+    } else {
+        const hue2rgb = (p: number, q: number, t: number) => {
+            if (t < 0) t += 1;
+            if (t > 1) t -= 1;
+            if (t < 1 / 6) return p + (q - p) * 6 * t;
+            if (t < 1 / 2) return q;
+            if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+            return p;
+        };
+        const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+        const p = 2 * l - q;
+        r = hue2rgb(p, q, h + 1 / 3);
+        g = hue2rgb(p, q, h);
+        b = hue2rgb(p, q, h - 1 / 3);
+    }
+    return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
 }
+
 function getNormalizedColor(normalizedPercent: number | null): [number, number, number, number] {
     if (normalizedPercent === null) return [128, 128, 128, 255];
     const p = Math.max(0, Math.min(1, normalizedPercent));
-    const hue = 240 * (1 - p);
-    const [r, g, b] = new THREE.Color().setHSL(hue / 360, 1.0, 0.5).toArray();
-    return [r * 255, g * 255, b * 255, 255];
+    const hue = (240 * (1 - p)) / 360; // Convert hue to 0-1 range for HSL
+    const [r, g, b] = hslToRgb(hue, 1.0, 0.5);
+    return [r, g, b, 255];
 }
+
 
 function computeStats(grid: MergedGrid, nominalInput: number) {
     const nominal = Number(nominalInput) || 0;
@@ -286,8 +307,8 @@ function computeStats(grid: MergedGrid, nominalInput: number) {
     maxThickness = isFinite(maxThickness) ? maxThickness : 0;
     const avgThickness = validPointsCount > 0 ? sumThickness / validPointsCount : 0;
     const minPercentage = nominal > 0 ? (minThickness / nominal) * 100 : 0;
-    const totalScannedPoints = validPointsCount + countND;
-    const scannedAreaM2 = (totalScannedPoints * xResolution * yResolution) / 1_000_000;
+    const scannedCells = validPointsCount + countND;
+    const scannedAreaM2 = (scannedCells * xResolution * yResolution) / 1_000_000;
 
     const stats: InspectionStats = {
         minThickness, maxThickness, avgThickness,
