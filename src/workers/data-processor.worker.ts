@@ -100,7 +100,8 @@ function parseFileToPlateData(fileBuffer: ArrayBuffer, fileName: string, config:
   const xCoords = headerRow.slice(1).map(val => parseFloat(String(val).trim()));
 
   const platePoints: GridCell[][] = [];
-  let minXmm = Infinity, maxXmm = -Infinity;
+  let minXmm = indexStart;
+  let maxXmm = indexStart + (xCoords.length - 1) * indexResolution;
   
   const dataRows = rows.slice(headerRowIndex + 1).filter(row => row && !isNaN(parseFloat(String(row[0]))));
   const yCoords = dataRows.map(row => parseFloat(String(row[0]).trim()));
@@ -112,8 +113,6 @@ function parseFileToPlateData(fileBuffer: ArrayBuffer, fileName: string, config:
       const gridRow: GridCell[] = [];
       for (let c = 0; c < xCoords.length; c++) {
           const xMm = indexStart + xCoords[c] * indexResolution;
-          minXmm = Math.min(minXmm, xMm);
-          maxXmm = Math.max(maxXmm, xMm);
           const rawValue = String(row[c + 1]).trim();
           const rawThickness = (rawValue === '' || rawValue === '---' || rawValue === 'ND') ? null : parseFloat(rawValue);
 
@@ -155,31 +154,42 @@ function appendNDGap(grid: MasterGrid, fromX: number, toX: number) {
     for (let x = fromX; x < toX; x += grid.resolutionX) {
         for (let y = 0; y < grid.height; y++) {
             grid.points[y].push({
-                plateId: null, rawThickness: null, effectiveThickness: null, percentage: null,
-                xMm: x, yMm: y * grid.yResolution, isND: true
+                plateId: null,
+                rawThickness: null,
+                effectiveThickness: null,
+                percentage: null,
+                xMm: x,
+                yMm: y * grid.yResolution,
+                isND: true
             });
         }
         grid.width++;
     }
 }
 
-function appendPlate(grid: MasterGrid, plate: PlateData) {
+function appendPlate(grid: MasterGrid, plate: PlateData, startX: number) {
+    let currentGlobalX = startX;
     for (let col = 0; col < plate.width; col++) {
+        const globalX = startX + col * plate.resolutionX;
         for (let y = 0; y < grid.height; y++) {
-            // If plate is shorter than grid, fill with ND
             const src = plate.points[y]?.[col];
-            if(src) {
-                grid.points[y].push({ ...src });
+            if (src) {
+                grid.points[y].push({ 
+                    ...src,
+                    xMm: globalX, // Recalculate xMm for the master grid
+                    yMm: y * grid.yResolution, // Ensure yMm is consistent
+                });
             } else {
                  grid.points[y].push({
                     plateId: null, rawThickness: null, effectiveThickness: null, percentage: null,
-                    xMm: plate.points[0][col].xMm, yMm: y * grid.yResolution, isND: true
+                    xMm: globalX, yMm: y * grid.yResolution, isND: true
                 });
             }
         }
         grid.width++;
+        currentGlobalX = globalX;
     }
-    grid.maxXmm = Math.max(grid.maxXmm, plate.maxXmm);
+    grid.maxXmm = Math.max(grid.maxXmm, currentGlobalX);
 }
 
 function freezeGrid<T extends { points: any[][] }>(grid: T): T {
@@ -192,32 +202,40 @@ function freezeGrid<T extends { points: any[][] }>(grid: T): T {
 function mergePlatesSequentially(plates: PlateData[]): MasterGrid {
     if (plates.length === 0) throw new Error("No plates to merge.");
 
-    const maxHeight = Math.max(...plates.map(p => p.height));
-    const firstPlate = plates[0];
+    // Sort plates based on their intended merge position (minXmm as a proxy for sequence)
+    const sortedPlates = [...plates].sort((a,b) => a.minXmm - b.minXmm);
+
+    const maxHeight = Math.max(...sortedPlates.map(p => p.height));
+    const firstPlate = sortedPlates[0];
     const yResolution = firstPlate.yResolution;
 
     const grid = createEmptyGrid(maxHeight, yResolution);
     grid.resolutionX = firstPlate.resolutionX;
     grid.baseConfig = firstPlate.config;
     
-    let currentX = 0;
+    let currentX = firstPlate.minXmm;
+    grid.minXmm = currentX;
 
-    for (const plate of plates) {
+    for (const plate of sortedPlates) {
         const plateStartX = plate.minXmm;
         if (plateStartX > currentX) {
             appendNDGap(grid, currentX, plateStartX);
+            currentX = plateStartX;
         }
-        appendPlate(grid, plate);
-        currentX = plate.maxXmm + grid.resolutionX;
+        
+        appendPlate(grid, plate, currentX);
+
+        currentX += plate.width * plate.resolutionX;
     }
     
-    grid.maxXmm = currentX - grid.resolutionX;
+    grid.maxXmm = currentX > grid.minXmm ? currentX - grid.resolutionX : currentX;
     return freezeGrid(grid);
 }
 
-
 // STATS, BUFFERS, AND SEGMENTATION (UNCHANGED LOGIC, OPERATES ON A GRID)
-
+declare class THREE {
+    static Color: any;
+}
 function getNormalizedColor(normalizedPercent: number | null): [number, number, number, number] {
     if (normalizedPercent === null) return [128, 128, 128, 255];
     const p = Math.max(0, Math.min(1, normalizedPercent));
@@ -233,20 +251,20 @@ function computeStats(grid: MergedGrid, nominalInput: number) {
     let worstLocation = { x: 0, y: 0, value: 0 }, bestLocation = { x: 0, y: 0, value: 0 };
     const height = grid.length, width = grid[0]?.length || 0;
 
-    const firstCell = grid[0]?.find(c => c !== null);
-    const resolutionX = grid[0]?.length > 1 && firstCell ? Math.abs(grid[0][1].xMm - grid[0][0].xMm) : 1;
-    const resolutionY = grid.length > 1 && firstCell ? Math.abs(grid[1][0].yMm - grid[0][0].yMm) : 1;
+    const firstValidCell = grid[0]?.find(c => c !== null);
+    const yResolution = grid.length > 1 && grid[0][0] && grid[1][0] ? Math.abs(grid[1][0].yMm - grid[0][0].yMm) : 1;
+    const xResolution = width > 1 && grid[0][0] && grid[0][1] ? Math.abs(grid[0][1].xMm - grid[0][0].xMm) : 1;
     
     for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
             const cell = grid[y][x];
-            if (!cell || cell.isND || cell.effectiveThickness === null) {
+            if (!cell || cell.isND) {
                 if (cell && cell.plateId) countND++;
                 continue;
             }
-            const value = cell.effectiveThickness;
-            if (!isFinite(value)) continue;
+            if (cell.effectiveThickness === null || !isFinite(cell.effectiveThickness)) continue;
 
+            const value = cell.effectiveThickness;
             validPointsCount++;
             sumThickness += value;
             if (value < minThickness) {
@@ -269,14 +287,14 @@ function computeStats(grid: MergedGrid, nominalInput: number) {
     const avgThickness = validPointsCount > 0 ? sumThickness / validPointsCount : 0;
     const minPercentage = nominal > 0 ? (minThickness / nominal) * 100 : 0;
     const totalScannedPoints = validPointsCount + countND;
-    const scannedAreaM2 = (totalScannedPoints * resolutionX * resolutionY) / 1_000_000;
+    const scannedAreaM2 = (totalScannedPoints * xResolution * yResolution) / 1_000_000;
 
     const stats: InspectionStats = {
         minThickness, maxThickness, avgThickness,
         minPercentage: isFinite(minPercentage) ? minPercentage : 0,
-        areaBelow80: totalScannedPoints > 0 ? (areaBelow80 / totalScannedPoints) * 100 : 0,
-        areaBelow70: totalScannedPoints > 0 ? (areaBelow70 / totalScannedPoints) * 100 : 0,
-        areaBelow60: totalScannedPoints > 0 ? (areaBelow60 / totalScannedPoints) * 100 : 0,
+        areaBelow80: validPointsCount > 0 ? (areaBelow80 / validPointsCount) * 100 : 0,
+        areaBelow70: validPointsCount > 0 ? (areaBelow70 / validPointsCount) * 100 : 0,
+        areaBelow60: validPointsCount > 0 ? (areaBelow60 / validPointsCount) * 100 : 0,
         countND, totalPoints: height * width,
         worstLocation, bestLocation,
         gridSize: { width, height },
@@ -304,7 +322,10 @@ function createFinalGrid(rawMergedGrid: GridCell[][], nominalInput: number): Mer
     for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
             const cell = rawMergedGrid[y][x];
-             if (!cell) continue;
+             if (!cell) {
+                finalGrid[y][x] = { plateId: null, rawThickness: null, effectiveThickness: null, percentage: null, isND: true, xMm: 0, yMm: 0 };
+                continue;
+             };
 
             if (cell.isND) {
                 finalGrid[y][x] = { ...cell, effectiveThickness: null, percentage: null };
@@ -599,7 +620,5 @@ self.onmessage = async (event: MessageEvent<any>) => {
 
 // Required to be a module
 export {};
-// For THREE JS
-declare class THREE {
-    static Color: any;
-}
+
+    
