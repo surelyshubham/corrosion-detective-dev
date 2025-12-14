@@ -1,5 +1,4 @@
 
-
 import * as XLSX from 'xlsx';
 import type { MergedGrid, InspectionStats, Condition, Plate, AssetType, SegmentBox, SeverityTier, PatchKind, GridCell, PatchRepresentation } from '../lib/types';
 import { type MergeFormValues } from '@/components/tabs/merge-alert-dialog';
@@ -19,118 +18,211 @@ interface PlateData {
     maxXmm: number;
     resolutionX: number;
     yResolution: number;
+    width: number;
+    height: number;
+    name: string;
+    config: ProcessConfig;
+    mergeConfig: MergeFormValues | null;
+    detectedNominal: number | null;
 }
+
 
 interface MasterGrid {
     points: GridCell[][];
     width: number;
     height: number;
-    plates: { name: string; config: ProcessConfig; mergeConfig: MergeFormValues | null; detectedNominal: number | null }[];
-    baseConfig: ProcessConfig;
     minXmm: number;
     maxXmm: number;
     resolutionX: number;
     yResolution: number;
+    baseConfig: ProcessConfig;
 }
 
 const MICRO_PATCH_THRESHOLD = 10; // points
-let MASTER_GRID: MasterGrid | null = null;
+let STAGED_PLATES: PlateData[] = [];
 let FINAL_GRID: MergedGrid | null = null;
+let FINAL_STATS: InspectionStats | null = null;
+let FINAL_CONDITION: Condition | null = null;
 
-function universalParse(fileBuffer: ArrayBuffer, fileName: string): {rows: any[][], detectedNominal: number | null, indexStart: number, indexResolution: number} {
+// Pure function to parse an Excel file into a structured PlateData object
+function parseFileToPlateData(fileBuffer: ArrayBuffer, fileName: string, config: ProcessConfig, mergeConfig: MergeFormValues | null): PlateData {
   const workbook = XLSX.read(fileBuffer, { type: 'array' });
-  
   const sheetName = workbook.SheetNames[0];
-  if (!sheetName) {
-      throw new Error("No sheets found in the Excel file.");
-  }
+  if (!sheetName) throw new Error("No sheets found in the Excel file.");
+  
   const sheet = workbook.Sheets[sheetName];
   const rows = XLSX.utils.sheet_to_json<any[]>(sheet, { header: 1, defval: '' });
   
   let headerRowIndex = -1;
-  for (let i = 0; i < Math.min(rows.length, 100); i++) { 
-    const row = rows[i];
-    if (!row || row.length < 2) continue;
-    let numberCount = 0;
-    let validCells = 0;
-    for (let j = 1; j < row.length; j++) {
-      const cellVal = row[j];
-      if (cellVal !== '' && cellVal !== null && cellVal !== undefined) {
-        validCells++;
-        const num = parseFloat(String(cellVal).trim());
-        if (!isNaN(num) && isFinite(num)) {
-          numberCount++;
-        }
-      }
-    }
-    if (validCells > 5 && (numberCount / validCells) > 0.8) {
-      headerRowIndex = i;
-      break;
-    }
-  }
-
-  if (headerRowIndex === -1) {
-    throw new Error("Could not detect Header Row. Please check file format.");
-  }
-
-  let detectedNominalThickness: number | null = null;
-  let maxThicknessValue: number | null = null;
+  let detectedNominal: number | null = null;
   let indexStart = 0;
   let indexResolution = 1;
-  
-  for (let i = 0; i < headerRowIndex; i++) {
+
+  // Find header and metadata
+  for (let i = 0; i < Math.min(rows.length, 100); i++) {
     const row = rows[i];
-    if (!row) continue;
+    if (!row || row.length < 2) continue;
     
-    let keyRaw = row[0] ? String(row[0]) : '';
-    let valRaw = row[1] ? String(row[1]) : '';
-    
-    if (keyRaw.includes('=')) {
-      const parts = keyRaw.split('=');
-      keyRaw = parts[0].trim();
-      valRaw = parts.slice(1).join('=').trim();
-    } else {
-        keyRaw = keyRaw.trim();
-        valRaw = valRaw.trim();
+    if (headerRowIndex === -1) {
+        let numberCount = 0;
+        let validCells = 0;
+        for (let j = 1; j < row.length; j++) {
+            const cellVal = row[j];
+            if (cellVal !== '' && cellVal !== null) {
+                validCells++;
+                if (!isNaN(parseFloat(String(cellVal)))) numberCount++;
+            }
+        }
+        if (validCells > 5 && (numberCount / validCells) > 0.8) {
+            headerRowIndex = i;
+        }
     }
 
+    let keyRaw = row[0] ? String(row[0]).trim() : '';
+    let valRaw = row[1] ? String(row[1]).trim() : '';
+    if (keyRaw.includes('=')) {
+        const parts = keyRaw.split('=');
+        keyRaw = parts[0].trim();
+        valRaw = parts.slice(1).join('=').trim();
+    }
     const key = keyRaw.toLowerCase();
-    const valStr = valRaw.trim();
-    const valNum = parseFloat(valStr);
-
-    if (key) {
-        if (key.includes('nominal thickness') && !isNaN(valNum)) detectedNominalThickness = valNum;
-        if (key.includes('max thickness') && !isNaN(valNum)) maxThicknessValue = valNum;
-        if (key.includes('indexstart') && !isNaN(valNum)) indexStart = valNum;
-        if (key.includes('index resol') && !isNaN(valNum)) indexResolution = valNum;
+    const valNum = parseFloat(valRaw);
+    if (!isNaN(valNum)) {
+        if (key.includes('nominal thickness')) detectedNominal = valNum;
+        if (key.includes('indexstart')) indexStart = valNum;
+        if (key.includes('index resol')) indexResolution = valNum;
     }
   }
-  
-  if (detectedNominalThickness === null) detectedNominalThickness = maxThicknessValue;
 
-  return { rows, detectedNominal: detectedNominalThickness, indexStart, indexResolution };
+  if (headerRowIndex === -1) throw new Error(`Could not detect Header Row in ${fileName}.`);
+
+  const headerRow = rows[headerRowIndex];
+  const xCoords = headerRow.slice(1).map(val => parseFloat(String(val).trim()));
+
+  const platePoints: GridCell[][] = [];
+  let minXmm = Infinity, maxXmm = -Infinity;
+  
+  const dataRows = rows.slice(headerRowIndex + 1).filter(row => row && !isNaN(parseFloat(String(row[0]))));
+  const yCoords = dataRows.map(row => parseFloat(String(row[0]).trim()));
+  const yResolution = yCoords.length > 1 ? yCoords[1] - yCoords[0] : 1;
+
+  for (let r = 0; r < dataRows.length; r++) {
+      const row = dataRows[r];
+      const yMm = yCoords[r];
+      const gridRow: GridCell[] = [];
+      for (let c = 0; c < xCoords.length; c++) {
+          const xMm = indexStart + xCoords[c] * indexResolution;
+          minXmm = Math.min(minXmm, xMm);
+          maxXmm = Math.max(maxXmm, xMm);
+          const rawValue = String(row[c + 1]).trim();
+          const rawThickness = (rawValue === '' || rawValue === '---' || rawValue === 'ND') ? null : parseFloat(rawValue);
+
+          gridRow.push({
+              plateId: fileName, rawThickness, xMm, yMm, isND: rawThickness === null || isNaN(rawThickness),
+              effectiveThickness: null, percentage: null,
+          });
+      }
+      platePoints.push(gridRow);
+  }
+
+  return {
+      points: platePoints,
+      width: platePoints[0]?.length || 0,
+      height: platePoints.length,
+      minXmm, maxXmm, resolutionX: indexResolution, yResolution,
+      name: fileName, config, mergeConfig, detectedNominal,
+  };
 }
 
-function getNormalizedColor(normalizedPercent: number | null): [number, number, number, number] {
-    if (normalizedPercent === null) return [128, 128, 128, 255]; // Grey for ND
-    const p = Math.max(0, Math.min(1, normalizedPercent));
-    const hue = 240 * (1 - p); 
-    const saturation = 1;
-    const value = 1;
-    let r=0, g=0, b=0;
-    const i = Math.floor(hue / 60);
-    const f = hue / 60 - i;
-    const p1 = value * (1 - saturation);
-    const p2 = value * (1 - f * saturation);
-    const p3 = value * (1 - (1 - f) * saturation);
-    switch (i % 6) {
-        case 0: r = value; g = p3; b = p1; break;
-        case 1: r = p2; g = value; b = p1; break;
-        case 2: r = p1; g = value; b = p3; break;
-        case 3: r = p1; g = p2; b = value; break;
-        case 4: r = p3; g = p1; b = value; break;
-        case 5: r = value; g = p1; b = p2; break;
+function createEmptyGrid(height: number, yResolution: number): MasterGrid {
+    const points: GridCell[][] = [];
+    for (let y = 0; y < height; y++) {
+        points.push([]);
     }
+    return {
+        points,
+        width: 0,
+        height,
+        minXmm: 0,
+        maxXmm: -Infinity,
+        resolutionX: 1, // Default, will be updated by first plate
+        yResolution: yResolution,
+        baseConfig: {} as ProcessConfig,
+    };
+}
+
+function appendNDGap(grid: MasterGrid, fromX: number, toX: number) {
+    for (let x = fromX; x < toX; x += grid.resolutionX) {
+        for (let y = 0; y < grid.height; y++) {
+            grid.points[y].push({
+                plateId: null, rawThickness: null, effectiveThickness: null, percentage: null,
+                xMm: x, yMm: y * grid.yResolution, isND: true
+            });
+        }
+        grid.width++;
+    }
+}
+
+function appendPlate(grid: MasterGrid, plate: PlateData) {
+    for (let col = 0; col < plate.width; col++) {
+        for (let y = 0; y < grid.height; y++) {
+            // If plate is shorter than grid, fill with ND
+            const src = plate.points[y]?.[col];
+            if(src) {
+                grid.points[y].push({ ...src });
+            } else {
+                 grid.points[y].push({
+                    plateId: null, rawThickness: null, effectiveThickness: null, percentage: null,
+                    xMm: plate.points[0][col].xMm, yMm: y * grid.yResolution, isND: true
+                });
+            }
+        }
+        grid.width++;
+    }
+    grid.maxXmm = Math.max(grid.maxXmm, plate.maxXmm);
+}
+
+function freezeGrid<T extends { points: any[][] }>(grid: T): T {
+    Object.freeze(grid);
+    Object.freeze(grid.points);
+    grid.points.forEach(r => Object.freeze(r));
+    return grid;
+}
+
+function mergePlatesSequentially(plates: PlateData[]): MasterGrid {
+    if (plates.length === 0) throw new Error("No plates to merge.");
+
+    const maxHeight = Math.max(...plates.map(p => p.height));
+    const firstPlate = plates[0];
+    const yResolution = firstPlate.yResolution;
+
+    const grid = createEmptyGrid(maxHeight, yResolution);
+    grid.resolutionX = firstPlate.resolutionX;
+    grid.baseConfig = firstPlate.config;
+    
+    let currentX = 0;
+
+    for (const plate of plates) {
+        const plateStartX = plate.minXmm;
+        if (plateStartX > currentX) {
+            appendNDGap(grid, currentX, plateStartX);
+        }
+        appendPlate(grid, plate);
+        currentX = plate.maxXmm + grid.resolutionX;
+    }
+    
+    grid.maxXmm = currentX - grid.resolutionX;
+    return freezeGrid(grid);
+}
+
+
+// STATS, BUFFERS, AND SEGMENTATION (UNCHANGED LOGIC, OPERATES ON A GRID)
+
+function getNormalizedColor(normalizedPercent: number | null): [number, number, number, number] {
+    if (normalizedPercent === null) return [128, 128, 128, 255];
+    const p = Math.max(0, Math.min(1, normalizedPercent));
+    const hue = 240 * (1 - p);
+    const [r, g, b] = new THREE.Color().setHSL(hue / 360, 1.0, 0.5).toArray();
     return [r * 255, g * 255, b * 255, 255];
 }
 
@@ -141,34 +233,17 @@ function computeStats(grid: MergedGrid, nominalInput: number) {
     let worstLocation = { x: 0, y: 0, value: 0 }, bestLocation = { x: 0, y: 0, value: 0 };
     const height = grid.length, width = grid[0]?.length || 0;
 
-    let resolutionX = 1;
-    let resolutionY = 1;
-
-    // Find first valid cell with plateId to get resolution
-    outerLoop:
+    const firstCell = grid[0]?.find(c => c !== null);
+    const resolutionX = grid[0]?.length > 1 && firstCell ? Math.abs(grid[0][1].xMm - grid[0][0].xMm) : 1;
+    const resolutionY = grid.length > 1 && firstCell ? Math.abs(grid[1][0].yMm - grid[0][0].yMm) : 1;
+    
     for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
             const cell = grid[y][x];
-            if (cell && cell.plateId) {
-                const nextCellX = grid[y][x+1];
-                const nextCellY = grid[y+1]?.[x];
-                if (nextCellX) resolutionX = Math.abs(nextCellX.xMm - cell.xMm);
-                if (nextCellY) resolutionY = Math.abs(nextCellY.yMm - cell.yMm);
-                if (resolutionX > 0 && resolutionY > 0) break outerLoop;
-            }
-        }
-    }
-
-
-    for (let y = 0; y < height; y++) {
-        for (let x = 0; x < width; x++) {
-            const cell = grid[y][x];
-            if (!cell || cell.isND) {
-                if(cell && cell.plateId) countND++;
+            if (!cell || cell.isND || cell.effectiveThickness === null) {
+                if (cell && cell.plateId) countND++;
                 continue;
             }
-            if (cell.effectiveThickness === null) continue;
-
             const value = cell.effectiveThickness;
             if (!isFinite(value)) continue;
 
@@ -182,24 +257,19 @@ function computeStats(grid: MergedGrid, nominalInput: number) {
                 maxThickness = value;
                 bestLocation = { x, y, value };
             }
-            
-            const nominalPercentage = nominal > 0 ? (value / nominal) * 100 : 0;
-            if (nominalPercentage < 80) areaBelow80++;
-            if (nominalPercentage < 70) areaBelow70++;
-            if (nominalPercentage < 60) areaBelow60++;
+            const p = cell.percentage ?? 100;
+            if (p < 80) areaBelow80++;
+            if (p < 70) areaBelow70++;
+            if (p < 60) areaBelow60++;
         }
     }
     
     minThickness = isFinite(minThickness) ? minThickness : 0;
     maxThickness = isFinite(maxThickness) ? maxThickness : 0;
-    
     const avgThickness = validPointsCount > 0 ? sumThickness / validPointsCount : 0;
     const minPercentage = nominal > 0 ? (minThickness / nominal) * 100 : 0;
-    
     const totalScannedPoints = validPointsCount + countND;
-    const scannedAreaMm2 = totalScannedPoints * resolutionX * resolutionY;
-    const scannedAreaM2 = scannedAreaMm2 / 1_000_000;
-
+    const scannedAreaM2 = (totalScannedPoints * resolutionX * resolutionY) / 1_000_000;
 
     const stats: InspectionStats = {
         minThickness, maxThickness, avgThickness,
@@ -224,27 +294,12 @@ function computeStats(grid: MergedGrid, nominalInput: number) {
     return { stats: { ...stats, nominalThickness: nominal }, condition };
 }
 
+
 function createFinalGrid(rawMergedGrid: GridCell[][], nominalInput: number): MergedGrid {
     const nominal = Number(nominalInput) || 0;
     const height = rawMergedGrid.length;
     const width = rawMergedGrid[0]?.length || 0;
     const finalGrid: MergedGrid = Array(height).fill(null).map(() => Array(width).fill(null));
-
-    let minThick = Infinity;
-    let maxThick = -Infinity;
-     for (let y = 0; y < height; y++) {
-        for (let x = 0; x < width; x++) {
-            const cell = rawMergedGrid[y][x];
-            if (cell && !cell.isND && cell.rawThickness !== null && cell.rawThickness > 0) {
-                const effectiveThickness = Math.min(cell.rawThickness, nominal);
-                if(effectiveThickness < minThick) minThick = effectiveThickness;
-                if(effectiveThickness > maxThick) maxThick = effectiveThickness;
-            }
-        }
-    }
-    minThick = isFinite(minThick) ? minThick : 0;
-    maxThick = isFinite(maxThick) ? maxThick : 0;
-    const range = maxThick - minThick;
 
     for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
@@ -265,17 +320,13 @@ function createFinalGrid(rawMergedGrid: GridCell[][], nominalInput: number): Mer
                     percentage = (effectiveThickness / nominal) * 100;
                 }
             }
-            finalGrid[y][x] = {
-                ...cell,
-                effectiveThickness, 
-                percentage
-            };
+            finalGrid[y][x] = { ...cell, effectiveThickness, percentage };
         }
     }
     return finalGrid;
 }
 
-function createBuffers(grid: MergedGrid, nominal: number, min: number, max: number) {
+function createBuffers(grid: MergedGrid, min: number, max: number) {
     const height = grid.length, width = grid[0]?.length || 0;
     const displacementBuffer = new Float32Array(width * height);
     const colorBuffer = new Uint8Array(width * height * 4);
@@ -287,125 +338,37 @@ function createBuffers(grid: MergedGrid, nominal: number, min: number, max: numb
             const index = y * width + x;
             const cell = grid[flippedY][x]; 
             
-            let displacementValue = 0;
-            if (cell && cell.effectiveThickness !== null) {
-                displacementValue = cell.effectiveThickness;
-            }
-            displacementBuffer[index] = isFinite(displacementValue) ? displacementValue : 0;
-
+            displacementBuffer[index] = cell?.effectiveThickness ?? 0;
             const normalizedColorValue = cell && cell.effectiveThickness !== null && colorRange > 0 
                 ? (cell.effectiveThickness - min) / colorRange 
                 : null;
             
             const rgba = getNormalizedColor(normalizedColorValue);
-            const colorIndex = index * 4;
-            [colorBuffer[colorIndex], colorBuffer[colorIndex + 1], colorBuffer[colorIndex + 2], colorBuffer[colorIndex + 3]] = rgba;
+            colorBuffer.set(rgba, index * 4);
         }
     }
     return { displacementBuffer, colorBuffer };
 }
 
-function parseFileToGrid(rows: any[][], fileName: string, indexStart: number, indexResolution: number): PlateData {
-    let headerRow = -1;
-
-    for (let i = 0; i < Math.min(rows.length, 100); i++) { 
-        const row = rows[i];
-        if (!row || row.length < 2) continue;
-        let numberCount = 0, validCells = 0;
-        for (let j = 1; j < row.length; j++) {
-            const cellVal = row[j];
-            if (cellVal !== '' && cellVal !== null && cellVal !== undefined) {
-                validCells++;
-                const num = parseFloat(String(cellVal).trim());
-                if (!isNaN(num) && isFinite(num)) numberCount++;
-            }
-        }
-        if (validCells > 5 && (numberCount / validCells) > 0.8) {
-            headerRow = i;
-            break;
-        }
-    }
-    if (headerRow === -1) throw new Error(`Could not find a valid header row in ${fileName}.`);
-    
-    const headerRowData = rows[headerRow];
-    const xCoords: (number | null)[] = [];
-    for (let j = 1; j < headerRowData.length; j++) {
-        const val = parseFloat(String(headerRowData[j]).trim());
-        xCoords.push(!isNaN(val) && isFinite(val) ? val : null);
-    }
-    
-    const yCoords: number[] = [];
-    const dataRows: any[][] = [];
-     for (let r = headerRow + 1; r < rows.length; r++) {
-        const row = rows[r];
-        if (!row || (row.length < 2 && (row[0] === '' || row[0] === undefined)) || isNaN(parseFloat(String(row[0])))) continue;
-        const yVal = parseFloat(String(row[0]).trim());
-        yCoords.push(yVal);
-        dataRows.push(row);
-    }
-    const yResolution = yCoords.length > 1 ? yCoords[1] - yCoords[0] : 1;
-
-
-    const dataGrid: GridCell[][] = [];
-    let minX = Infinity;
-    let maxX = -Infinity;
-
-    for(let r = 0; r < dataRows.length; r++) {
-        const row = dataRows[r];
-        const yMm = yCoords[r];
-        const gridRow: GridCell[] = [];
-
-        for (let c = 1; c < row.length; c++) {
-            const xIndex = c - 1;
-            const xCoord = xCoords[xIndex];
-            if(xCoord === null) continue;
-
-            const xMm = indexStart + xCoord * indexResolution;
-            minX = Math.min(minX, xMm);
-            maxX = Math.max(maxX, xMm);
-            
-            let rawValue = String(row[c]).trim();
-            if (rawValue === '---' || rawValue === 'ND' || rawValue === '' || rawValue.toLowerCase().includes('n/a')) {
-                rawValue = '';
-            }
-            const num = parseFloat(rawValue);
-            const rawThickness = isNaN(num) || !isFinite(num) ? null : num;
-
-            gridRow.push({ 
-                plateId: fileName, 
-                rawThickness,
-                effectiveThickness: null,
-                percentage: null,
-                xMm,
-                yMm,
-                isND: rawThickness === null,
-            });
-        }
-        dataGrid.push(gridRow);
-    }
-    
-    return { points: dataGrid, minXmm: minX, maxXmm: maxX, resolutionX: indexResolution, yResolution };
+function evaluatePatchRepresentation(patch: Omit<SegmentBox, 'representation'>, kind: PatchKind): PatchRepresentation {
+    if (kind === 'NON_INSPECTED') return 'TABLE_ONLY';
+    if (patch.pointCount < MICRO_PATCH_THRESHOLD) return 'TABLE_ONLY';
+    return 'IMAGE';
 }
 
-function generatePatchHeatmap(grid: MergedGrid, patch: SegmentBox): Promise<string> {
+async function generatePatchHeatmap(grid: MergedGrid, patch: SegmentBox): Promise<string> {
     const { xMin, xMax, yMin, yMax } = patch.coordinates;
     const patchWidth = xMax - xMin + 1;
     const patchHeight = yMax - yMin + 1;
     
-    // Using OffscreenCanvas if available, otherwise requires a polyfill or different approach
-    if (typeof OffscreenCanvas === 'undefined') {
-        // This environment doesn't support OffscreenCanvas.
-        // Return an empty string or handle it gracefully.
-        return Promise.resolve('');
-    }
+    if (typeof OffscreenCanvas === 'undefined') return Promise.resolve('');
     
     const canvas = new OffscreenCanvas(patchWidth, patchHeight);
     const ctx = canvas.getContext('2d');
     if (!ctx) return Promise.resolve('');
     const imageData = ctx.createImageData(patchWidth, patchHeight);
 
-    let minThick = Infinity;
-    let maxThick = -Infinity;
+    let minThick = Infinity, maxThick = -Infinity;
     for (let y = yMin; y <= yMax; y++) {
         for (let x = xMin; x <= xMax; x++) {
             const cell = grid[y]?.[x];
@@ -423,26 +386,16 @@ function generatePatchHeatmap(grid: MergedGrid, patch: SegmentBox): Promise<stri
             const cell = grid[gridY]?.[gridX];
             const normalizedColorValue = cell && !cell.isND && cell.effectiveThickness !== null && colorRange > 0 ? (cell.effectiveThickness - minThick) / colorRange : null;
             const rgba = getNormalizedColor(normalizedColorValue);
-            const index = (y * patchWidth + x) * 4;
-            imageData.data.set(rgba, index);
+            imageData.data.set(rgba, (y * patchWidth + x) * 4);
         }
     }
     ctx.putImageData(imageData, 0, 0);
-    return canvas.convertToBlob({ type: 'image/png' }).then(blob => new Promise(resolve => {
+    const blob = await canvas.convertToBlob({ type: 'image/png' });
+    return new Promise(resolve => {
         const reader = new FileReader();
         reader.onloadend = () => resolve(reader.result as string);
         reader.readAsDataURL(blob);
-    }));
-}
-
-function evaluatePatchRepresentation(patch: Omit<SegmentBox, 'representation'>, kind: PatchKind): PatchRepresentation {
-    if (kind === 'NON_INSPECTED') {
-        return 'TABLE_ONLY';
-    }
-    if (patch.pointCount < MICRO_PATCH_THRESHOLD) {
-        return 'TABLE_ONLY';
-    }
-    return 'IMAGE';
+    });
 }
 
 
@@ -455,103 +408,77 @@ async function segmentAndAnalyze(grid: MergedGrid, nominalInput: number, thresho
 
     for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
+            if (visited[y][x]) continue;
             const cell = grid[y][x];
-            if (!cell || cell.isND || visited[y][x]) continue;
+            if (!cell || cell.isND || (cell.percentage ?? 100) >= threshold) continue;
 
-            const percentage = cell.percentage ?? 100;
-            
-            if (percentage < threshold) {
-                const points: {x: number, y: number, cell: GridCell}[] = [];
-                const queue: [number, number][] = [[x, y]];
-                visited[y][x] = true;
-                let minThick = Infinity, sumThick = 0, xMin = x, xMax = x, yMin = y, yMax = y;
+            const points: {x: number, y: number, cell: GridCell}[] = [];
+            const queue: [number, number][] = [[x, y]];
+            visited[y][x] = true;
+            let minThick = Infinity, sumThick = 0, xMin = x, xMax = x, yMin = y, yMax = y;
 
-                while (queue.length > 0) {
-                    const [curX, curY] = queue.shift()!;
-                    const currentCell = grid[curY][curX];
-
-                    if (currentCell && !currentCell.isND && currentCell.effectiveThickness !== null) {
-                        points.push({ x: curX, y: curY, cell: currentCell });
-                        minThick = Math.min(minThick, currentCell.effectiveThickness);
-                        sumThick += currentCell.effectiveThickness;
-                        xMin = Math.min(xMin, curX); xMax = Math.max(xMax, curX);
-                        yMin = Math.min(yMin, curY); yMax = Math.max(yMax, curY);
-                    }
-                    [[0, -1], [0, 1], [-1, 0], [1, 0]].forEach(([dx, dy]) => {
-                        const nx = curX + dx, ny = curY + dy;
-                        if (nx >= 0 && nx < width && ny >= 0 && ny < height && !visited[ny][nx]) {
-                            const neighbor = grid[ny][nx];
-                            if (neighbor && !neighbor.isND) {
-                                const neighborNominalPct = neighbor.percentage ?? 100;
-                                if (neighborNominalPct < threshold) {
-                                    visited[ny][nx] = true;
-                                    queue.push([nx, ny]);
-                                }
-                            }
+            while (queue.length > 0) {
+                const [curX, curY] = queue.shift()!;
+                const currentCell = grid[curY][curX];
+                if (currentCell && !currentCell.isND && currentCell.effectiveThickness !== null) {
+                    points.push({ x: curX, y: curY, cell: currentCell });
+                    minThick = Math.min(minThick, currentCell.effectiveThickness);
+                    sumThick += currentCell.effectiveThickness;
+                    xMin = Math.min(xMin, curX); xMax = Math.max(xMax, curX);
+                    yMin = Math.min(yMin, curY); yMax = Math.max(yMax, curY);
+                }
+                [[0, -1], [0, 1], [-1, 0], [1, 0]].forEach(([dx, dy]) => {
+                    const nx = curX + dx, ny = curY + dy;
+                    if (nx >= 0 && nx < width && ny >= 0 && ny < height && !visited[ny][nx]) {
+                        const neighbor = grid[ny][nx];
+                        if (neighbor && !neighbor.isND && (neighbor.percentage ?? 100) < threshold) {
+                            visited[ny][nx] = true;
+                            queue.push([nx, ny]);
                         }
-                    });
-                }
-                
-                if (points.length > 0) {
-                    const worstPct = nominal > 0 ? (minThick / nominal) * 100 : 0;
-                    let tier: SeverityTier = 'Moderate';
-                    if (worstPct < 60) tier = 'Critical';
-                    else if (worstPct < 70) tier = 'Severe';
-
-                    const partialPatch = {
-                        id: segmentIdCounter++,
-                        kind: 'CORROSION' as PatchKind,
-                        tier, 
-                        pointCount: points.length,
-                        worstThickness: minThick,
-                        avgThickness: sumThick / points.length,
-                        severityScore: (1 - minThick / nominal) * points.length,
-                        coordinates: { xMin, xMax, yMin, yMax },
-                        center: { x: Math.round(xMin + (xMax - xMin) / 2), y: Math.round(yMin + (yMax - yMin) / 2) }
-                    };
-
-                    const representation = evaluatePatchRepresentation(partialPatch, 'CORROSION');
-                    const fullPatch: SegmentBox = { ...partialPatch, representation };
-
-                    if (representation === 'IMAGE') {
-                       fullPatch.heatmapDataUrl = await generatePatchHeatmap(grid, fullPatch);
-                    } else {
-                       fullPatch.cells = points.map(p => ({ 
-                           x: p.x, 
-                           y: p.y, 
-                           xMm: p.cell.xMm, 
-                           yMm: p.cell.yMm, 
-                           rawThickness: p.cell.rawThickness, 
-                           effectiveThickness: p.cell.effectiveThickness 
-                        }));
                     }
-                    
-                    segments.push(fullPatch);
+                });
+            }
+            
+            if (points.length > 0) {
+                const worstPct = nominal > 0 ? (minThick / nominal) * 100 : 0;
+                let tier: SeverityTier = worstPct < 60 ? 'Critical' : worstPct < 70 ? 'Severe' : 'Moderate';
+                
+                const partialPatch = {
+                    id: segmentIdCounter++,
+                    kind: 'CORROSION' as PatchKind,
+                    tier, pointCount: points.length,
+                    worstThickness: minThick, avgThickness: sumThick / points.length,
+                    severityScore: (1 - minThick / nominal) * points.length,
+                    coordinates: { xMin, xMax, yMin, yMax },
+                    center: { x: Math.round(xMin + (xMax - xMin) / 2), y: Math.round(yMin + (yMax - yMin) / 2) }
+                };
+                const representation = evaluatePatchRepresentation(partialPatch, 'CORROSION');
+                const fullPatch: SegmentBox = { ...partialPatch, representation };
+
+                if (representation === 'IMAGE') {
+                   fullPatch.heatmapDataUrl = await generatePatchHeatmap(grid, fullPatch);
+                } else {
+                   fullPatch.cells = points.map(p => ({ x: p.x, y: p.y, xMm: p.cell.xMm, yMm: p.cell.yMm, rawThickness: p.cell.rawThickness, effectiveThickness: p.cell.effectiveThickness }));
                 }
+                segments.push(fullPatch);
             }
         }
     }
-    
     return segments.sort((a, b) => (a.worstThickness ?? Infinity) - (b.worstThickness ?? Infinity));
 }
 
 function segmentNonInspected(grid: MergedGrid): SegmentBox[] {
-    const height = grid.length;
-    const width = grid[0]?.length || 0;
+    const height = grid.length, width = grid[0]?.length || 0;
     const visited: boolean[][] = Array(height).fill(null).map(() => Array(width).fill(false));
     const ndPatches: SegmentBox[] = [];
     let patchId = 1;
 
     for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
-            const cell = grid[y][x];
-            if (!cell || !cell.isND || visited[y][x]) continue;
-
+            if (visited[y][x] || !grid[y][x]?.isND) continue;
             const queue: [number, number][] = [[x, y]];
             visited[y][x] = true;
-            let xMin = x, xMax = x, yMin = y, yMax = y;
-            let count = 0;
-
+            let xMin = x, xMax = x, yMin = y, yMax = y, count = 0;
             while (queue.length) {
                 const [cx, cy] = queue.shift()!;
                 count++;
@@ -559,196 +486,120 @@ function segmentNonInspected(grid: MergedGrid): SegmentBox[] {
                 yMin = Math.min(yMin, cy); yMax = Math.max(yMax, cy);
                 [[0, -1], [0, 1], [-1, 0], [1, 0]].forEach(([dx, dy]) => {
                     const nx = cx + dx, ny = cy + dy;
-                    if (nx >= 0 && ny >= 0 && nx < width && ny < height && !visited[ny][nx]) {
-                        const nCell = grid[ny][nx];
-                        if (nCell && nCell.isND) {
-                            visited[ny][nx] = true;
-                            queue.push([nx, ny]);
-                        }
+                    if (nx >= 0 && ny >= 0 && nx < width && ny < height && !visited[ny][nx] && grid[ny][nx]?.isND) {
+                        visited[ny][nx] = true;
+                        queue.push([nx, ny]);
                     }
                 });
             }
-
             ndPatches.push({
-                id: patchId++,
-                kind: 'NON_INSPECTED',
-                pointCount: count,
+                id: patchId++, kind: 'NON_INSPECTED', pointCount: count,
                 coordinates: { xMin, xMax, yMin, yMax },
                 center: { x: Math.round(xMin + (xMax - xMin) / 2), y: Math.round(yMin + (yMax - yMin) / 2) },
-                representation: 'TABLE_ONLY',
-                reason: 'Gap between plates or unscanned region'
+                representation: 'TABLE_ONLY', reason: 'Gap between plates or unscanned region'
             });
         }
     }
-    return ndPatches.sort((a,b) => b.pointCount - a.pointCount);
+    return ndPatches.sort((a, b) => b.pointCount - a.pointCount);
 }
 
-function injectNDGapColumns(
-  masterGrid: MasterGrid,
-  newPlateStartX: number,
-  yResolution: number
-) {
-  const prevMaxX = masterGrid.maxXmm;
-  const step = masterGrid.resolutionX;
-
-  // NO GAP -> DO NOTHING
-  if (newPlateStartX <= prevMaxX + step) return;
-
-  // CREATE PHYSICAL ND COLUMNS
-  for (let x = prevMaxX + step; x < newPlateStartX; x += step) {
-    for (let y = 0; y < masterGrid.height; y++) {
-      masterGrid.points[y].push({
-        plateId: null,
-        rawThickness: null,
-        effectiveThickness: null,
-        percentage: null,
-        xMm: x,
-        yMm: y * yResolution,
-        isND: true
-      });
-    }
-    masterGrid.width++;
-  }
-}
-
-async function finalizeProcessing(threshold: number) {
-    if (!MASTER_GRID) throw new Error("Cannot finalize: MASTER_GRID is not initialized.");
-    
-    const finalMasterGrid = structuredClone(MASTER_GRID);
-
-    self.postMessage({ type: 'PROGRESS', progress: 50, message: 'Processing merged data...' });
-
-    FINAL_GRID = createFinalGrid(finalMasterGrid.points, finalMasterGrid.baseConfig.nominalThickness);
-    const { stats, condition } = computeStats(FINAL_GRID, finalMasterGrid.baseConfig.nominalThickness);
-    self.postMessage({ type: 'PROGRESS', progress: 60, message: 'Analyzing patches...' });
-    
-    const corrosionPatches = await segmentAndAnalyze(FINAL_GRID, finalMasterGrid.baseConfig.nominalThickness, threshold);
-    self.postMessage({ type: 'PROGRESS', progress: 80, message: 'Generating images...' });
-
-    const ndPatches = segmentNonInspected(FINAL_GRID);
-    self.postMessage({ type: 'PROGRESS', progress: 90, message: 'Building tables...' });
-    
-    const { displacementBuffer, colorBuffer } = createBuffers(FINAL_GRID, finalMasterGrid.baseConfig.nominalThickness, stats.minThickness, stats.maxThickness);
-    
-    const plates = finalMasterGrid.plates.map(p => ({
-        id: p.name, fileName: p.name, ...p.config
-    })) as Plate[];
-    
-    self.postMessage({
-        type: 'FINALIZED', displacementBuffer, colorBuffer,
-        gridMatrix: FINAL_GRID, stats, condition, plates, corrosionPatches, ndPatches,
-    }, [displacementBuffer.buffer, colorBuffer.buffer]);
-}
-
-async function resegment(threshold: number) {
-    if (!FINAL_GRID || !MASTER_GRID) throw new Error("Cannot resegment: data not finalized.");
-    const corrosionPatches = await segmentAndAnalyze(FINAL_GRID, MASTER_GRID.baseConfig.nominalThickness, threshold);
-    const ndPatches = segmentNonInspected(FINAL_GRID);
-    self.postMessage({ type: 'SEGMENTS_UPDATED', corrosionPatches, ndPatches });
-}
-
+// Main message handler
 self.onmessage = async (event: MessageEvent<any>) => {
     const { type, ...payload } = event.data;
     try {
         if (type === 'RESET') {
-            MASTER_GRID = null;
+            STAGED_PLATES = [];
             FINAL_GRID = null;
             return;
         }
 
-        if (type === 'INIT') {
-            const { file, config } = payload as { file: { name: string, buffer: ArrayBuffer }, config: ProcessConfig };
-            self.postMessage({ type: 'PROGRESS' });
-            const { rows, detectedNominal, indexStart, indexResolution } = universalParse(file.buffer, file.name);
-            const plateData = parseFileToGrid(rows, file.name, indexStart, indexResolution);
-
-            if (plateData.points.length === 0 || plateData.points[0].length === 0) throw new Error("Parsing resulted in empty data grid.");
+        if (type === 'ADD_FILE') {
+            const { file, config, mergeConfig } = payload;
+            const plateData = parseFileToPlateData(file.buffer, file.name, config, mergeConfig);
             
-            const finalConfig = { ...config, nominalThickness: Number(detectedNominal ?? config.nominalThickness) };
-
-            MASTER_GRID = {
-                points: plateData.points, 
-                width: plateData.points[0].length, 
-                height: plateData.points.length,
-                plates: [{ name: file.name, config: finalConfig, mergeConfig: null, detectedNominal }],
-                baseConfig: finalConfig,
-                minXmm: plateData.minXmm,
-                maxXmm: plateData.maxXmm,
-                resolutionX: plateData.resolutionX,
-                yResolution: plateData.yResolution
-            };
-            
-            self.postMessage({ type: 'STAGED', dimensions: { width: MASTER_GRID.width, height: MASTER_GRID.height }});
-            return;
-        }
-
-        if (type === 'MERGE') {
-            if (!MASTER_GRID) throw new Error("Cannot merge: Initial file not processed yet.");
-
-            const { file, config, mergeConfig, resolution } = payload;
-            self.postMessage({ type: 'PROGRESS' });
-            const { rows, detectedNominal, indexStart, indexResolution } = universalParse(file.buffer, file.name);
-            
-            if (!resolution) {
-                if (detectedNominal && Math.abs(detectedNominal - MASTER_GRID.baseConfig.nominalThickness) > 0.01) {
-                    self.postMessage({ type: 'THICKNESS_CONFLICT', conflict: {
+            // Handle thickness conflicts
+            if (STAGED_PLATES.length > 0 && plateData.detectedNominal) {
+                const baseNominal = STAGED_PLATES[0].config.nominalThickness;
+                if (Math.abs(plateData.detectedNominal - Number(baseNominal)) > 0.01) {
+                     self.postMessage({ type: 'THICKNESS_CONFLICT', conflict: {
                         fileName: file.name, fileBuffer: file.buffer,
-                        originalThickness: MASTER_GRID.baseConfig.nominalThickness,
-                        conflictingThickness: detectedNominal,
+                        originalThickness: baseNominal,
+                        conflictingThickness: plateData.detectedNominal,
                         mergeConfig: mergeConfig,
                     }}, [file.buffer]);
                     return;
                 }
-            } else {
-                if (resolution.type === 'useNew') MASTER_GRID.baseConfig.nominalThickness = Number(detectedNominal ?? MASTER_GRID.baseConfig.nominalThickness);
-                else if (resolution.type === 'useCustom') MASTER_GRID.baseConfig.nominalThickness = resolution.value;
-            }
-            
-            const newPlateData = parseFileToGrid(rows, file.name, indexStart, indexResolution);
-
-            // 1. Inject ND gap if it exists
-            injectNDGapColumns(MASTER_GRID, newPlateData.minXmm, MASTER_GRID.yResolution);
-
-            // 2. Now merge the new plate
-            const targetHeight = Math.max(MASTER_GRID.height, newPlateData.points.length);
-            const newPlateWidth = newPlateData.points[0]?.length || 0;
-            
-            // Resize master grid height if new plate is taller
-            if (targetHeight > MASTER_GRID.height) {
-                for (let y = MASTER_GRID.height; y < targetHeight; y++) {
-                    MASTER_GRID.points.push(Array(MASTER_GRID.width).fill(null).map((_, i) => ({ plateId: null, rawThickness: null, effectiveThickness: null, percentage: null, xMm: MASTER_GRID!.points[0][i].xMm, yMm: y * MASTER_GRID!.yResolution, isND: true })));
-                }
-                 MASTER_GRID.height = targetHeight;
             }
 
-            // Add new plate columns, resizing height if master is taller
-            for (let x = 0; x < newPlateWidth; x++) {
-                for (let y = 0; y < targetHeight; y++) {
-                     if (y < newPlateData.points.length) {
-                        MASTER_GRID.points[y].push(newPlateData.points[y][x]);
-                    } else {
-                        MASTER_GRID.points[y].push({ plateId: null, rawThickness: null, effectiveThickness: null, percentage: null, xMm: newPlateData.points[0][x].xMm, yMm: y * MASTER_GRID.yResolution, isND: true });
-                    }
-                }
-            }
-
-            MASTER_GRID.width += newPlateWidth;
-
-            // 3. Update master grid's max X coordinate
-            MASTER_GRID.maxXmm = Math.max(MASTER_GRID.maxXmm, newPlateData.maxXmm);
-            MASTER_GRID.plates.push({ name: file.name, config: MASTER_GRID.baseConfig, mergeConfig, detectedNominal: null });
-
-            self.postMessage({ type: 'STAGED', dimensions: { width: MASTER_GRID.width, height: MASTER_GRID.height }});
+            STAGED_PLATES.push(plateData);
+            const tempMaster = mergePlatesSequentially(STAGED_PLATES);
+            self.postMessage({ type: 'STAGED', dimensions: { width: tempMaster.width, height: tempMaster.height }});
             return;
         }
 
-        if (type === 'FINALIZE') await finalizeProcessing(payload.threshold);
-        else if (type === 'RESEGMENT') await resegment(payload.threshold);
-        
+        if (type === 'RESOLVE_CONFLICT_AND_ADD') {
+             const { file, config, mergeConfig, resolution } = payload;
+             if (resolution.type === 'useNew' && resolution.value) {
+                STAGED_PLATES.forEach(p => p.config.nominalThickness = resolution.value);
+             } else if (resolution.type === 'useCustom' && resolution.value) {
+                STAGED_PLATES.forEach(p => p.config.nominalThickness = resolution.value);
+             }
+             const plateData = parseFileToPlateData(file.buffer, file.name, config, mergeConfig);
+             STAGED_PLATES.push(plateData);
+             const tempMaster = mergePlatesSequentially(STAGED_PLATES);
+             self.postMessage({ type: 'STAGED', dimensions: { width: tempMaster.width, height: tempMaster.height }});
+             return;
+        }
+
+        if (type === 'FINALIZE') {
+            self.postMessage({ type: 'PROGRESS', progress: 10, message: 'Merging plates...' });
+            if(STAGED_PLATES.length === 0) throw new Error("No files staged to finalize.");
+            
+            const mergedMasterGrid = mergePlatesSequentially(STAGED_PLATES);
+            const nominalThickness = mergedMasterGrid.baseConfig.nominalThickness;
+
+            self.postMessage({ type: 'PROGRESS', progress: 30, message: 'Creating final grid...' });
+            FINAL_GRID = createFinalGrid(mergedMasterGrid.points, nominalThickness);
+
+            self.postMessage({ type: 'PROGRESS', progress: 50, message: 'Computing statistics...' });
+            const { stats, condition } = computeStats(FINAL_GRID, nominalThickness);
+            FINAL_STATS = stats;
+            FINAL_CONDITION = condition;
+
+            self.postMessage({ type: 'PROGRESS', progress: 70, message: 'Analyzing patches...' });
+            const corrosionPatches = await segmentAndAnalyze(FINAL_GRID, nominalThickness, payload.threshold);
+            const ndPatches = segmentNonInspected(FINAL_GRID);
+
+            self.postMessage({ type: 'PROGRESS', progress: 90, message: 'Generating buffers...' });
+            const { displacementBuffer, colorBuffer } = createBuffers(FINAL_GRID, stats.minThickness, stats.maxThickness);
+            
+            const platesForStore = STAGED_PLATES.map(p => ({ id: p.name, fileName: p.name, ...p.config, rawGridData:[], processedData:[], stats:{} as InspectionStats, metadata:[] } as Plate));
+            
+            self.postMessage({
+                type: 'FINALIZED', displacementBuffer, colorBuffer,
+                gridMatrix: FINAL_GRID, stats, condition, plates: platesForStore, corrosionPatches, ndPatches,
+            }, [displacementBuffer.buffer, colorBuffer.buffer]);
+            return;
+        }
+
+        if (type === 'RESEGMENT') {
+             if (!FINAL_GRID || !FINAL_STATS) throw new Error("Cannot resegment: data not finalized.");
+             self.postMessage({ type: 'PROGRESS', progress: 50, message: 'Re-analyzing patches...' });
+             const corrosionPatches = await segmentAndAnalyze(FINAL_GRID, FINAL_STATS.nominalThickness!, payload.threshold);
+             const ndPatches = segmentNonInspected(FINAL_GRID);
+             self.postMessage({ type: 'SEGMENTS_UPDATED', corrosionPatches, ndPatches });
+             return;
+        }
+
     } catch (error: any) {
         console.error("Worker CRASH:", error);
         self.postMessage({ type: 'ERROR', message: error.message, stack: error.stack });
     }
 };
 
+// Required to be a module
 export {};
+// For THREE JS
+declare class THREE {
+    static Color: any;
+}

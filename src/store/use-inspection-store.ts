@@ -59,7 +59,7 @@ interface InspectionState {
   projectDimensions: { width: number; height: number } | null;
   thicknessConflict: ThicknessConflict | null;
   setThicknessConflict: (conflict: ThicknessConflict | null) => void;
-  resolveThicknessConflict: (resolution: 'useOriginal' | 'useNew' | { type: 'useCustom', value: number }) => void;
+  resolveThicknessConflict: (resolution: { type: 'useOriginal' | 'useNew' | 'useCustom', value?: number }) => void;
 
 
   // UI state
@@ -72,14 +72,13 @@ interface InspectionState {
   setActiveTab: (tab: string) => void;
 
   // Actions
-  addFileToStage: (file: File, config: Omit<ProcessConfig, 'nominalThickness'> & { nominalThickness: number | string }, mergeConfig: MergeFormValues | null) => void;
+  addFileToStage: (file: File, config: ProcessConfig, mergeConfig: MergeFormValues | null) => void;
   finalizeProject: () => void;
   resetProject: () => void;
   
   // Segmentation
   defectThreshold: number;
   setDefectThreshold: (threshold: number) => void;
-  setSegmentsForThreshold: (threshold: number) => void;
   
   // Interactive state
   selectedPoint: { x: number; y: number } | null;
@@ -217,12 +216,17 @@ export const useInspectionStore = create<InspectionState>()(
             const conflict = get().thicknessConflict;
             if (!worker || !conflict) return;
             set({ isLoading: true, thicknessConflict: null });
+            
+            const { fileName, fileBuffer, mergeConfig } = conflict;
+            const config = get().stagedFiles.length > 0 ? get().stagedFiles[0] : { assetType: 'Plate', nominalThickness: 6 } as any;
+
             worker.postMessage({
-                type: 'MERGE',
-                file: { name: conflict.fileName, buffer: conflict.fileBuffer },
-                resolution: resolution,
-                mergeConfig: conflict.mergeConfig
-            }, [conflict.fileBuffer]);
+                type: 'RESOLVE_CONFLICT_AND_ADD',
+                file: { name: fileName, buffer: fileBuffer },
+                config: { ...config, nominalThickness: resolution.value || config.nominalThickness },
+                mergeConfig: mergeConfig,
+                resolution
+            }, [fileBuffer]);
         },
         
         addFileToStage: async (file, config, mergeConfig) => {
@@ -233,27 +237,13 @@ export const useInspectionStore = create<InspectionState>()(
             set(state => ({ stagedFiles: [...state.stagedFiles, newStagedFile] }));
 
             const buffer = await file.arrayBuffer();
-            const isFirstFile = get().stagedFiles.length === 1;
 
-            const sanitizedConfig = {
-              ...config,
-              nominalThickness: Number(config.nominalThickness) || 0,
-            };
-
-            if (isFirstFile) {
-                worker?.postMessage({
-                    type: 'INIT',
-                    file: { name: file.name, buffer: buffer },
-                    config: sanitizedConfig
-                }, [buffer]);
-            } else {
-                 worker?.postMessage({
-                    type: 'MERGE',
-                    file: { name: file.name, buffer: buffer },
-                    config: sanitizedConfig,
-                    mergeConfig: mergeConfig,
-                }, [buffer]);
-            }
+            worker?.postMessage({
+                type: 'ADD_FILE',
+                file: { name: file.name, buffer: buffer },
+                config: config,
+                mergeConfig: mergeConfig,
+            }, [buffer]);
         },
 
         finalizeProject: () => {
@@ -262,8 +252,8 @@ export const useInspectionStore = create<InspectionState>()(
             worker.postMessage({ type: 'FINALIZE', threshold: get().defectThreshold });
         },
         
-        setDefectThreshold: (threshold) => set({ defectThreshold: threshold }),
-        setSegmentsForThreshold: (threshold) => {
+        setDefectThreshold: (threshold) => {
+            set({ defectThreshold: threshold });
             if (!worker || !get().inspectionResult) return;
             worker.postMessage({ type: 'RESEGMENT', threshold: threshold });
         },
@@ -275,14 +265,13 @@ export const useInspectionStore = create<InspectionState>()(
             DataVault.colorBuffer = null;
             DataVault.gridMatrix = null;
             DataVault.stats = null;
-            if(typeof window !== 'undefined') {
-                localStorage.removeItem('patchVault');
-            }
+
             set({ 
                 inspectionResult: null, 
                 patches: null,
                 stagedFiles: [],
                 projectDimensions: null,
+                thicknessConflict: null,
                 selectedPoint: null, 
                 isLoading: false, 
                 isFinalizing: false,
