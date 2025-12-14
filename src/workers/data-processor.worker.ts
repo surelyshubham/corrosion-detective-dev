@@ -1,4 +1,5 @@
 
+
 import * as XLSX from 'xlsx';
 import type { MergedGrid, InspectionStats, Condition, Plate, AssetType, SegmentBox, SeverityTier, PatchKind, GridCell, PatchRepresentation } from '../lib/types';
 import { type MergeFormValues } from '@/components/tabs/merge-alert-dialog';
@@ -140,13 +141,34 @@ function computeStats(grid: MergedGrid, nominalInput: number) {
     let worstLocation = { x: 0, y: 0, value: 0 }, bestLocation = { x: 0, y: 0, value: 0 };
     const height = grid.length, width = grid[0]?.length || 0;
 
+    let resolutionX = 1;
+    let resolutionY = 1;
+
+    // Find first valid cell with plateId to get resolution
+    outerLoop:
     for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
             const cell = grid[y][x];
-            if (!cell || cell.isND || cell.effectiveThickness === null) {
-                if (cell && cell.plateId) countND++;
+            if (cell && cell.plateId) {
+                const nextCellX = grid[y][x+1];
+                const nextCellY = grid[y+1]?.[x];
+                if (nextCellX) resolutionX = Math.abs(nextCellX.xMm - cell.xMm);
+                if (nextCellY) resolutionY = Math.abs(nextCellY.yMm - cell.yMm);
+                if (resolutionX > 0 && resolutionY > 0) break outerLoop;
+            }
+        }
+    }
+
+
+    for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+            const cell = grid[y][x];
+            if (!cell || cell.isND) {
+                if(cell && cell.plateId) countND++;
                 continue;
             }
+            if (cell.effectiveThickness === null) continue;
+
             const value = cell.effectiveThickness;
             if (!isFinite(value)) continue;
 
@@ -173,7 +195,11 @@ function computeStats(grid: MergedGrid, nominalInput: number) {
     
     const avgThickness = validPointsCount > 0 ? sumThickness / validPointsCount : 0;
     const minPercentage = nominal > 0 ? (minThickness / nominal) * 100 : 0;
+    
     const totalScannedPoints = validPointsCount + countND;
+    const scannedAreaMm2 = totalScannedPoints * resolutionX * resolutionY;
+    const scannedAreaM2 = scannedAreaMm2 / 1_000_000;
+
 
     const stats: InspectionStats = {
         minThickness, maxThickness, avgThickness,
@@ -184,7 +210,7 @@ function computeStats(grid: MergedGrid, nominalInput: number) {
         countND, totalPoints: height * width,
         worstLocation, bestLocation,
         gridSize: { width, height },
-        scannedArea: totalScannedPoints / 1_000_000,
+        scannedArea: scannedAreaM2,
     };
     
     let condition: Condition = 'N/A';
@@ -350,9 +376,9 @@ function parseFileToGrid(rows: any[][], fileName: string, indexStart: number, in
                 rawThickness,
                 effectiveThickness: null,
                 percentage: null,
-                isND: rawThickness === null,
                 xMm,
-                yMm
+                yMm,
+                isND: rawThickness === null,
             });
         }
         dataGrid.push(gridRow);
@@ -365,6 +391,14 @@ function generatePatchHeatmap(grid: MergedGrid, patch: SegmentBox): Promise<stri
     const { xMin, xMax, yMin, yMax } = patch.coordinates;
     const patchWidth = xMax - xMin + 1;
     const patchHeight = yMax - yMin + 1;
+    
+    // Using OffscreenCanvas if available, otherwise requires a polyfill or different approach
+    if (typeof OffscreenCanvas === 'undefined') {
+        // This environment doesn't support OffscreenCanvas.
+        // Return an empty string or handle it gracefully.
+        return Promise.resolve('');
+    }
+    
     const canvas = new OffscreenCanvas(patchWidth, patchHeight);
     const ctx = canvas.getContext('2d');
     if (!ctx) return Promise.resolve('');
@@ -579,21 +613,24 @@ function injectNDGapColumns(
 
 async function finalizeProcessing(threshold: number) {
     if (!MASTER_GRID) throw new Error("Cannot finalize: MASTER_GRID is not initialized.");
+    
+    const finalMasterGrid = structuredClone(MASTER_GRID);
+
     self.postMessage({ type: 'PROGRESS', progress: 50, message: 'Processing merged data...' });
 
-    FINAL_GRID = createFinalGrid(MASTER_GRID.points, MASTER_GRID.baseConfig.nominalThickness);
-    const { stats, condition } = computeStats(FINAL_GRID, MASTER_GRID.baseConfig.nominalThickness);
+    FINAL_GRID = createFinalGrid(finalMasterGrid.points, finalMasterGrid.baseConfig.nominalThickness);
+    const { stats, condition } = computeStats(FINAL_GRID, finalMasterGrid.baseConfig.nominalThickness);
     self.postMessage({ type: 'PROGRESS', progress: 60, message: 'Analyzing patches...' });
     
-    const corrosionPatches = await segmentAndAnalyze(FINAL_GRID, MASTER_GRID.baseConfig.nominalThickness, threshold);
+    const corrosionPatches = await segmentAndAnalyze(FINAL_GRID, finalMasterGrid.baseConfig.nominalThickness, threshold);
     self.postMessage({ type: 'PROGRESS', progress: 80, message: 'Generating images...' });
 
     const ndPatches = segmentNonInspected(FINAL_GRID);
     self.postMessage({ type: 'PROGRESS', progress: 90, message: 'Building tables...' });
     
-    const { displacementBuffer, colorBuffer } = createBuffers(FINAL_GRID, MASTER_GRID.baseConfig.nominalThickness, stats.minThickness, stats.maxThickness);
+    const { displacementBuffer, colorBuffer } = createBuffers(FINAL_GRID, finalMasterGrid.baseConfig.nominalThickness, stats.minThickness, stats.maxThickness);
     
-    const plates = MASTER_GRID.plates.map(p => ({
+    const plates = finalMasterGrid.plates.map(p => ({
         id: p.name, fileName: p.name, ...p.config
     })) as Plate[];
     
@@ -715,5 +752,3 @@ self.onmessage = async (event: MessageEvent<any>) => {
 };
 
 export {};
-
-    

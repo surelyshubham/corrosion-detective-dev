@@ -34,6 +34,7 @@ export function buildInspectionSummary(input: ReportInput) {
         row("Minimum Thickness (mm)", stats.minThickness?.toFixed(2)),
         row("Average Thickness (mm)", stats.avgThickness?.toFixed(2)),
         row("Maximum Thickness (mm)", stats.maxThickness?.toFixed(2)),
+        row("Total Scanned Area (m²)", stats.scannedArea.toFixed(2)),
         row(
           "Area Below 80% (%)",
           stats.areaBelow80?.toFixed(2)

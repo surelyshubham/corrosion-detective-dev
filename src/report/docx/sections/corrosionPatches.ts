@@ -49,7 +49,7 @@ export function buildCorrosionPatches(patches: EnrichedPatch[]) {
     children.push(new Paragraph({
         spacing: { after: 300 },
         children: [new TextRun({
-            text: "Small corrosion patches consisting of limited data points ('micro-patches') are documented in the summary table below. Graphical representations are omitted for these due to their limited spatial extent.",
+            text: "Small corrosion patches consisting of limited data points ('micro-patches') are documented in the summary table below. Graphical representations are omitted due to their limited spatial extent.",
             italics: true,
             size: 18,
         })]
@@ -113,7 +113,6 @@ export function buildCorrosionPatches(patches: EnrichedPatch[]) {
           metaRow("Location (Y Range)", meta.yRange),
           metaRow("Area (Points)", meta.area),
           metaRow("Minimum Thickness", `${meta.minThickness} mm`),
-          metaRow("Average Thickness", `${meta.avgThickness} mm`),
         ],
       })
     );
