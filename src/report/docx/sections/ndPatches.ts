@@ -16,7 +16,7 @@ import type { PatchImageSet } from "../types";
 import { base64ToUint8Array } from "../utils";
 
 export function buildNDPatches(patches: PatchImageSet[]) {
-  if (!patches.length) {
+  if (!patches || patches.length === 0) {
     return [
       new Paragraph({
         text: "Non-Inspected Areas",
@@ -39,7 +39,7 @@ export function buildNDPatches(patches: PatchImageSet[]) {
     }),
     new Paragraph({
       text:
-        "The following regions could not be inspected due to physical, access, or data limitations. These areas require follow-up inspection where feasible.",
+        "The following regions could not be inspected due to physical gaps between plates, access limitations, or data acquisition issues. These areas should be considered when making final integrity management decisions.",
       spacing: { after: 300 },
     })
   );
@@ -47,35 +47,22 @@ export function buildNDPatches(patches: PatchImageSet[]) {
   patches.forEach((patch, index) => {
     children.push(
       new Paragraph({
-        text: `ND Patch ID: ${patch.patchId}`,
+        text: `ND Region ID: ${patch.patchId}`,
         heading: HeadingLevel.HEADING_2,
         spacing: { after: 200 },
       }),
 
       new Table({
         width: { size: 100, type: WidthType.PERCENTAGE },
+        columnWidths: [35, 65],
         rows: [
           row("Patch Type", "Non-Inspected Area"),
-          row("X Range", patch.meta.xRange),
-          row("Y Range", patch.meta.yRange),
+          row("Location (X Range)", patch.meta.xRange),
+          row("Location (Y Range)", patch.meta.yRange),
           row("Estimated Area (Points)", patch.meta.area),
-          row("Reason", patch.meta.reason ?? "Inspection not possible"),
+          row("Reason", patch.meta.reason ?? "Region could not be scanned"),
         ],
       }),
-
-      new Paragraph({ spacing: { after: 200 } }),
-
-      new Table({
-        width: { size: 100, type: WidthType.PERCENTAGE },
-        rows: [
-          new TableRow({
-            children: [
-              imageCell(patch.images.view2D, "2D ND Region"),
-              imageCell(patch.images.view3DTop, "3D Top View"),
-            ],
-          }),
-        ],
-      })
     );
 
     if (index !== patches.length - 1) {
@@ -99,28 +86,8 @@ function cell(text: string, bold = false) {
     borders: border(),
     children: [
       new Paragraph({
-        children: [new TextRun({ text, bold })],
-      }),
-    ],
-  });
-}
-
-function imageCell(base64: string, caption: string) {
-  return new TableCell({
-    borders: border(),
-    children: [
-      new Paragraph({
-        alignment: AlignmentType.CENTER,
-        children: [
-          new ImageRun({
-            data: base64ToUint8Array(base64),
-            transformation: { width: 260, height: 180 },
-          }),
-        ],
-      }),
-      new Paragraph({
-        alignment: AlignmentType.CENTER,
-        children: [new TextRun({ text: caption, size: 18 })],
+          spacing: { before: 80, after: 80 },
+          children: [new TextRun({ text, bold, size: 20 })]
       }),
     ],
   });
@@ -128,9 +95,9 @@ function imageCell(base64: string, caption: string) {
 
 function border() {
   return {
-    top: { style: BorderStyle.SINGLE, size: 1 },
-    bottom: { style: BorderStyle.SINGLE, size: 1 },
-    left: { style: BorderStyle.SINGLE, size: 1 },
-    right: { style: BorderStyle.SINGLE, size: 1 },
+    top: { style: BorderStyle.SINGLE, size: 1, color: "D3D3D3" },
+    bottom: { style: BorderStyle.SINGLE, size: 1, color: "D3D3D3" },
+    left: { style: BorderStyle.SINGLE, size: 1, color: "D3D3D3" },
+    right: { style: BorderStyle.SINGLE, size: 1, color: "D3D3D3" },
   };
 }
