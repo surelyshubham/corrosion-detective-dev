@@ -1,4 +1,5 @@
-import { Header, Paragraph, ImageRun, TextRun, Footer, AlignmentType } from "docx";
+
+import { Header, Paragraph, ImageRun, TextRun, Footer, AlignmentType, PageNumber } from "docx";
 
 export const HEADING_1 = "heading1";
 export const HEADING_2 = "heading2";
@@ -68,7 +69,7 @@ export function createFooter() {
     children: [
       new Paragraph({
         alignment: AlignmentType.CENTER,
-        children: [new TextRun("Page "), new TextRun({ children: ["PAGE_NUMBER"] })],
+        children: [new TextRun("Page "), PageNumber.CURRENT],
       }),
     ],
   });

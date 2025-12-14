@@ -12,7 +12,7 @@ import { useToast } from "@/hooks/use-toast";
 import { getBase64ImageFromUrl } from "@/lib/image-utils";
 import type { ReportInput, PatchImageSet } from "@/report/docx/types";
 import { generateInspectionReport } from "@/report/docx/ReportBuilder";
-import type { SegmentBox } from "@/lib/types";
+import type { SegmentBox, GridCell } from "@/lib/types";
 import { DataVault } from "@/store/data-vault";
 import { Progress } from "../ui/progress";
 
@@ -50,6 +50,38 @@ async function capturePatchImages(
   return results;
 }
 
+function getCorrosionColor(percentage: number | null): string {
+    if (percentage === null) return '#bdbdbd';
+    if (percentage < 70) return '#ff0000';
+    if (percentage < 80) return '#ffff00';
+    if (percentage < 90) return '#00ff00';
+    return '#0000ff';
+}
+
+function renderFullPlate2D(gridMatrix: GridCell[][]): string {
+  if (!gridMatrix || gridMatrix.length === 0 || gridMatrix[0].length === 0) return '';
+  const height = gridMatrix.length;
+  const width = gridMatrix[0].length;
+  const cellSize = 2; // Fixed cell size for high-res export
+
+  const canvas = document.createElement('canvas');
+  canvas.width = width * cellSize;
+  canvas.height = height * cellSize;
+  const ctx = canvas.getContext('2d');
+
+  if (!ctx) return '';
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const cell = gridMatrix[y][x];
+      ctx.fillStyle = cell.isND ? '#bdbdbd' : getCorrosionColor(cell.percentage);
+      ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
+    }
+  }
+
+  return canvas.toDataURL('image/png');
+}
+
 
 export function ReportTab({ twoDViewRef, threeDeeViewRef }: ReportTabProps) {
   const { inspectionResult, patches, defectThreshold } = useInspectionStore();
@@ -65,7 +97,7 @@ export function ReportTab({ twoDViewRef, threeDeeViewRef }: ReportTabProps) {
   });
 
   const generateDocx = async () => {
-    if (!inspectionResult || !patches) {
+    if (!inspectionResult || !patches || !DataVault.gridMatrix) {
       toast({
         variant: "destructive",
         title: "No Data Available",
@@ -79,7 +111,10 @@ export function ReportTab({ twoDViewRef, threeDeeViewRef }: ReportTabProps) {
     try {
         setProgress({ stage: "Capturing full asset views...", percent: 5 });
         const logoBase64 = await getBase64ImageFromUrl('/logo.png');
-        const full2D = await twoDViewRef.current.capture();
+        
+        // Use the new offscreen renderer for the full 2D view
+        const full2D = renderFullPlate2D(DataVault.gridMatrix);
+        
         await threeDeeViewRef.current.resetCamera();
         const fullIso = await threeDeeViewRef.current.setView("iso").then(() => threeDeeViewRef.current.capture());
         const fullTop = await threeDeeViewRef.current.setView("top").then(() => threeDeeViewRef.current.capture());
