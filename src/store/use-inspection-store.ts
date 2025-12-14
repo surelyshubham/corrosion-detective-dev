@@ -128,11 +128,13 @@ export const useInspectionStore = create<InspectionState>()(
                       set({ isFinalizing: false, error: "Processing Failed: No data points found in the project." });
                       return;
                   }
-
+                  
+                  // CRITICAL FIX: Update DataVault with the new merged data
                   DataVault.displacementBuffer = data.displacementBuffer;
                   DataVault.colorBuffer = data.colorBuffer;
                   DataVault.gridMatrix = data.gridMatrix;
                   DataVault.stats = data.stats;
+                  console.log("🔥 MERGE APPLIED TO DATAVAULT");
                   
                   const newResult: MergedInspectionResult = {
                       plates: data.plates,
@@ -153,7 +155,7 @@ export const useInspectionStore = create<InspectionState>()(
                       patches: { corrosion: data.corrosionPatches!, nonInspected: data.ndPatches! },
                       isFinalizing: false,
                       error: null,
-                      dataVersion: state.dataVersion + 1,
+                      dataVersion: Date.now() // Use timestamp for unique version
                   }));
 
                   // Fire off AI insight generation
