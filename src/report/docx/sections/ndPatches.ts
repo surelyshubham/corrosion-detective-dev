@@ -12,10 +12,10 @@ import {
   ImageRun,
   PageBreak,
 } from "docx";
-import type { PatchImageSet } from "../types";
+import type { SegmentBox } from "@/lib/types";
 import { base64ToUint8Array } from "../utils";
 
-export function buildNDPatches(patches: PatchImageSet[]) {
+export function buildNDPatches(patches: SegmentBox[]) {
   if (!patches || patches.length === 0) {
     return [
       new Paragraph({
@@ -44,54 +44,53 @@ export function buildNDPatches(patches: PatchImageSet[]) {
     })
   );
 
-  patches.forEach((patch, index) => {
-    children.push(
-      new Paragraph({
-        text: `ND Region ID: ${patch.patchId}`,
-        heading: HeadingLevel.HEADING_2,
-        spacing: { after: 200 },
-      }),
+  const ndRows = patches.map(p => new TableRow({
+    children: [
+        tableCell(`ND-${p.id}`),
+        tableCell(`${p.coordinates.xMin} – ${p.coordinates.xMax}`),
+        tableCell(`${p.coordinates.yMin} – ${p.coordinates.yMax}`),
+        tableCell(p.pointCount.toString()),
+        tableCell(p.reason),
+    ]
+  }));
 
-      new Table({
-        width: { size: 100, type: WidthType.PERCENTAGE },
-        columnWidths: [35, 65],
-        rows: [
-          row("Patch Type", "Non-Inspected Area"),
-          row("Location (X Range)", patch.meta.xRange),
-          row("Location (Y Range)", patch.meta.yRange),
-          row("Estimated Area (Points)", patch.meta.area),
-          row("Reason", patch.meta.reason ?? "Region could not be scanned"),
-        ],
-      }),
-    );
+  children.push(new Table({
+      width: { size: 100, type: WidthType.PERCENTAGE },
+      rows: [
+          new TableRow({
+              children: [
+                headerCell("Region ID"),
+                headerCell("X-Range"),
+                headerCell("Y-Range"),
+                headerCell("Area (Points)"),
+                headerCell("Reason"),
+              ]
+          }),
+          ...ndRows,
+      ]
+  }));
 
-    if (index !== patches.length - 1) {
-      children.push(new PageBreak());
-    }
-  });
 
   return children;
 }
 
 /* -------- HELPERS -------- */
 
-function row(label: string, value: any) {
-  return new TableRow({
-    children: [cell(label, true), cell(String(value ?? "N/A"))],
+function headerCell(text: string) {
+  return new TableCell({
+    borders: border(),
+    shading: { fill: "EAEAEA" },
+    children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text, bold: true, size: 20 })] })]
   });
 }
 
-function cell(text: string, bold = false) {
-  return new TableCell({
-    borders: border(),
-    children: [
-      new Paragraph({
-          spacing: { before: 80, after: 80 },
-          children: [new TextRun({ text, bold, size: 20 })]
-      }),
-    ],
-  });
+function tableCell(text: string | undefined) {
+    return new TableCell({
+        borders: border(),
+        children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: text ?? 'N/A', size: 20 })]})]
+    });
 }
+
 
 function border() {
   return {

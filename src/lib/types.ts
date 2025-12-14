@@ -54,6 +54,7 @@ export interface InspectionStats {
   bestLocation: { x: number; y: number; value: number };
   gridSize: { width: number; height: number };
   scannedArea: number;
+  nominalThickness?: number;
 }
 
 export type Condition = 'Healthy' | 'Moderate' | 'Severe' | 'Critical' | 'N/A';
@@ -65,6 +66,7 @@ export interface AIInsight {
 
 export type SeverityTier = 'Critical' | 'Severe' | 'Moderate' | 'Normal';
 export type PatchKind = 'CORROSION' | 'NON_INSPECTED';
+export type PatchRepresentation = 'IMAGE' | 'TABLE_ONLY';
 
 export interface SegmentBox {
   id: number;
@@ -80,6 +82,8 @@ export interface SegmentBox {
     x: number;
     y: number;
   };
+  representation: PatchRepresentation;
+  
   // Corrosion-specific
   tier?: SeverityTier;
   worstThickness?: number;
@@ -87,11 +91,12 @@ export interface SegmentBox {
   severityScore?: number;
   
   // Reporting data
-  isoViewDataUrl?: string;
-  topViewDataUrl?: string;
-  sideViewDataUrl?: string;
   heatmapDataUrl?: string;
-  aiObservation?: string;
+  
+  // For micro-patches
+  cells?: { x: number, y: number, xMm: number, yMm: number, rawThickness: number | null, effectiveThickness: number | null }[];
+
+  // For ND patches
   reason?: string;
 }
 

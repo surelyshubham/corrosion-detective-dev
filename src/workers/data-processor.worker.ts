@@ -1,6 +1,6 @@
 
 import * as XLSX from 'xlsx';
-import type { MergedGrid, InspectionStats, Condition, Plate, AssetType, SegmentBox, SeverityTier, PatchKind, GridCell } from '../lib/types';
+import type { MergedGrid, InspectionStats, Condition, Plate, AssetType, SegmentBox, SeverityTier, PatchKind, GridCell, PatchRepresentation } from '../lib/types';
 import { type MergeFormValues } from '@/components/tabs/merge-alert-dialog';
 import { type ProcessConfig } from '@/store/use-inspection-store';
 
@@ -32,7 +32,7 @@ interface MasterGrid {
     yResolution: number;
 }
 
-
+const MICRO_PATCH_THRESHOLD = 10; // points
 let MASTER_GRID: MasterGrid | null = null;
 let FINAL_GRID: MergedGrid | null = null;
 
@@ -235,10 +235,8 @@ function createFinalGrid(rawMergedGrid: GridCell[][], nominalInput: number): Mer
             
             if (cell.rawThickness !== null && cell.rawThickness > 0) {
                 effectiveThickness = Math.min(cell.rawThickness, nominal);
-                if (range > 0) {
-                    percentage = ((effectiveThickness - minThick) / range) * 100;
-                } else {
-                    percentage = 100;
+                if (nominal > 0) {
+                    percentage = (effectiveThickness / nominal) * 100;
                 }
             }
             finalGrid[y][x] = {
@@ -342,7 +340,7 @@ function parseFileToGrid(rows: any[][], fileName: string, indexStart: number, in
             
             let rawValue = String(row[c]).trim();
             if (rawValue === '---' || rawValue === 'ND' || rawValue === '' || rawValue.toLowerCase().includes('n/a')) {
-                rawValue = '0';
+                rawValue = '';
             }
             const num = parseFloat(rawValue);
             const rawThickness = isNaN(num) || !isFinite(num) ? null : num;
@@ -363,7 +361,7 @@ function parseFileToGrid(rows: any[][], fileName: string, indexStart: number, in
     return { points: dataGrid, minXmm: minX, maxXmm: maxX, resolutionX: indexResolution, yResolution };
 }
 
-function generatePatchHeatmap(grid: MergedGrid, patch: SegmentBox, overallMin: number, overallMax: number): Promise<string> {
+function generatePatchHeatmap(grid: MergedGrid, patch: SegmentBox): Promise<string> {
     const { xMin, xMax, yMin, yMax } = patch.coordinates;
     const patchWidth = xMax - xMin + 1;
     const patchHeight = yMax - yMin + 1;
@@ -371,12 +369,25 @@ function generatePatchHeatmap(grid: MergedGrid, patch: SegmentBox, overallMin: n
     const ctx = canvas.getContext('2d');
     if (!ctx) return Promise.resolve('');
     const imageData = ctx.createImageData(patchWidth, patchHeight);
-    const colorRange = overallMax - overallMin;
+
+    let minThick = Infinity;
+    let maxThick = -Infinity;
+    for (let y = yMin; y <= yMax; y++) {
+        for (let x = xMin; x <= xMax; x++) {
+            const cell = grid[y]?.[x];
+            if(cell && !cell.isND && cell.effectiveThickness !== null) {
+                minThick = Math.min(minThick, cell.effectiveThickness);
+                maxThick = Math.max(maxThick, cell.effectiveThickness);
+            }
+        }
+    }
+    const colorRange = maxThick - minThick;
+
     for (let y = 0; y < patchHeight; y++) {
         for (let x = 0; x < patchWidth; x++) {
             const gridX = xMin + x, gridY = yMin + y;
             const cell = grid[gridY]?.[gridX];
-            const normalizedColorValue = cell && !cell.isND && cell.effectiveThickness !== null && colorRange > 0 ? (cell.effectiveThickness - overallMin) / colorRange : null;
+            const normalizedColorValue = cell && !cell.isND && cell.effectiveThickness !== null && colorRange > 0 ? (cell.effectiveThickness - minThick) / colorRange : null;
             const rgba = getNormalizedColor(normalizedColorValue);
             const index = (y * patchWidth + x) * 4;
             imageData.data.set(rgba, index);
@@ -390,7 +401,18 @@ function generatePatchHeatmap(grid: MergedGrid, patch: SegmentBox, overallMin: n
     }));
 }
 
-async function segmentAndAnalyze(grid: MergedGrid, nominalInput: number, threshold: number, overallMin: number, overallMax: number): Promise<SegmentBox[]> {
+function evaluatePatchRepresentation(patch: Omit<SegmentBox, 'representation'>, kind: PatchKind): PatchRepresentation {
+    if (kind === 'NON_INSPECTED') {
+        return 'TABLE_ONLY';
+    }
+    if (patch.pointCount < MICRO_PATCH_THRESHOLD) {
+        return 'TABLE_ONLY';
+    }
+    return 'IMAGE';
+}
+
+
+async function segmentAndAnalyze(grid: MergedGrid, nominalInput: number, threshold: number): Promise<SegmentBox[]> {
     const nominal = Number(nominalInput) || 0;
     const height = grid.length, width = grid[0]?.length || 0;
     const visited: boolean[][] = Array(height).fill(null).map(() => Array(width).fill(false));
@@ -402,10 +424,10 @@ async function segmentAndAnalyze(grid: MergedGrid, nominalInput: number, thresho
             const cell = grid[y][x];
             if (!cell || cell.isND || visited[y][x]) continue;
 
-            const nominalPercentage = cell.effectiveThickness && nominal > 0 ? (cell.effectiveThickness / nominal) * 100 : 100;
+            const percentage = cell.percentage ?? 100;
             
-            if (nominalPercentage < threshold) {
-                const points: {x: number, y: number, cell: any}[] = [];
+            if (percentage < threshold) {
+                const points: {x: number, y: number, cell: GridCell}[] = [];
                 const queue: [number, number][] = [[x, y]];
                 visited[y][x] = true;
                 let minThick = Infinity, sumThick = 0, xMin = x, xMax = x, yMin = y, yMax = y;
@@ -426,7 +448,7 @@ async function segmentAndAnalyze(grid: MergedGrid, nominalInput: number, thresho
                         if (nx >= 0 && nx < width && ny >= 0 && ny < height && !visited[ny][nx]) {
                             const neighbor = grid[ny][nx];
                             if (neighbor && !neighbor.isND) {
-                                const neighborNominalPct = neighbor.effectiveThickness && nominal > 0 ? (neighbor.effectiveThickness / nominal) * 100 : 100;
+                                const neighborNominalPct = neighbor.percentage ?? 100;
                                 if (neighborNominalPct < threshold) {
                                     visited[ny][nx] = true;
                                     queue.push([nx, ny]);
@@ -441,28 +463,42 @@ async function segmentAndAnalyze(grid: MergedGrid, nominalInput: number, thresho
                     let tier: SeverityTier = 'Moderate';
                     if (worstPct < 60) tier = 'Critical';
                     else if (worstPct < 70) tier = 'Severe';
-                    
-                    segments.push({
+
+                    const partialPatch = {
                         id: segmentIdCounter++,
-                        kind: 'CORROSION',
-                        tier, pointCount: points.length,
+                        kind: 'CORROSION' as PatchKind,
+                        tier, 
+                        pointCount: points.length,
                         worstThickness: minThick,
                         avgThickness: sumThick / points.length,
                         severityScore: (1 - minThick / nominal) * points.length,
                         coordinates: { xMin, xMax, yMin, yMax },
                         center: { x: Math.round(xMin + (xMax - xMin) / 2), y: Math.round(yMin + (yMax - yMin) / 2) }
-                    });
+                    };
+
+                    const representation = evaluatePatchRepresentation(partialPatch, 'CORROSION');
+                    const fullPatch: SegmentBox = { ...partialPatch, representation };
+
+                    if (representation === 'IMAGE') {
+                       fullPatch.heatmapDataUrl = await generatePatchHeatmap(grid, fullPatch);
+                    } else {
+                       fullPatch.cells = points.map(p => ({ 
+                           x: p.x, 
+                           y: p.y, 
+                           xMm: p.cell.xMm, 
+                           yMm: p.cell.yMm, 
+                           rawThickness: p.cell.rawThickness, 
+                           effectiveThickness: p.cell.effectiveThickness 
+                        }));
+                    }
+                    
+                    segments.push(fullPatch);
                 }
             }
         }
     }
     
-    const segmentsWithImages = await Promise.all(segments.map(async (seg) => {
-        const heatmapDataUrl = await generatePatchHeatmap(grid, seg, overallMin, overallMax);
-        return { ...seg, heatmapDataUrl };
-    }));
-
-    return segmentsWithImages.sort((a, b) => (a.worstThickness ?? Infinity) - (b.worstThickness ?? Infinity));
+    return segments.sort((a, b) => (a.worstThickness ?? Infinity) - (b.worstThickness ?? Infinity));
 }
 
 function segmentNonInspected(grid: MergedGrid): SegmentBox[] {
@@ -505,11 +541,12 @@ function segmentNonInspected(grid: MergedGrid): SegmentBox[] {
                 pointCount: count,
                 coordinates: { xMin, xMax, yMin, yMax },
                 center: { x: Math.round(xMin + (xMax - xMin) / 2), y: Math.round(yMin + (yMax - yMin) / 2) },
+                representation: 'TABLE_ONLY',
                 reason: 'Gap between plates or unscanned region'
             });
         }
     }
-    return ndPatches;
+    return ndPatches.sort((a,b) => b.pointCount - a.pointCount);
 }
 
 async function finalizeProcessing(threshold: number) {
@@ -518,9 +555,15 @@ async function finalizeProcessing(threshold: number) {
 
     FINAL_GRID = createFinalGrid(MASTER_GRID.points, MASTER_GRID.baseConfig.nominalThickness);
     const { stats, condition } = computeStats(FINAL_GRID, MASTER_GRID.baseConfig.nominalThickness);
-    const { displacementBuffer, colorBuffer } = createBuffers(FINAL_GRID, MASTER_GRID.baseConfig.nominalThickness, stats.minThickness, stats.maxThickness);
-    const corrosionPatches = await segmentAndAnalyze(FINAL_GRID, MASTER_GRID.baseConfig.nominalThickness, threshold, stats.minThickness, stats.maxThickness);
+    self.postMessage({ type: 'PROGRESS', progress: 60, message: 'Analyzing patches...' });
+    
+    const corrosionPatches = await segmentAndAnalyze(FINAL_GRID, MASTER_GRID.baseConfig.nominalThickness, threshold);
+    self.postMessage({ type: 'PROGRESS', progress: 80, message: 'Generating images...' });
+
     const ndPatches = segmentNonInspected(FINAL_GRID);
+    self.postMessage({ type: 'PROGRESS', progress: 90, message: 'Building tables...' });
+    
+    const { displacementBuffer, colorBuffer } = createBuffers(FINAL_GRID, MASTER_GRID.baseConfig.nominalThickness, stats.minThickness, stats.maxThickness);
     
     const plates = MASTER_GRID.plates.map(p => ({
         id: p.name, fileName: p.name, ...p.config
@@ -534,8 +577,7 @@ async function finalizeProcessing(threshold: number) {
 
 async function resegment(threshold: number) {
     if (!FINAL_GRID || !MASTER_GRID) throw new Error("Cannot resegment: data not finalized.");
-    const { stats } = computeStats(FINAL_GRID, MASTER_GRID.baseConfig.nominalThickness);
-    const corrosionPatches = await segmentAndAnalyze(FINAL_GRID, MASTER_GRID.baseConfig.nominalThickness, threshold, stats.minThickness, stats.maxThickness);
+    const corrosionPatches = await segmentAndAnalyze(FINAL_GRID, MASTER_GRID.baseConfig.nominalThickness, threshold);
     const ndPatches = segmentNonInspected(FINAL_GRID);
     self.postMessage({ type: 'SEGMENTS_UPDATED', corrosionPatches, ndPatches });
 }
@@ -603,6 +645,7 @@ self.onmessage = async (event: MessageEvent<any>) => {
             const newStartX = newPlateData.minXmm;
             const step = MASTER_GRID.resolutionX;
 
+            // Insert ND gap if it exists
             if (newStartX > prevMaxX + step) {
                  for (let x = prevMaxX + step; x < newStartX; x += step) {
                     for (let y = 0; y < MASTER_GRID.height; y++) {
