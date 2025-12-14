@@ -12,13 +12,13 @@ import {
   ImageRun,
   PageBreak,
 } from "docx";
-import type { SegmentBox } from "@/lib/types";
+import type { EnrichedPatch } from "../types";
 import { base64ToUint8Array } from "../utils";
 
 /**
  * Builds Corrosion Patch Details section
  */
-export function buildCorrosionPatches(patches: SegmentBox[]) {
+export function buildCorrosionPatches(patches: EnrichedPatch[]) {
   if (!patches || patches.length === 0) {
     return [
       new Paragraph({
@@ -49,7 +49,7 @@ export function buildCorrosionPatches(patches: SegmentBox[]) {
     children.push(new Paragraph({
         spacing: { after: 300 },
         children: [new TextRun({
-            text: "Small corrosion patches consisting of limited data points are documented in the summary table below. Graphical representations are omitted for these due to their limited spatial extent.",
+            text: "Small corrosion patches consisting of limited data points ('micro-patches') are documented in the summary table below. Graphical representations are omitted for these due to their limited spatial extent.",
             italics: true,
             size: 18,
         })]
@@ -61,9 +61,9 @@ export function buildCorrosionPatches(patches: SegmentBox[]) {
     const microPatchRows = tableOnlyPatches.flatMap(p => 
         p.cells?.map(cell => new TableRow({
             children: [
-                tableCell(`C-${p.id}`),
-                tableCell(p.tier),
-                tableCell(`${cell.x}, ${cell.y}`),
+                tableCell(p.patchId),
+                tableCell(p.meta.severity),
+                tableCell(`${cell.x},${cell.y}`),
                 tableCell(cell.effectiveThickness?.toFixed(2) ?? 'N/A'),
             ]
         })) || []
@@ -94,25 +94,26 @@ export function buildCorrosionPatches(patches: SegmentBox[]) {
     /* -------- PATCH HEADER -------- */
     children.push(
       new Paragraph({
-        text: `Patch ID: C-${patch.id}`,
+        text: `Patch ID: ${patch.patchId}`,
         heading: HeadingLevel.HEADING_2,
         spacing: { after: 200 },
       })
     );
 
     /* -------- METADATA TABLE -------- */
+    const { meta } = patch;
     children.push(
       new Table({
         width: { size: 100, type: WidthType.PERCENTAGE },
         columnWidths: [35, 65],
         rows: [
           metaRow("Patch Type", "Corrosion"),
-          metaRow("Severity", patch.tier),
-          metaRow("Location (X Range)", `${patch.coordinates.xMin} – ${patch.coordinates.xMax}`),
-          metaRow("Location (Y Range)", `${patch.coordinates.yMin} – ${patch.coordinates.yMax}`),
-          metaRow("Area (Points)", patch.pointCount),
-          metaRow("Minimum Thickness", `${patch.worstThickness?.toFixed(2)} mm`),
-          metaRow("Average Thickness", `${patch.avgThickness?.toFixed(2)} mm`),
+          metaRow("Severity", meta.severity),
+          metaRow("Location (X Range)", meta.xRange),
+          metaRow("Location (Y Range)", meta.yRange),
+          metaRow("Area (Points)", meta.area),
+          metaRow("Minimum Thickness", `${meta.minThickness} mm`),
+          metaRow("Average Thickness", `${meta.avgThickness} mm`),
         ],
       })
     );
@@ -120,23 +121,20 @@ export function buildCorrosionPatches(patches: SegmentBox[]) {
     /* -------- IMAGE GRID (2 × 2) -------- */
     children.push(new Paragraph({ text: "", spacing: { after: 200 } }));
     
-    // The patch image generation logic now needs to be called from the UI and passed in
-    // This is a placeholder showing how it *would* be used if images were on the patch object
     children.push(
         new Table({
             width: { size: 100, type: WidthType.PERCENTAGE },
             rows: [
             new TableRow({
                 children: [
-                    imageCell(patch.heatmapDataUrl, "2D Patch View"),
-                    // These would be populated by the UI capture process
-                    imageCell(undefined, "3D Top View (Placeholder)"),
+                    imageCell(patch.images?.view2D, "2D Patch View"),
+                    imageCell(patch.images?.view3DTop, "3D Top View"),
                 ],
             }),
             new TableRow({
                 children: [
-                    imageCell(undefined, "3D Side View (Placeholder)"),
-                    imageCell(undefined, "3D Isometric View (Placeholder)"),
+                    imageCell(patch.images?.view3DSide, "3D Side View"),
+                    imageCell(patch.images?.view3DIso, "3D Isometric View"),
                 ],
             }),
             ],

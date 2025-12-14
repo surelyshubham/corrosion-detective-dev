@@ -1,20 +1,11 @@
+
 // src/report/docx/ReportBuilder.ts
 
 import {
   Document,
   Packer,
   Paragraph,
-  TextRun,
-  Table,
-  TableRow,
-  TableCell,
-  HeadingLevel,
-  ImageRun,
-  AlignmentType,
-  WidthType,
   PageBreak,
-  Header,
-  Footer,
 } from "docx";
 
 import type { ReportInput } from "./types";
@@ -25,13 +16,14 @@ import { buildLegend } from "./sections/legend";
 import { buildCorrosionPatches } from "./sections/corrosionPatches";
 import { buildNDPatches } from "./sections/ndPatches";
 import { buildConclusion } from "./sections/conclusion";
-import { createHeader, createFooter } from "./styles";
+import { createHeader, createFooter, STYLES } from "./styles";
 
 export async function generateInspectionReport(
   input: ReportInput
 ): Promise<Blob> {
 
   const doc = new Document({
+    styles: STYLES,
     sections: [
       {
         headers: {
@@ -59,7 +51,7 @@ export async function generateInspectionReport(
 
           // 5️⃣ CORROSION PATCHES
           ...buildCorrosionPatches(input.corrosionPatches),
-          ...(input.ndPatches.length > 0 ? [new PageBreak()] : []),
+          ...(input.ndPatches.length > 0 && input.corrosionPatches.filter(p=>p.representation === 'IMAGE').length > 0 ? [new PageBreak()] : []),
 
           // 6️⃣ ND PATCHES
           ...buildNDPatches(input.ndPatches),

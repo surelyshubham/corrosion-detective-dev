@@ -9,13 +9,10 @@ import {
   WidthType,
   BorderStyle,
   AlignmentType,
-  ImageRun,
-  PageBreak,
 } from "docx";
-import type { SegmentBox } from "@/lib/types";
-import { base64ToUint8Array } from "../utils";
+import type { EnrichedPatch } from "../types";
 
-export function buildNDPatches(patches: SegmentBox[]) {
+export function buildNDPatches(patches: EnrichedPatch[]) {
   if (!patches || patches.length === 0) {
     return [
       new Paragraph({
@@ -46,11 +43,11 @@ export function buildNDPatches(patches: SegmentBox[]) {
 
   const ndRows = patches.map(p => new TableRow({
     children: [
-        tableCell(`ND-${p.id}`),
-        tableCell(`${p.coordinates.xMin} – ${p.coordinates.xMax}`),
-        tableCell(`${p.coordinates.yMin} – ${p.coordinates.yMax}`),
-        tableCell(p.pointCount.toString()),
-        tableCell(p.reason),
+        tableCell(p.patchId),
+        tableCell(p.meta.xRange),
+        tableCell(p.meta.yRange),
+        tableCell(p.meta.area.toString()),
+        tableCell(p.meta.reason),
     ]
   }));
 

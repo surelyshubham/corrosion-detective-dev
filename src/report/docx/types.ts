@@ -1,5 +1,5 @@
 
-import type { InspectionStats } from "@/lib/types";
+import type { InspectionStats, SegmentBox } from "@/lib/types";
 
 export interface ReportInput {
   assetInfo: {
@@ -22,18 +22,27 @@ export interface ReportInput {
   stats: any; // your InspectionStats
   aiSummary: string;
 
-  corrosionPatches: PatchImageSet[];
-  ndPatches: PatchImageSet[];
+  corrosionPatches: EnrichedPatch[];
+  ndPatches: EnrichedPatch[];
 }
 
-export interface PatchImageSet {
+export interface EnrichedPatch {
   patchId: string;
   type: "CORROSION" | "ND";
+  representation: "IMAGE" | "TABLE_ONLY";
   meta: Record<string, any>;
   images: {
     view2D: string;
     view3DTop: string;
     view3DSide: string;
     view3DIso: string;
-  };
+  } | null;
+   cells?: {
+    x: number;
+    y: number;
+    xMm: number;
+    yMm: number;
+    rawThickness: number | null;
+    effectiveThickness: number | null;
+  }[];
 }

@@ -1,7 +1,7 @@
 
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState } from "react";
 import { useInspectionStore } from "@/store/use-inspection-store";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -11,6 +11,7 @@ import { Loader2, Download, FileText } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { getBase64ImageFromUrl } from "@/lib/image-utils";
 import type { ReportInput, PatchImageSet } from "@/report/docx/types";
+import { generateInspectionReport } from "@/report/docx/ReportBuilder";
 import type { SegmentBox } from "@/lib/types";
 import { DataVault } from "@/store/data-vault";
 import { Progress } from "../ui/progress";
@@ -25,24 +26,20 @@ const delayFrame = (ms = 70) => new Promise(res => setTimeout(res, ms));
 async function capturePatchImages(
   plate3DRef: any,
   corrosionPatches: SegmentBox[],
-  ndPatches: SegmentBox[]
 ): Promise<{ [key: string]: any }> {
   const results: { [key: string]: any } = {};
 
-  const all = [
-    ...corrosionPatches.map(p => ({ ...p, type: "corrosion" })),
-    ...ndPatches.map(p => ({ ...p, type: "nd" }))
-  ].filter(p => p.representation === 'IMAGE'); // IMPORTANT: Only capture for IMAGE patches
+  const imagePatches = corrosionPatches.filter(p => p.representation === 'IMAGE');
 
-  for (const p of all) {
+  for (const p of imagePatches) {
     await plate3DRef.current.focus(p.center.x, p.center.y, true, (p.coordinates.xMax - p.coordinates.xMin) ?? 10);
     await delayFrame();
 
-    const iso = await plate3DRef.current.setView("iso").then(() => plate3DRef.current.capture());
+    const iso = await plate3DRef.current.capture();
     const top = await plate3DRef.current.setView("top").then(() => plate3DRef.current.capture());
     const side = await plate3DRef.current.setView("side").then(() => plate3DRef.current.capture());
 
-    results[p.id] = {
+    results[`C-${p.id}`] = {
       view2D: p.heatmapDataUrl,
       view3DIso: iso,
       view3DTop: top,
@@ -52,6 +49,7 @@ async function capturePatchImages(
 
   return results;
 }
+
 
 export function ReportTab({ twoDViewRef, threeDeeViewRef }: ReportTabProps) {
   const { inspectionResult, patches, defectThreshold } = useInspectionStore();
@@ -65,7 +63,7 @@ export function ReportTab({ twoDViewRef, threeDeeViewRef }: ReportTabProps) {
     operatorName: "AI Inspector",
     method: "Automated Ultrasonic Testing (AUT)",
   });
-  
+
   const generateDocx = async () => {
     if (!inspectionResult || !patches) {
       toast({
@@ -77,69 +75,35 @@ export function ReportTab({ twoDViewRef, threeDeeViewRef }: ReportTabProps) {
     }
     
     setIsGenerating(true);
-    setProgress({ stage: "Preparing views...", percent: 0 });
     
-    const worker = new Worker(new URL('../../workers/report.worker.ts', import.meta.url));
-
-    worker.onmessage = (e: MessageEvent) => {
-      const { type, stage, percent, reportBlob, error } = e.data;
-      if (type === 'PROGRESS') {
-        setProgress({ stage, percent });
-      } else if (type === 'DONE') {
-        downloadFile(reportBlob, `Inspection_Report_${reportMetadata.assetTag}.docx`);
-        toast({
-          title: "Report Generated!",
-          description: "Your DOCX file has been downloaded.",
-        });
-        setIsGenerating(false);
-        worker.terminate();
-      } else if (type === 'ERROR') {
-        console.error("Report generation failed:", error);
-        toast({
-          variant: "destructive",
-          title: "Generation Failed",
-          description: error || "Could not generate the report.",
-        });
-        setIsGenerating(false);
-        worker.terminate();
-      }
-    };
-    
-    worker.onerror = (err) => {
-        console.error("Worker error:", err);
-        toast({
-          variant: "destructive",
-          title: "Worker Error",
-          description: err.message || "An unexpected error occurred in the report generator.",
-        });
-        setIsGenerating(false);
-        worker.terminate();
-    }
-
     try {
+        setProgress({ stage: "Capturing full asset views...", percent: 5 });
         const logoBase64 = await getBase64ImageFromUrl('/logo.png');
-        
-        // Capture all necessary images on the main thread
-        setProgress({ stage: "Capturing asset views...", percent: 5 });
         const full2D = await twoDViewRef.current.capture();
         await threeDeeViewRef.current.resetCamera();
         const fullIso = await threeDeeViewRef.current.setView("iso").then(() => threeDeeViewRef.current.capture());
         const fullTop = await threeDeeViewRef.current.setView("top").then(() => threeDeeViewRef.current.capture());
         const fullSide = await threeDeeViewRef.current.setView("side").then(() => threeDeeViewRef.current.capture());
         
-        setProgress({ stage: "Capturing patch images...", percent: 10 });
-        const patchImages = await capturePatchImages(threeDeeViewRef, patches.corrosion, patches.nonInspected);
-
+        setProgress({ stage: "Capturing patch-specific images...", percent: 20 });
+        const patchImages = await capturePatchImages(threeDeeViewRef, patches.corrosion);
+        
         await threeDeeViewRef.current.resetCamera();
 
         const reportInput: ReportInput = {
-            assetInfo: {...reportMetadata, logoBase64},
+            assetInfo: {
+                ...reportMetadata, 
+                logoBase64,
+                inspectionDate: new Date().toLocaleDateString(),
+                reportId: `REP-${Date.now()}`
+            },
             fullAssetImages: { view2D: full2D, view3DIso: fullIso, view3DTop: fullTop, view3DSide: fullSide },
             stats: {...inspectionResult.stats, condition: inspectionResult.condition, nominalThickness: inspectionResult.nominalThickness },
             aiSummary: inspectionResult.aiInsight?.recommendation ?? "AI summary was not generated for this inspection.",
             corrosionPatches: patches.corrosion.map(p => ({
                 patchId: `C-${p.id}`,
                 type: 'CORROSION',
+                representation: p.representation,
                 meta: {
                     xRange: `${p.coordinates.xMin} - ${p.coordinates.xMax}`,
                     yRange: `${p.coordinates.yMin} - ${p.coordinates.yMax}`,
@@ -148,33 +112,44 @@ export function ReportTab({ twoDViewRef, threeDeeViewRef }: ReportTabProps) {
                     avgThickness: p.avgThickness?.toFixed(2),
                     severity: p.tier,
                 },
-                images: patchImages[p.id] ?? null
+                images: patchImages[`C-${p.id}`] ?? null,
+                cells: p.cells,
             })),
             ndPatches: patches.nonInspected.map(p => ({
                 patchId: `ND-${p.id}`,
                 type: 'ND',
+                representation: p.representation,
                 meta: {
                      xRange: `${p.coordinates.xMin} - ${p.coordinates.xMax}`,
                     yRange: `${p.coordinates.yMin} - ${p.coordinates.yMax}`,
                     area: p.pointCount,
+                    reason: p.reason
                 },
-                images: patchImages[p.id] ?? null
+                images: null, // ND patches don't get images
+                cells: [],
             }))
         };
 
-        // Offload the heavy DOCX generation to the worker
-        setProgress({ stage: "Building document...", percent: 20 });
-        worker.postMessage({ type: 'GENERATE_REPORT', payload: reportInput });
+        setProgress({ stage: "Assembling DOCX file...", percent: 75 });
+        const reportBlob = await generateInspectionReport(reportInput);
+        
+        setProgress({ stage: "Finalizing download...", percent: 100 });
+        downloadFile(reportBlob, `Inspection_Report_${reportMetadata.assetTag}.docx`);
+        
+        toast({
+          title: "Report Generated!",
+          description: "Your DOCX file has been downloaded.",
+        });
 
     } catch (error) {
-      console.error("Report generation setup failed:", error);
+      console.error("Report generation failed:", error);
       toast({
         variant: "destructive",
         title: "Generation Failed",
         description: (error as Error).message || "Could not generate the report.",
       });
-      setIsGenerating(false);
-      worker.terminate();
+    } finally {
+        setIsGenerating(false);
     }
   };
 
@@ -268,5 +243,3 @@ function downloadFile(blob: Blob, fileName: string) {
   document.body.removeChild(link);
   URL.revokeObjectURL(link.href);
 }
-
-    
