@@ -1,3 +1,4 @@
+
 import {
   Paragraph,
   TextRun,
@@ -57,7 +58,7 @@ export function buildNDPatches(patches: PatchImageSet[]) {
           row("Patch Type", "Non-Inspected Area"),
           row("X Range", patch.meta.xRange),
           row("Y Range", patch.meta.yRange),
-          row("Estimated Area (mm²)", patch.meta.area),
+          row("Estimated Area (Points)", patch.meta.area),
           row("Reason", patch.meta.reason ?? "Inspection not possible"),
         ],
       }),

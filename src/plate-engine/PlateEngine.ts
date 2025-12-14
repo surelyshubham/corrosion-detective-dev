@@ -1,6 +1,6 @@
 
 import * as THREE from "three";
-import type { MergedGrid, InspectionStats } from "@/lib/types";
+import type { MergedGrid, InspectionStats, GridCell } from "@/lib/types";
 
 export type HoverInfo = {
   gridX: number;
@@ -12,31 +12,25 @@ export type HoverInfo = {
 };
 
 export class PlateEngine {
-  // --- immutable inputs ---
   private grid: MergedGrid;
   private stats: InspectionStats;
   private nominalThickness: number;
   private depthExaggeration: number;
 
-  // --- three.js ---
   private scene: THREE.Scene;
   private camera: THREE.Camera;
   private plateMesh!: THREE.Mesh;
   private raycaster = new THREE.Raycaster();
   
-  // --- geometry mapping ---
-  private readonly MAX_VISUAL_SIZE = 100;
   public readonly VISUAL_WIDTH: number;
   public visualHeight: number;
   public readonly cellWidth: number;
   public readonly cellHeight: number;
 
-  // --- world frame ---
   private axesHelper!: THREE.AxesHelper;
   private originMarker!: THREE.Mesh;
   private referencePlane!: THREE.Mesh;
 
-  // --- cursor ---
   private hoverCallback?: (info: HoverInfo | null) => void;
 
   constructor(params: {
@@ -57,7 +51,8 @@ export class PlateEngine {
     const plateWidth = this.stats.gridSize.width;
     const plateHeight = this.stats.gridSize.height;
 
-    const scaleFactor = this.MAX_VISUAL_SIZE / Math.max(plateWidth, plateHeight);
+    const MAX_VISUAL_SIZE = 100;
+    const scaleFactor = MAX_VISUAL_SIZE / Math.max(plateWidth, plateHeight);
 
     this.VISUAL_WIDTH = plateWidth * scaleFactor;
     this.visualHeight = plateHeight * scaleFactor;
@@ -69,34 +64,28 @@ export class PlateEngine {
     this.createWorldFrame();
   }
   
-  private getAbsColor(percentage: number | null): THREE.Color {
+  private getAbsColor(percentage: number | null, isND: boolean): THREE.Color {
     const c = new THREE.Color();
-    if (percentage === null) c.set(0x888888);        // ND
-    else if (percentage < 70) c.set(0xff0000);       // Red
-    else if (percentage < 80) c.set(0xffff00);       // Yellow
-    else if (percentage < 90) c.set(0x00ff00);       // Green
-    else c.set(0x0000ff);                            // Blue
+    if (isND) {
+      c.set(0x888888); 
+      return c;
+    }
+    if (percentage === null) c.set(0x444444);
+    else if (percentage < 70) c.set(0xff0000);
+    else if (percentage < 80) c.set(0xffff00);
+    else if (percentage < 90) c.set(0x00ff00);
+    else c.set(0x0000ff);
     return c;
   }
 
-  // ===============================
-  // GEOMETRY (FLAT, FAST, IMMUTABLE)
-  // ===============================
   private createPlate() {
     const gridW = this.stats.gridSize.width;
     const gridH = this.stats.gridSize.height;
-
     const MAX_SEGMENTS = 250;
     const widthSegments  = Math.min(gridW - 1, MAX_SEGMENTS);
     const heightSegments = Math.min(gridH - 1, MAX_SEGMENTS);
 
-    const geom = new THREE.PlaneGeometry(
-      this.VISUAL_WIDTH,
-      this.visualHeight,
-      widthSegments,
-      heightSegments
-    );
-
+    const geom = new THREE.PlaneGeometry(this.VISUAL_WIDTH, this.visualHeight, widthSegments, heightSegments);
     geom.rotateX(-Math.PI / 2);
     geom.translate(this.VISUAL_WIDTH / 2, 0, this.visualHeight / 2);
     
@@ -104,82 +93,50 @@ export class PlateEngine {
     const positions = geom.attributes.position;
     const xStep = (gridW - 1) / widthSegments;
     const yStep = (gridH - 1) / heightSegments;
-    const zScale = this.depthExaggeration;
 
     for (let y = 0; y <= heightSegments; y++) {
       for (let x = 0; x <= widthSegments; x++) {
         const gridX = Math.round(x * xStep);
         const gridY = Math.round(y * yStep);
-
         const cell = this.grid[gridY]?.[gridX];
+        
+        const isND = !cell || cell.isND;
         const percentage = cell?.percentage ?? null;
-        const color = this.getAbsColor(percentage);
+        const color = this.getAbsColor(percentage, isND);
         colors.push(color.r, color.g, color.b);
 
-        const wallLoss = (cell && cell.effectiveThickness !== null)
-            ? this.nominalThickness - cell.effectiveThickness
-            : 0;
-
+        const wallLoss = (cell && !isND && cell.effectiveThickness !== null) ? this.nominalThickness - cell.effectiveThickness : 0;
+        const z = -wallLoss * this.depthExaggeration;
         const i = y * (widthSegments + 1) + x;
-        const z = -wallLoss * zScale;
-        positions.setY(i, z);
+        positions.setY(i, isND ? 0 : z); // Set ND points to be flat
       }
     }
 
-    geom.setAttribute(
-      "color",
-      new THREE.Float32BufferAttribute(colors, 3)
-    );
+    geom.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
     positions.needsUpdate = true;
     geom.computeVertexNormals();
 
-    const mat = new THREE.MeshStandardMaterial({
-      vertexColors: true,
-      side: THREE.DoubleSide
-    });
-
+    const mat = new THREE.MeshStandardMaterial({ vertexColors: true, side: THREE.DoubleSide });
     this.plateMesh = new THREE.Mesh(geom, mat);
     this.scene.add(this.plateMesh);
   }
 
   private createWorldFrame() {
-    // 1️⃣ AXES (X=Red, Y=Green, Z=Blue)
     this.axesHelper = new THREE.AxesHelper(30);
     this.scene.add(this.axesHelper);
-  
-    // 2️⃣ ORIGIN MARKER (0,0,0)
-    this.originMarker = new THREE.Mesh(
-      new THREE.SphereGeometry(1.2, 16, 16),
-      new THREE.MeshBasicMaterial({ color: 0xff00ff }) // magenta
-    );
+    this.originMarker = new THREE.Mesh(new THREE.SphereGeometry(1.2, 16, 16), new THREE.MeshBasicMaterial({ color: 0xff00ff }));
     this.originMarker.position.set(0, 0, 0);
     this.scene.add(this.originMarker);
 
-    // 3️⃣ REFERENCE PLANE (Y = 0)
-    const planeGeom = new THREE.PlaneGeometry(
-        this.VISUAL_WIDTH,
-        this.visualHeight
-    );
+    const planeGeom = new THREE.PlaneGeometry(this.VISUAL_WIDTH, this.visualHeight);
     planeGeom.rotateX(-Math.PI / 2);
     planeGeom.translate(this.VISUAL_WIDTH / 2, 0, this.visualHeight / 2);
-
-    this.referencePlane = new THREE.Mesh(
-        planeGeom,
-        new THREE.MeshBasicMaterial({
-        color: 0x1e90ff,
-        transparent: true,
-        opacity: 0.25,
-        side: THREE.DoubleSide,
-        depthWrite: false
-        })
-    );
-
+    this.referencePlane = new THREE.Mesh(planeGeom, new THREE.MeshBasicMaterial({
+        color: 0x1e90ff, transparent: true, opacity: 0.25, side: THREE.DoubleSide, depthWrite: false
+    }));
     this.scene.add(this.referencePlane);
   }
 
-  // ===============================
-  // CURSOR HANDLING (NO LAG)
-  // ===============================
   handleMouseMove(ndc: THREE.Vector2) {
     this.raycaster.setFromCamera(ndc, this.camera);
     const hit = this.raycaster.intersectObject(this.plateMesh, false)[0];
@@ -187,60 +144,36 @@ export class PlateEngine {
       this.hoverCallback?.(null);
       return;
     }
-
     const { x, z } = hit.point;
-
     const gridX = Math.floor(x / this.cellWidth);
     const gridY = Math.floor(z / this.cellHeight);
-
-    if (
-      gridX < 0 ||
-      gridY < 0 ||
-      gridY >= this.grid.length ||
-      gridX >= this.grid[0].length
-    ) {
+    if (gridX < 0 || gridY < 0 || gridY >= this.grid.length || gridX >= this.grid[0].length) {
       this.hoverCallback?.(null);
       return;
     }
-
     const cell = this.grid[gridY][gridX];
     if (!cell) {
       this.hoverCallback?.(null);
       return;
     }
-    
     this.hoverCallback?.({
-      gridX,
-      gridY,
-      worldX: x,
-      worldY: z,
-      effectiveThickness: cell.effectiveThickness,
-      percentage: cell.percentage,
+      gridX, gridY, worldX: x, worldY: z,
+      effectiveThickness: cell.effectiveThickness, percentage: cell.percentage,
     });
   }
 
-  // ===============================
-  // PUBLIC API
-  // ===============================
-  onHover(cb: (info: HoverInfo | null) => void) {
-    this.hoverCallback = cb;
-  }
+  onHover(cb: (info: HoverInfo | null) => void) { this.hoverCallback = cb; }
   
   gridToWorld(gridX: number, gridY: number): THREE.Vector3 {
       const worldX = gridX * this.cellWidth;
       const worldZ = gridY * this.cellHeight;
-      // Y (height) needs to be calculated from displacement
       const cell = this.grid[gridY]?.[gridX];
-      const wallLoss = (cell && cell.effectiveThickness !== null)
-          ? this.nominalThickness - cell.effectiveThickness
-          : 0;
+      const wallLoss = (cell && !cell.isND && cell.effectiveThickness !== null) ? this.nominalThickness - cell.effectiveThickness : 0;
       const worldY = -wallLoss * this.depthExaggeration;
       return new THREE.Vector3(worldX, worldY, worldZ);
   }
 
-  getReferencePlane(): THREE.Mesh {
-    return this.referencePlane;
-  }
+  getReferencePlane(): THREE.Mesh { return this.referencePlane; }
 
   setDepthExaggeration(scale: number) {
     this.depthExaggeration = scale;
@@ -257,11 +190,10 @@ export class PlateEngine {
             const gridX = Math.round(x * xStep);
             const gridY = Math.round(y * yStep);
             const cell = this.grid[gridY]?.[gridX];
-            const wallLoss = (cell && cell.effectiveThickness !== null)
-                ? this.nominalThickness - cell.effectiveThickness
-                : 0;
+            const isND = !cell || cell.isND;
+            const wallLoss = (cell && !isND && cell.effectiveThickness !== null) ? this.nominalThickness - cell.effectiveThickness : 0;
             const i = y * (widthSegments + 1) + x;
-            positions.setY(i, -wallLoss * this.depthExaggeration);
+            positions.setY(i, isND ? 0 : -wallLoss * this.depthExaggeration);
         }
     }
     positions.needsUpdate = true;
@@ -269,11 +201,7 @@ export class PlateEngine {
   }
 
   dispose() {
-    this.scene.remove(this.plateMesh);
-    this.scene.remove(this.axesHelper);
-    this.scene.remove(this.originMarker);
-    this.scene.remove(this.referencePlane);
-  
+    this.scene.remove(this.plateMesh, this.axesHelper, this.originMarker, this.referencePlane);
     this.plateMesh.geometry.dispose();
     (this.plateMesh.material as THREE.Material).dispose();
   }

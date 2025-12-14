@@ -1,9 +1,8 @@
 
-
 "use client"
 
 import { create } from 'zustand';
-import type { MergedInspectionResult, AIInsight, Plate, MergedGrid, AssetType, InspectionStats, SegmentBox } from '@/lib/types';
+import type { MergedInspectionResult, AIInsight, Plate, MergedGrid, AssetType, InspectionStats, SegmentBox, GridCell } from '@/lib/types';
 import { DataVault } from './data-vault';
 import { type MergeFormValues } from '@/components/tabs/merge-alert-dialog';
 import { toast } from '@/hooks/use-toast';
@@ -217,14 +216,12 @@ export const useInspectionStore = create<InspectionState>()(
         resolveThicknessConflict: (resolution) => {
             const conflict = get().thicknessConflict;
             if (!worker || !conflict) return;
-
             set({ isLoading: true, thicknessConflict: null });
-            
             worker.postMessage({
                 type: 'MERGE',
                 file: { name: conflict.fileName, buffer: conflict.fileBuffer },
-                mergeConfig: conflict.mergeConfig,
                 resolution: resolution,
+                mergeConfig: conflict.mergeConfig
             }, [conflict.fileBuffer]);
         },
         

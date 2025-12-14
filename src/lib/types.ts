@@ -1,5 +1,4 @@
 
-
 export type AssetType = 
   | 'Plate'
   | 'Tank'
@@ -18,6 +17,16 @@ export const assetTypes: AssetType[] = [
   'Ship Hull',
   'LPG/Gas Bullet',
 ];
+
+export interface GridCell {
+  plateId: string | null;
+  rawThickness: number | null;
+  effectiveThickness: number | null;
+  percentage: number | null;
+  isND: boolean;
+  xMm: number;
+  yMm: number;
+}
 
 export interface InspectionDataPoint {
   x: number;
@@ -83,6 +92,7 @@ export interface SegmentBox {
   sideViewDataUrl?: string;
   heatmapDataUrl?: string;
   aiObservation?: string;
+  reason?: string;
 }
 
 export type Plate = {
@@ -98,14 +108,7 @@ export type Plate = {
   pipeLength?: number;
 };
 
-export interface MergedCell {
-  plateId: string | null;
-  rawThickness: number | null;
-  effectiveThickness: number | null;
-  percentage: number | null;
-}
-
-export type MergedGrid = MergedCell[][]; // [y][x]
+export type MergedGrid = GridCell[][]; // [y][x]
 
 export interface MergedInspectionResult {
   plates: Plate[];
