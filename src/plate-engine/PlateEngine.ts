@@ -6,7 +6,7 @@ export type HoverInfo = {
   gridX: number;
   gridY: number;
   worldX: number;
-  worldY: number;
+  worldY: number; // This is the Z-axis in THREE.js
   effectiveThickness: number | null;
   percentage: number | null;
 };
@@ -28,8 +28,8 @@ export class PlateEngine {
   private readonly MAX_VISUAL_SIZE = 100;
   public readonly VISUAL_WIDTH: number;
   public visualHeight: number;
-  private cellWidth: number;
-  private cellHeight: number;
+  public readonly cellWidth: number;
+  public readonly cellHeight: number;
 
   // --- world frame ---
   private axesHelper!: THREE.AxesHelper;
@@ -224,6 +224,18 @@ export class PlateEngine {
   // ===============================
   onHover(cb: (info: HoverInfo | null) => void) {
     this.hoverCallback = cb;
+  }
+  
+  gridToWorld(gridX: number, gridY: number): THREE.Vector3 {
+      const worldX = gridX * this.cellWidth;
+      const worldZ = gridY * this.cellHeight;
+      // Y (height) needs to be calculated from displacement
+      const cell = this.grid[gridY]?.[gridX];
+      const wallLoss = (cell && cell.effectiveThickness !== null)
+          ? this.nominalThickness - cell.effectiveThickness
+          : 0;
+      const worldY = -wallLoss * this.depthExaggeration;
+      return new THREE.Vector3(worldX, worldY, worldZ);
   }
 
   getReferencePlane(): THREE.Mesh {

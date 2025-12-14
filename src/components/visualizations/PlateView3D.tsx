@@ -16,11 +16,13 @@ import { useImperativeHandle } from 'react'
 import { PlateEngine, type HoverInfo } from '@/plate-engine'
 import { PlatePercentLegend } from './PlatePercentLegend'
 
+const delayFrame = (ms = 70) => new Promise(res => setTimeout(res, ms));
+
 export type PlateView3DRef = {
-  capture: () => string;
-  focus: (x: number, y: number, zoomIn: boolean) => void;
-  resetCamera: () => void;
-  setView: (view: 'iso' | 'top' | 'side') => void;
+  capture: () => Promise<string>;
+  focus: (x: number, y: number, zoomIn: boolean, boxSize: number) => Promise<void>;
+  resetCamera: () => Promise<void>;
+  setView: (view: 'iso' | 'top' | 'side') => Promise<void>;
 };
 
 interface PlateView3DProps {}
@@ -56,46 +58,60 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     rendererRef.current.render(sceneRef.current, cameraRef.current);
   }, []);
 
-  const setView = useCallback(async (view: "iso" | "top" | "side") => {
-    if (!cameraRef.current || !controlsRef.current || !engineRef.current) return;
+  const setView = useCallback(
+    async (view: "iso" | "top" | "side") => {
+        if (!cameraRef.current || !controlsRef.current || !engineRef.current) return;
 
-    const distance = Math.max(120, engineRef.current.visualHeight * 1.2);
-    const targetX = engineRef.current.VISUAL_WIDTH / 2;
-    const targetZ = engineRef.current.visualHeight / 2;
-    
-    controlsRef.current.target.set(targetX, 0, targetZ);
+        const cam = cameraRef.current;
+        const ctl = controlsRef.current;
+        const target = new THREE.Vector3(engineRef.current.VISUAL_WIDTH / 2, 0, engineRef.current.visualHeight / 2);
+        
+        const dist = Math.max(engineRef.current.VISUAL_WIDTH, engineRef.current.visualHeight) * 1.5;
 
-    switch (view) {
-      case "top":
-        cameraRef.current.position.set(targetX, distance, targetZ);
-        break;
+        switch (view) {
+        case "top":
+            cam.position.set(target.x, dist, target.z);
+            break;
+        case "side":
+            cam.position.set(target.x + dist, 0, target.z);
+            break;
+        case "iso":
+        default:
+            cam.position.set(target.x + dist * 0.7, dist * 0.5, target.z + dist * 0.7);
+            break;
+        }
 
-      case "side":
-        cameraRef.current.position.set(targetX + distance, 0, targetZ);
-        break;
-
-      case "iso":
-      default:
-        cameraRef.current.position.set(
-          targetX + distance * 0.7,
-          distance * 0.6,
-          targetZ + distance * 0.7
-        );
-        break;
-    }
-    controlsRef.current.update();
-  }, []);
+        ctl.target.copy(target);
+        ctl.update();
+        
+        await delayFrame();
+        rendererRef.current?.render(sceneRef.current!, cam);
+    },
+    []
+  );
   
   const resetCamera = useCallback(async () => {
-    cameraInitializedRef.current = false;
     await setView("iso");
-    cameraInitializedRef.current = true;
   }, [setView]);
 
 
    useImperativeHandle(ref, () => ({
-    capture: () => rendererRef.current!.domElement.toDataURL(),
-    focus: (x, y, zoomIn) => {},
+    capture: async () => {
+        if (!rendererRef.current || !cameraRef.current || !sceneRef.current) return "";
+        await delayFrame();
+        rendererRef.current.render(sceneRef.current, cameraRef.current);
+        return rendererRef.current.domElement.toDataURL("image/png");
+    },
+    focus: async (x: number, y: number, zoomIn: boolean, boxSize: number) => {
+        if (!cameraRef.current || !controlsRef.current || !engineRef.current) return;
+        const target = engineRef.current.gridToWorld(x, y);
+        controlsRef.current.target.set(target.x, target.y, target.z);
+
+        const camDist = Math.max(boxSize * engineRef.current.cellWidth, 20) * 1.5;
+        cameraRef.current.position.set(target.x + camDist, target.y + camDist, target.z + camDist);
+        controlsRef.current.update();
+        await delayFrame();
+    },
     resetCamera: resetCamera,
     setView: setView,
   }));
@@ -163,10 +179,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
     currentMount.addEventListener('mouseleave', () => setHoveredPoint(null));
     window.addEventListener('resize', handleResize);
     
-    if (!cameraInitializedRef.current) {
-        setView("iso");
-        cameraInitializedRef.current = true;
-    }
+    resetCamera();
     
     animate();
 
@@ -180,7 +193,7 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
         currentMount.innerHTML = '';
         cameraInitializedRef.current = false;
     };
-}, [isReady, nominalThickness, animate, setView, depthExaggeration]);
+}, [isReady, nominalThickness, animate, setView, depthExaggeration, resetCamera]);
 
  useEffect(() => {
     if (refPlaneRef.current) {
@@ -261,5 +274,3 @@ export const PlateView3D = React.forwardRef<PlateView3DRef, PlateView3DProps>((p
   )
 });
 PlateView3D.displayName = "PlateView3D";
-
-    

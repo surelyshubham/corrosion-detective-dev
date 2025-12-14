@@ -21,6 +21,104 @@ interface ReportTabProps {
   threeDeeViewRef: React.RefObject<any>;
 }
 
+const delayFrame = (ms = 70) => new Promise(res => setTimeout(res, ms));
+
+async function capturePatchImages(
+  plate3DRef: any,
+  corrosionPatches: SegmentBox[],
+  ndPatches: SegmentBox[]
+) {
+  const results: { [key: string]: any } = {};
+
+  const all = [
+    ...corrosionPatches.map(p => ({ ...p, type: "corrosion" })),
+    ...ndPatches.map(p => ({ ...p, type: "nd" }))
+  ];
+
+  for (const p of all) {
+    // Focus the camera on patch center (existing method)
+    await plate3DRef.current.focus(p.center.x, p.center.y, true, (p.coordinates.xMax - p.coordinates.xMin) ?? 10);
+    await delayFrame();
+
+    // ISO
+    await plate3DRef.current.setView("iso");
+    const iso = await plate3DRef.current.capture();
+
+    // TOP
+    await plate3DRef.current.setView("top");
+    const top = await plate3DRef.current.capture();
+
+    // SIDE
+    await plate3DRef.current.setView("side");
+    const side = await plate3DRef.current.capture();
+
+    results[p.id] = {
+      view2D: p.heatmapDataUrl,   // From worker
+      view3DIso: iso,
+      view3DTop: top,
+      view3DSide: side,
+    };
+  }
+
+  return results;
+}
+
+function assembleReportInput(
+  metadata: any,
+  inspectionResult: any,
+  full2D: string,
+  fullIso: string,
+  fullTop: string,
+  fullSide: string,
+  corrosionPatches: SegmentBox[],
+  ndPatches: SegmentBox[],
+  patchImages: any
+): ReportInput {
+  return {
+    assetInfo: {
+        clientName: metadata.clientName,
+        assetTag: metadata.assetTag,
+        operatorName: metadata.operatorName,
+        inspectionDate: new Date().toLocaleDateString(),
+        method: metadata.method,
+        reportId: `REP-${Date.now()}`,
+        logoBase64: metadata.logoBase64,
+    },
+    fullAssetImages: {
+      view2D: full2D,
+      view3DIso: fullIso,
+      view3DTop: fullTop,
+      view3DSide: fullSide,
+    },
+    stats: inspectionResult.stats,
+    aiSummary: inspectionResult.aiInsight?.recommendation ?? "AI summary not available.",
+    corrosionPatches: corrosionPatches.map(p => ({
+      patchId: `C-${p.id}`,
+      type: 'CORROSION',
+      meta: {
+        xRange: `${p.coordinates.xMin} - ${p.coordinates.xMax}`,
+        yRange: `${p.coordinates.yMin} - ${p.coordinates.yMax}`,
+        area: p.pointCount,
+        minThickness: p.worstThickness?.toFixed(2),
+        avgThickness: p.avgThickness?.toFixed(2),
+        severity: p.tier,
+      },
+      images: patchImages[p.id] ?? null
+    })),
+    ndPatches: ndPatches.map(p => ({
+      patchId: `ND-${p.id}`,
+      type: 'ND',
+      meta: {
+        xRange: `${p.coordinates.xMin} - ${p.coordinates.xMax}`,
+        yRange: `${p.coordinates.yMin} - ${p.coordinates.yMax}`,
+        area: p.pointCount,
+      },
+      images: patchImages[p.id] ?? null
+    }))
+  };
+}
+
+
 export function ReportTab({ twoDViewRef, threeDeeViewRef }: ReportTabProps) {
   const { inspectionResult, patches } = useInspectionStore();
   const { toast } = useToast();
@@ -31,82 +129,7 @@ export function ReportTab({ twoDViewRef, threeDeeViewRef }: ReportTabProps) {
     operatorName: "AI Inspector",
     method: "Automated Ultrasonic Testing (AUT)",
   });
-
-  const assembleReportInput = async (
-    inspectionResult: any,
-    patches: any,
-    metadata: any
-  ): Promise<ReportInput> => {
-    if (!twoDViewRef.current || !threeDeeViewRef.current) {
-      throw new Error("View refs are not available");
-    }
-
-    /* ✅ DECLARE FIRST (THIS IS THE FIX) */
-    let view2D = "";
-    let view3DTop = "";
-    let view3DSide = "";
-    let view3DIso = "";
-
-    // 1. CAPTURE IMAGES SEQUENTIALLY
-    await threeDeeViewRef.current.resetCamera();
-    
-    view2D = twoDViewRef.current.capture();
-
-    await threeDeeViewRef.current.setView('iso');
-    view3DIso = await threeDeeViewRef.current.capture();
-
-    await threeDeeViewRef.current.setView('top');
-    view3DTop = await threeDeeViewRef.current.capture();
-
-    await threeDeeViewRef.current.setView('side');
-    view3DSide = await threeDeeViewRef.current.capture();
-
-    console.log("ISO image size:", view3DIso.length); // sanity
-
-    const logoBase64 = await getBase64ImageFromUrl('/logo.png');
-
-    const createPatchSet = (patch: SegmentBox, type: 'CORROSION' | 'NON_INSPECTED'): PatchImageSet => ({
-        patchId: `${type === 'CORROSION' ? 'C' : 'ND'}-${patch.id}`,
-        type: type,
-        meta: {
-          xRange: `${patch.coordinates.xMin} - ${patch.coordinates.xMax}`,
-          yRange: `${patch.coordinates.yMin} - ${patch.coordinates.yMax}`,
-          area: patch.pointCount,
-          minThickness: patch.worstThickness?.toFixed(2),
-          avgThickness: patch.avgThickness?.toFixed(2),
-          severity: patch.tier,
-        },
-        images: {
-            view2D: patch.heatmapDataUrl || '', 
-            view3DTop: DataVault.patchSnapshots.find(s => s.patchId === String(patch.id) && s.patchType === type && s.view === 'TOP')?.image || 'placeholder',
-            view3DSide: DataVault.patchSnapshots.find(s => s.patchId === String(patch.id) && s.patchType === type && s.view === 'SIDE')?.image || 'placeholder',
-            view3DIso: DataVault.patchSnapshots.find(s => s.patchId === String(patch.id) && s.patchType === type && s.view === 'ISO')?.image || 'placeholder',
-        }
-    });
-
-    return {
-      assetInfo: {
-        clientName: metadata.clientName,
-        assetTag: metadata.assetTag,
-        operatorName: metadata.operatorName,
-        inspectionDate: new Date().toLocaleDateString(),
-        method: metadata.method,
-        reportId: `REP-${Date.now()}`,
-        logoBase64,
-      },
-      fullAssetImages: {
-        view2D: view2D,
-        view3DIso,
-        view3DTop,
-        view3DSide,
-      },
-      stats: inspectionResult.stats,
-      aiSummary: inspectionResult.aiInsight?.recommendation ?? "AI summary not available.",
-      corrosionPatches: patches.corrosion.map((p: SegmentBox) => createPatchSet(p, 'CORROSION')),
-      ndPatches: patches.nonInspected.map((p: SegmentBox) => createPatchSet(p, 'NON_INSPECTED')),
-    };
-  };
-
+  
   const generateDocx = async () => {
     if (!inspectionResult || !patches) {
       toast({
@@ -119,17 +142,46 @@ export function ReportTab({ twoDViewRef, threeDeeViewRef }: ReportTabProps) {
     setIsGenerating(true);
     toast({
       title: "Generating Report...",
-      description: "Please wait, this may take a moment.",
+      description: "Capturing views and assembling document. This may take a moment.",
     });
 
     try {
-      const reportInput = await assembleReportInput(inspectionResult, patches, reportMetadata);
-      const docxBlob = await generateInspectionReport(reportInput);
-      downloadFile(docxBlob, `Inspection_Report_${reportMetadata.assetTag}.docx`);
-      toast({
-        title: "Report Generated!",
-        description: "Your DOCX file has been downloaded.",
-      });
+        const logoBase64 = await getBase64ImageFromUrl('/logo.png');
+
+        // Capture full asset views
+        const full2D = await twoDViewRef.current.capture();
+        await threeDeeViewRef.current.resetCamera();
+        const fullIso = await threeDeeViewRef.current.setView("iso").then(() => threeDeeViewRef.current.capture());
+        const fullTop = await threeDeeViewRef.current.setView("top").then(() => threeDeeViewRef.current.capture());
+        const fullSide = await threeDeeViewRef.current.setView("side").then(() => threeDeeViewRef.current.capture());
+
+        // Capture images for each patch
+        const patchImages = await capturePatchImages(
+            threeDeeViewRef,
+            patches.corrosion,
+            patches.nonInspected
+        );
+
+        // Assemble the final input for the report builder
+        const reportInput = assembleReportInput(
+            {...reportMetadata, logoBase64},
+            inspectionResult,
+            full2D,
+            fullIso,
+            fullTop,
+            fullSide,
+            patches.corrosion,
+            patches.nonInspected,
+            patchImages
+        );
+
+        const docxBlob = await generateInspectionReport(reportInput);
+        downloadFile(docxBlob, `Inspection_Report_${reportMetadata.assetTag}.docx`);
+
+        toast({
+            title: "Report Generated!",
+            description: "Your DOCX file has been downloaded.",
+        });
     } catch (error) {
       console.error("Report generation failed:", error);
       toast({
@@ -139,6 +191,8 @@ export function ReportTab({ twoDViewRef, threeDeeViewRef }: ReportTabProps) {
       });
     } finally {
       setIsGenerating(false);
+      // Reset camera to a sensible default view
+      await threeDeeViewRef.current.resetCamera();
     }
   };
 
