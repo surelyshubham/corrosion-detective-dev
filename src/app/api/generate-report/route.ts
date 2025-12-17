@@ -1,4 +1,3 @@
-
 // This API route is not currently in use.
 // It is a placeholder for any future server-side report generation logic.
 

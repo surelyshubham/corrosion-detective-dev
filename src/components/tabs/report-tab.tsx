@@ -1,7 +1,7 @@
 
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useInspectionStore } from "@/store/use-inspection-store";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Loader2, Download, FileText } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { getBase64ImageFromUrl } from "@/lib/image-utils";
-import type { ReportInput, PatchImageSet } from "@/report/docx/types";
+import type { ReportInput } from "@/report/docx/types";
 import { generateInspectionReport } from "@/report/docx/ReportBuilder";
 import type { SegmentBox, GridCell } from "@/lib/types";
 import { DataVault } from "@/store/data-vault";
@@ -96,8 +96,72 @@ export function ReportTab({ twoDViewRef, threeDeeViewRef }: ReportTabProps) {
     method: "Automated Ultrasonic Testing (AUT)",
   });
 
+  const [worker, setWorker] = useState<Worker | null>(null);
+
+  // Initialize worker
+  useEffect(() => {
+    const reportWorker = new Worker(new URL('../../workers/report.worker.ts', import.meta.url));
+    setWorker(reportWorker);
+    
+    reportWorker.onmessage = (event: MessageEvent) => {
+      const { type, reportInput, error, stage, percent } = event.data;
+
+      if (type === 'ERROR') {
+        console.error("Report worker error:", error);
+        toast({ variant: "destructive", title: "Generation Failed", description: error });
+        setIsGenerating(false);
+      } else if (type === 'PROGRESS') {
+         setProgress({ stage, percent });
+      } else if (type === 'DATA_READY') {
+        // Now on the main thread, do the visual parts
+        generateAndFinalizeDocx(reportInput);
+      }
+    };
+
+    return () => {
+      reportWorker.terminate();
+    };
+  }, []);
+
+  const generateAndFinalizeDocx = async (reportInput: ReportInput) => {
+      try {
+        setProgress({ stage: "Capturing patch-specific images...", percent: 20 });
+        const patchImages = await capturePatchImages(threeDeeViewRef, patches?.corrosion || []);
+        
+        // Enrich the report input with the newly captured images
+        reportInput.corrosionPatches.forEach(p => {
+            if (p.representation === 'IMAGE' && patchImages[p.patchId]) {
+                p.images = patchImages[p.patchId];
+            }
+        });
+
+        await threeDeeViewRef.current.resetCamera();
+
+        setProgress({ stage: "Assembling DOCX file...", percent: 75 });
+        const reportBlob = await generateInspectionReport(reportInput);
+        
+        setProgress({ stage: "Finalizing download...", percent: 100 });
+        downloadFile(reportBlob, `Inspection_Report_${reportMetadata.assetTag}.docx`);
+        
+        toast({
+          title: "Report Generated!",
+          description: "Your DOCX file has been downloaded.",
+        });
+      } catch (error) {
+         console.error("Report finalization failed:", error);
+         toast({
+            variant: "destructive",
+            title: "Generation Failed",
+            description: (error as Error).message || "Could not generate the report.",
+         });
+      } finally {
+        setIsGenerating(false);
+      }
+  }
+
+
   const generateDocx = async () => {
-    if (!inspectionResult || !patches || !DataVault.gridMatrix) {
+    if (!worker || !inspectionResult || !patches || !DataVault.gridMatrix) {
       toast({
         variant: "destructive",
         title: "No Data Available",
@@ -107,25 +171,20 @@ export function ReportTab({ twoDViewRef, threeDeeViewRef }: ReportTabProps) {
     }
     
     setIsGenerating(true);
+    setProgress({ stage: "Capturing full asset views...", percent: 5 });
     
     try {
-        setProgress({ stage: "Capturing full asset views...", percent: 5 });
+        // Visual tasks remain on main thread
         const logoBase64 = await getBase64ImageFromUrl('/logo.png');
-        
-        // Use the new offscreen renderer for the full 2D view
         const full2D = renderFullPlate2D(DataVault.gridMatrix);
         
         await threeDeeViewRef.current.resetCamera();
         const fullIso = await threeDeeViewRef.current.setView("iso").then(() => threeDeeViewRef.current.capture());
         const fullTop = await threeDeeViewRef.current.setView("top").then(() => threeDeeViewRef.current.capture());
         const fullSide = await threeDeeViewRef.current.setView("side").then(() => threeDeeViewRef.current.capture());
-        
-        setProgress({ stage: "Capturing patch-specific images...", percent: 20 });
-        const patchImages = await capturePatchImages(threeDeeViewRef, patches.corrosion);
-        
-        await threeDeeViewRef.current.resetCamera();
 
-        const reportInput: ReportInput = {
+        // Prepare data-only payload for worker
+        const reportInputPayload: ReportInput = {
             assetInfo: {
                 ...reportMetadata, 
                 logoBase64,
@@ -144,10 +203,9 @@ export function ReportTab({ twoDViewRef, threeDeeViewRef }: ReportTabProps) {
                     yRange: `${p.coordinates.yMin} - ${p.coordinates.yMax}`,
                     area: p.pointCount,
                     minThickness: p.worstThickness?.toFixed(2),
-                    avgThickness: p.avgThickness?.toFixed(2),
                     severity: p.tier,
                 },
-                images: patchImages[`C-${p.id}`] ?? null,
+                images: null, // Images will be added later on the main thread
                 cells: p.cells,
             })),
             ndPatches: patches.nonInspected.map(p => ({
@@ -160,21 +218,13 @@ export function ReportTab({ twoDViewRef, threeDeeViewRef }: ReportTabProps) {
                     area: p.pointCount,
                     reason: p.reason
                 },
-                images: null, // ND patches don't get images
+                images: null,
                 cells: [],
             }))
         };
 
-        setProgress({ stage: "Assembling DOCX file...", percent: 75 });
-        const reportBlob = await generateInspectionReport(reportInput);
-        
-        setProgress({ stage: "Finalizing download...", percent: 100 });
-        downloadFile(reportBlob, `Inspection_Report_${reportMetadata.assetTag}.docx`);
-        
-        toast({
-          title: "Report Generated!",
-          description: "Your DOCX file has been downloaded.",
-        });
+        // Offload data preparation to the worker
+        worker.postMessage({ type: 'GENERATE_REPORT_DATA', payload: reportInputPayload });
 
     } catch (error) {
       console.error("Report generation failed:", error);
@@ -183,8 +233,7 @@ export function ReportTab({ twoDViewRef, threeDeeViewRef }: ReportTabProps) {
         title: "Generation Failed",
         description: (error as Error).message || "Could not generate the report.",
       });
-    } finally {
-        setIsGenerating(false);
+      setIsGenerating(false);
     }
   };
 

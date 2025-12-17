@@ -1,4 +1,3 @@
-
 import * as XLSX from 'xlsx';
 import type { MergedGrid, InspectionStats, Condition, Plate, AssetType, SegmentBox, SeverityTier, PatchKind, GridCell, PatchRepresentation } from '../lib/types';
 import { type MergeFormValues } from '@/components/tabs/merge-alert-dialog';
@@ -112,7 +111,6 @@ function parseFileToPlateData(fileBuffer: ArrayBuffer, fileName: string, config:
       const yMm = yCoords[r];
       const gridRow: GridCell[] = [];
       for (let c = 0; c < xCoords.length; c++) {
-          // The x-coordinate from the excel file is a local index, not a physical measurement
           const localXIndex = xCoords[c];
           const rawValue = String(row[c + 1]).trim();
           const rawThickness = (rawValue === '' || rawValue === '---' || rawValue === 'ND') ? null : parseFloat(rawValue);
@@ -134,6 +132,7 @@ function parseFileToPlateData(fileBuffer: ArrayBuffer, fileName: string, config:
   };
 }
 
+
 function createEmptyGrid(height: number, yResolution: number): MasterGrid {
     const points: GridCell[][] = [];
     for (let y = 0; y < height; y++) {
@@ -150,6 +149,7 @@ function createEmptyGrid(height: number, yResolution: number): MasterGrid {
         baseConfig: {} as ProcessConfig,
     };
 }
+
 
 function appendNDGap(grid: MasterGrid, fromX: number, toX: number) {
     for (let x = fromX; x < toX; x += grid.resolutionX) {
@@ -168,6 +168,7 @@ function appendNDGap(grid: MasterGrid, fromX: number, toX: number) {
     }
 }
 
+
 function appendPlate(grid: MasterGrid, plate: PlateData, startX: number) {
     let currentGlobalX = startX;
     for (let col = 0; col < plate.width; col++) {
@@ -177,8 +178,8 @@ function appendPlate(grid: MasterGrid, plate: PlateData, startX: number) {
             if (src) {
                 grid.points[y].push({ 
                     ...src,
-                    xMm: globalX, // Recalculate xMm for the master grid
-                    yMm: y * grid.yResolution, // Ensure yMm is consistent
+                    xMm: globalX,
+                    yMm: y * grid.yResolution,
                 });
             } else {
                  grid.points[y].push({
@@ -193,6 +194,7 @@ function appendPlate(grid: MasterGrid, plate: PlateData, startX: number) {
     grid.maxXmm = Math.max(grid.maxXmm, currentGlobalX);
 }
 
+
 function freezeGrid<T extends { points: any[][] }>(grid: T): T {
     Object.freeze(grid);
     Object.freeze(grid.points);
@@ -200,11 +202,11 @@ function freezeGrid<T extends { points: any[][] }>(grid: T): T {
     return grid;
 }
 
+
 function mergePlatesSequentially(plates: PlateData[]): MasterGrid {
     if (plates.length === 0) throw new Error("No plates to merge.");
 
-    // Sort plates based on their intended merge position (minXmm as a proxy for sequence)
-    const sortedPlates = [...plates].sort((a,b) => (a.mergeConfig?.start ?? 0) - (b.mergeConfig?.start ?? 0));
+    const sortedPlates = [...plates].sort((a, b) => (a.mergeConfig?.start ?? a.minXmm) - (b.mergeConfig?.start ?? b.minXmm));
 
     const maxHeight = Math.max(...sortedPlates.map(p => p.height));
     const firstPlate = sortedPlates[0];
@@ -218,14 +220,13 @@ function mergePlatesSequentially(plates: PlateData[]): MasterGrid {
     grid.minXmm = currentX;
 
     for (const plate of sortedPlates) {
-        const plateStartX = plate.minXmm;
+        const plateStartX = plate.mergeConfig?.start ?? plate.minXmm;
         if (plateStartX > currentX) {
             appendNDGap(grid, currentX, plateStartX);
             currentX = plateStartX;
         }
         
         appendPlate(grid, plate, currentX);
-
         currentX += plate.width * plate.resolutionX;
     }
     
@@ -641,5 +642,3 @@ self.onmessage = async (event: MessageEvent<any>) => {
 
 // Required to be a module
 export {};
-
-    

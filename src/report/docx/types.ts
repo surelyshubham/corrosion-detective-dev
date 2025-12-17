@@ -1,4 +1,3 @@
-
 import type { InspectionStats, SegmentBox } from "@/lib/types";
 
 export interface ReportInput {

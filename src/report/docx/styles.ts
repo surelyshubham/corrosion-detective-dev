@@ -1,4 +1,3 @@
-
 import { Header, Paragraph, ImageRun, TextRun, Footer, AlignmentType, PageNumber } from "docx";
 
 export const HEADING_1 = "heading1";

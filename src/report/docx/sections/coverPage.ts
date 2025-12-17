@@ -1,4 +1,3 @@
-
 import { Paragraph, HeadingLevel, TextRun, AlignmentType, Table, TableRow, TableCell, WidthType, BorderStyle } from "docx";
 import type { ReportInput } from "../types";
 
