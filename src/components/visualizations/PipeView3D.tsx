@@ -173,7 +173,7 @@ export const PipeView3D = React.forwardRef<PipeView3DRef, PipeView3DProps>((prop
     sceneRef.current.add(dirLight);
 
     const { width, height } = stats.gridSize;
-    const geometry = new THREE.CylinderGeometry(pipeOuterDiameter / 2, pipeOuterDiameter / 2, pipeLength, width - 1, height - 1, true);
+    const geometry = new THREE.CylinderGeometry(pipeOuterDiameter / 2, pipeOuterDiameter / 2, pipeLength, width > 1 ? width -1 : 64, height > 1 ? height - 1 : 1, true);
     geometry.translate(0, 0, 0);
 
     const material = new THREE.ShaderMaterial({
@@ -224,7 +224,7 @@ export const PipeView3D = React.forwardRef<PipeView3DRef, PipeView3DProps>((prop
     originAxesRef.current = new THREE.AxesHelper(Math.max(pipeOuterDiameter, pipeLength) * 0.1);
     sceneRef.current.add(originAxesRef.current);
     
-    const capMaterial = new THREE.MeshStandardMaterial({ color: 0x666666, side: THREE.DoubleSide, transparent: true, opacity: 0.5 });
+    const capMaterial = new THREE.MeshStandardMaterial({ color: 0x666666, side: THREE.DoubleSide });
     const capGeometry = new THREE.CircleGeometry(pipeOuterDiameter / 2, width > 1 ? width -1 : 64);
     const topCap = new THREE.Mesh(capGeometry, capMaterial);
     topCap.position.y = pipeLength / 2;
@@ -418,5 +418,7 @@ PipeView3D.displayName = "PipeView3D";
     
     
 
+
+    
 
     

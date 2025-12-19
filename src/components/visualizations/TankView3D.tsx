@@ -1,4 +1,5 @@
 
+
 "use client"
 
 import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react'
@@ -172,7 +173,7 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>((prop
     sceneRef.current.add(dirLight);
 
     const { width, height } = stats.gridSize;
-    const geometry = new THREE.CylinderGeometry(pipeOuterDiameter / 2, pipeOuterDiameter / 2, pipeLength, width - 1, height - 1, true);
+    const geometry = new THREE.CylinderGeometry(pipeOuterDiameter / 2, pipeOuterDiameter / 2, pipeLength, width > 1 ? width - 1 : 64, height > 1 ? height - 1 : 1, true);
 
     const material = new THREE.ShaderMaterial({
         uniforms: {
@@ -412,6 +413,8 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>((prop
 TankView3D.displayName = "TankView3D";
 
     
+    
+
     
 
     
