@@ -15,97 +15,28 @@ import { base64ToUint8Array } from "../utils";
 
 /**
  * Builds Asset Overview section:
- * - Full 2D + 3D images
- * - Optional Top & Side views
- * - AI Insight box
+ * - Full 2D Heatmap
+ * - Full 3D Isometric View
  */
 export function buildAssetOverview(input: ReportInput) {
   const children: any[] = [];
 
-  /* -------------------- TITLE -------------------- */
   children.push(
     new Paragraph({
-      text: "Asset Overview",
+      text: "Overall Asset Thickness Mapping",
       heading: HeadingLevel.HEADING_1,
       spacing: { after: 300 },
     })
   );
 
-  /* -------------------- FULL ASSET IMAGES (2D + ISO) -------------------- */
-  children.push(
-    new Paragraph({
-      text: "Overall Plate Views",
-      heading: HeadingLevel.HEADING_2,
-      spacing: { after: 200 },
-    })
-  );
-
   children.push(
     new Table({
       width: { size: 100, type: WidthType.PERCENTAGE },
       rows: [
         new TableRow({
           children: [
-            imageCell(input.fullAssetImages.view2D, "Full Plate 2D Thickness Map"),
-            imageCell(input.fullAssetImages.view3DIso, "Full Plate 3D Isometric View"),
-          ],
-        }),
-      ],
-    })
-  );
-
-  /* -------------------- OPTIONAL TOP & SIDE VIEWS -------------------- */
-  if (input.fullAssetImages.view3DTop && input.fullAssetImages.view3DSide) {
-    children.push(
-      new Paragraph({ text: "", spacing: { after: 200 } }),
-      new Table({
-        width: { size: 100, type: WidthType.PERCENTAGE },
-        rows: [
-          new TableRow({
-            children: [
-              imageCell(input.fullAssetImages.view3DTop, "3D Top View"),
-              imageCell(input.fullAssetImages.view3DSide, "3D Side View"),
-            ],
-          }),
-        ],
-      })
-    );
-  }
-
-  /* -------------------- AI INSIGHT BOX -------------------- */
-  children.push(
-    new Paragraph({
-      text: "AI-Based Inspection Insight",
-      heading: HeadingLevel.HEADING_2,
-      spacing: { before: 400, after: 150 },
-    })
-  );
-
-  children.push(
-    new Table({
-      width: { size: 100, type: WidthType.PERCENTAGE },
-      borders: {
-        top: { style: BorderStyle.SINGLE, size: 1 },
-        bottom: { style: BorderStyle.SINGLE, size: 1 },
-        left: { style: BorderStyle.SINGLE, size: 1 },
-        right: { style: BorderStyle.SINGLE, size: 1 },
-      },
-      rows: [
-        new TableRow({
-          children: [
-            new TableCell({
-              shading: { fill: "F2F2F2" },
-              children: [
-                new Paragraph({
-                  children: [
-                    new TextRun({
-                      text: input.aiSummary,
-                      italics: true,
-                    }),
-                  ],
-                }),
-              ],
-            }),
+            imageCell(input.fullAssetImages.view2D, "Full Asset 2D Heatmap"),
+            imageCell(input.fullAssetImages.view3DIso, "Full Asset 3D Isometric View"),
           ],
         }),
       ],
@@ -115,16 +46,15 @@ export function buildAssetOverview(input: ReportInput) {
   return children;
 }
 
-/* -------------------- HELPERS -------------------- */
 
 function imageCell(base64: string, caption: string) {
   return new TableCell({
     width: { size: 50, type: WidthType.PERCENTAGE },
     borders: {
-      top: { style: BorderStyle.SINGLE, size: 1 },
-      bottom: { style: BorderStyle.SINGLE, size: 1 },
-      left: { style: BorderStyle.SINGLE, size: 1 },
-      right: { style: BorderStyle.SINGLE, size: 1 },
+      top: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+      bottom: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+      left: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+      right: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
     },
     children: [
       new Paragraph({
@@ -146,6 +76,7 @@ function imageCell(base64: string, caption: string) {
           new TextRun({
             text: caption,
             size: 18,
+            italics: true,
           }),
         ],
       }),

@@ -8,6 +8,7 @@ import {
   WidthType,
   BorderStyle,
   AlignmentType,
+  ShadingType,
 } from "docx";
 
 /**
@@ -24,27 +25,15 @@ export function buildLegend() {
 
     /* ---------------- LEGEND TABLE ---------------- */
     new Table({
-      width: { size: 60, type: WidthType.PERCENTAGE },
+      width: { size: 80, type: WidthType.PERCENTAGE },
+      columnWidths: [10, 20, 35, 35],
       rows: [
         headerRow(),
-        legendRow("Blue", "90 – 100%", "Acceptable / Healthy"),
-        legendRow("Green", "80 – 90%", "Moderate Condition"),
-        legendRow("Yellow", "70 – 80%", "Marginal Condition"),
-        legendRow("Red", "< 70%", "Severe / Critical Condition"),
-        legendRow("Grey", "N/A", "Non-Inspected Area (ND)"),
-      ],
-    }),
-
-    /* ---------------- NOTE ---------------- */
-    new Paragraph({
-      spacing: { before: 200 },
-      children: [
-        new TextRun({
-          text:
-            "Note: Thickness percentages are calculated with respect to nominal thickness. " +
-            "Grey regions represent areas where thickness measurements could not be obtained.",
-          italics: true,
-        }),
+        legendRow({ hex: "1f77b4" }, "Blue", "90 – 100%", "Acceptable / Healthy"),
+        legendRow({ hex: "2ca02c" }, "Green", "80 – 90%", "Moderate Condition"),
+        legendRow({ hex: "ff7f0e" }, "Yellow", "70 – 80%", "Marginal Condition"),
+        legendRow({ hex: "d62728" }, "Red", "< 70%", "Severe / Critical Condition"),
+        legendRow({ hex: "bdbdbd" }, "Grey", "N/A", "Non-Inspected Area (ND)"),
       ],
     }),
   ];
@@ -55,6 +44,7 @@ export function buildLegend() {
 function headerRow() {
   return new TableRow({
     children: [
+      headerCell(""), // For color box
       headerCell("Color"),
       headerCell("Thickness (%)"),
       headerCell("Interpretation"),
@@ -62,20 +52,21 @@ function headerRow() {
   });
 }
 
-function legendRow(color: string, range: string, meaning: string) {
+function legendRow(color: { hex: string }, name: string, range: string, meaning: string) {
   return new TableRow({
     children: [
-      cell(color),
-      cell(range),
-      cell(meaning),
+      colorCell(color.hex),
+      textCell(name),
+      textCell(range),
+      textCell(meaning),
     ],
   });
 }
 
 function headerCell(text: string) {
   return new TableCell({
-    width: { size: 33, type: WidthType.PERCENTAGE },
     borders: border(),
+    shading: { fill: "EAEAEA", type: ShadingType.CLEAR },
     children: [
       new Paragraph({
         alignment: AlignmentType.CENTER,
@@ -83,6 +74,7 @@ function headerCell(text: string) {
           new TextRun({
             text,
             bold: true,
+            size: 20
           }),
         ],
       }),
@@ -90,7 +82,18 @@ function headerCell(text: string) {
   });
 }
 
-function cell(text: string) {
+function colorCell(hex: string) {
+  return new TableCell({
+    shading: {
+      fill: hex,
+      type: ShadingType.CLEAR,
+    },
+    borders: border(),
+    children: [new Paragraph(" ")], // Must have content
+  });
+}
+
+function textCell(text: string) {
   return new TableCell({
     borders: border(),
     children: [
@@ -99,6 +102,7 @@ function cell(text: string) {
         children: [
           new TextRun({
             text,
+            size: 20,
           }),
         ],
       }),
@@ -108,9 +112,9 @@ function cell(text: string) {
 
 function border() {
   return {
-    top: { style: BorderStyle.SINGLE, size: 1 },
-    bottom: { style: BorderStyle.SINGLE, size: 1 },
-    left: { style: BorderStyle.SINGLE, size: 1 },
-    right: { style: BorderStyle.SINGLE, size: 1 },
+    top: { style: BorderStyle.SINGLE, size: 1, color: "D3D3D3" },
+    bottom: { style: BorderStyle.SINGLE, size: 1, color: "D3D3D3" },
+    left: { style: BorderStyle.SINGLE, size: 1, color: "D3D3D3" },
+    right: { style: BorderStyle.SINGLE, size: 1, color: "D3D3D3" },
   };
 }

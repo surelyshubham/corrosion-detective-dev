@@ -31,11 +31,11 @@ export function buildNDPatches(patches: EnrichedPatch[]) {
     new Paragraph({
       text: "Non-Inspected Areas (ND)",
       heading: HeadingLevel.HEADING_1,
-      spacing: { after: 400 },
+      spacing: { after: 200 },
     }),
     new Paragraph({
       text:
-        "The following regions could not be inspected due to physical gaps between plates, access limitations, or data acquisition issues. These areas should be considered when making final integrity management decisions.",
+        "The following regions were not inspected during the scan due to physical gaps, access limitations, or data acquisition issues.",
       spacing: { after: 300 },
     })
   );
@@ -46,7 +46,6 @@ export function buildNDPatches(patches: EnrichedPatch[]) {
         tableCell(p.meta.xRange),
         tableCell(p.meta.yRange),
         tableCell(p.meta.area.toString()),
-        tableCell(p.meta.reason),
     ]
   }));
 
@@ -56,10 +55,9 @@ export function buildNDPatches(patches: EnrichedPatch[]) {
           new TableRow({
               children: [
                 headerCell("Region ID"),
-                headerCell("X-Range"),
-                headerCell("Y-Range"),
+                headerCell("X Range"),
+                headerCell("Y Range"),
                 headerCell("Area (Points)"),
-                headerCell("Reason"),
               ]
           }),
           ...ndRows,

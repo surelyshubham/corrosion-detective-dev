@@ -14,7 +14,6 @@ import { buildInspectionSummary } from "./sections/inspectionSummary";
 import { buildLegend } from "./sections/legend";
 import { buildCorrosionPatches } from "./sections/corrosionPatches";
 import { buildNDPatches } from "./sections/ndPatches";
-import { buildConclusion } from "./sections/conclusion";
 import { createHeader, createFooter, STYLES } from "./styles";
 
 export async function generateInspectionReport(
@@ -32,32 +31,28 @@ export async function generateInspectionReport(
           default: createFooter(),
         },
         children: [
-          // 1️⃣ COVER PAGE
+          // 1. Cover Page
           ...buildCoverPage(input),
           new PageBreak(),
 
-          // 2️⃣ ASSET OVERVIEW (FULL 2D + 3D + AI INSIGHT)
+          // 2. Asset Overview (2D + 3D Isometric)
           ...buildAssetOverview(input),
           new PageBreak(),
 
-          // 3️⃣ INSPECTION SUMMARY
+          // 3. Inspection Summary
           ...buildInspectionSummary(input),
           new PageBreak(),
 
-          // 4️⃣ LEGEND
+          // 4. Legend
           ...buildLegend(),
           new PageBreak(),
 
-          // 5️⃣ CORROSION PATCHES
-          ...buildCorrosionPatches(input.corrosionPatches),
-          ...(input.ndPatches.length > 0 && input.corrosionPatches.filter(p=>p.representation === 'IMAGE').length > 0 ? [new PageBreak()] : []),
+          // 5. Corrosion Patches (Summary Table + Individual Details)
+          ...buildCorrosionPatches(input.corrosionPatches, input.stats.nominalThickness),
+          ...(input.ndPatches.length > 0 && input.corrosionPatches.filter(p => p.representation === 'IMAGE').length > 0 ? [new PageBreak()] : []),
 
-          // 6️⃣ ND PATCHES
+          // 6. ND Patches
           ...buildNDPatches(input.ndPatches),
-
-          // 7️⃣ CONCLUSION
-          new PageBreak(),
-          ...buildConclusion(input),
         ],
       },
     ],

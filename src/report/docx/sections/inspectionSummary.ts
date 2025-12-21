@@ -10,19 +10,19 @@ import {
   AlignmentType,
 } from "docx";
 import type { ReportInput } from "../types";
-import { STYLES } from "../styles";
 
 /**
  * Inspection Summary Section
  */
 export function buildInspectionSummary(input: ReportInput) {
   const stats = input.stats;
+  const ndPercentage = stats.totalPoints > 0 ? (stats.countND / stats.totalPoints) * 100 : 0;
 
   return [
     /* ---------------- TITLE ---------------- */
     new Paragraph({
       text: "Inspection Summary",
-      style: STYLES.paragraphStyles.find(s => s.id === "heading1")?.id, // Assumes you have defined styles
+      heading: HeadingLevel.HEADING_1,
       spacing: { after: 300 },
     }),
 
@@ -30,31 +30,11 @@ export function buildInspectionSummary(input: ReportInput) {
     new Table({
       width: { size: 100, type: WidthType.PERCENTAGE },
       rows: [
-        row("Nominal Thickness (mm)", stats.nominalThickness),
+        row("Nominal Thickness (mm)", stats.nominalThickness.toFixed(2)),
         row("Minimum Thickness (mm)", stats.minThickness?.toFixed(2)),
-        row("Average Thickness (mm)", stats.avgThickness?.toFixed(2)),
-        row("Maximum Thickness (mm)", stats.maxThickness?.toFixed(2)),
         row("Total Scanned Area (m²)", stats.scannedArea.toFixed(2)),
-        row(
-          "Area Below 80% (%)",
-          stats.areaBelow80?.toFixed(2)
-        ),
-        row(
-          "Area Below 70% (%)",
-          stats.areaBelow70?.toFixed(2)
-        ),
-        row(
-          "Area Below 60% (%)",
-          stats.areaBelow60?.toFixed(2)
-        ),
-        row(
-          "Non-Inspected Area (%)",
-          stats.countND
-            ? ((stats.countND / stats.totalPoints) * 100).toFixed(2)
-            : "0.00"
-        ),
-        row("Total Scan Points", stats.totalPoints),
-        row("Overall Condition", stats.condition),
+        row("Non-Inspected Area (%)", ndPercentage.toFixed(2)),
+        row("Total Scan Points", stats.totalPoints.toLocaleString()),
       ],
     }),
   ];
@@ -72,10 +52,10 @@ function cell(text: string, bold = false) {
   return new TableCell({
     width: { size: 50, type: WidthType.PERCENTAGE },
     borders: {
-      top: { style: BorderStyle.SINGLE, size: 1 },
-      bottom: { style: BorderStyle.SINGLE, size: 1 },
-      left: { style: BorderStyle.SINGLE, size: 1 },
-      right: { style: BorderStyle.SINGLE, size: 1 },
+      top: { style: BorderStyle.SINGLE, size: 1, color: "D3D3D3" },
+      bottom: { style: BorderStyle.SINGLE, size: 1, color: "D3D3D3" },
+      left: { style: BorderStyle.SINGLE, size: 1, color: "D3D3D3" },
+      right: { style: BorderStyle.SINGLE, size: 1, color: "D3D3D3" },
     },
     children: [
       new Paragraph({
@@ -84,6 +64,7 @@ function cell(text: string, bold = false) {
           new TextRun({
             text,
             bold,
+            size: 22,
           }),
         ],
       }),

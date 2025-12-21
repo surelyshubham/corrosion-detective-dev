@@ -1,4 +1,3 @@
-
 import {
   Paragraph,
   TextRun,
@@ -18,7 +17,7 @@ import { base64ToUint8Array } from "../utils";
 /**
  * Builds Corrosion Patch Details section
  */
-export function buildCorrosionPatches(patches: EnrichedPatch[]) {
+export function buildCorrosionPatches(patches: EnrichedPatch[], nominalThickness: number) {
   if (!patches || patches.length === 0) {
     return [
       new Paragraph({
@@ -31,61 +30,48 @@ export function buildCorrosionPatches(patches: EnrichedPatch[]) {
   }
 
   const children: any[] = [];
-
-  /* ---------------- SECTION TITLE ---------------- */
+  const imagePatches = patches.filter(p => p.representation === 'IMAGE');
+  
+  /* ---------------- SUMMARY TABLE ---------------- */
   children.push(
     new Paragraph({
-      text: "Corrosion Patch Details",
+      text: "Corrosion Patch Summary",
       heading: HeadingLevel.HEADING_1,
-      spacing: { after: 400 },
+      spacing: { after: 300 },
     })
   );
 
-  const imagePatches = patches.filter(p => p.representation === 'IMAGE');
-  const tableOnlyPatches = patches.filter(p => p.representation === 'TABLE_ONLY');
+  const summaryRows = patches.map(p => {
+    const wallLoss = (nominalThickness && p.meta.minThickness) 
+      ? ((nominalThickness - p.meta.minThickness) / nominalThickness) * 100
+      : 0;
 
-  // Add note about micro-patches
-  if (tableOnlyPatches.length > 0) {
-    children.push(new Paragraph({
-        spacing: { after: 300 },
-        children: [new TextRun({
-            text: "Small corrosion patches consisting of limited data points ('micro-patches') are documented in the summary table below. Graphical representations are omitted due to their limited spatial extent.",
-            italics: true,
-            size: 18,
-        })]
-    }));
-  }
-
-  // Build table for micro-patches first
-  if (tableOnlyPatches.length > 0) {
-    const microPatchRows = tableOnlyPatches.flatMap(p => 
-        p.cells?.map(cell => new TableRow({
-            children: [
-                tableCell(p.patchId),
-                tableCell(p.meta.severity),
-                tableCell(`${cell.x},${cell.y}`),
-                tableCell(cell.effectiveThickness?.toFixed(2) ?? 'N/A'),
-            ]
-        })) || []
-    );
-
-    children.push(new Table({
-        width: { size: 100, type: WidthType.PERCENTAGE },
-        rows: [
-            new TableRow({
-                children: [
-                    headerCell("Patch ID"),
-                    headerCell("Severity"),
-                    headerCell("Coords (X,Y)"),
-                    headerCell("Thickness (mm)"),
-                ]
-            }),
-            ...microPatchRows
+    return new TableRow({
+        children: [
+            tableCell(p.patchId),
+            tableCell(`${p.meta.xRange}, ${p.meta.yRange}`),
+            tableCell(p.meta.minThickness?.toFixed(2)),
+            tableCell(wallLoss.toFixed(1)),
         ]
-    }));
-  }
+    })
+  });
+
+  children.push(new Table({
+      width: { size: 100, type: WidthType.PERCENTAGE },
+      rows: [
+          new TableRow({
+              children: [
+                  headerCell("Patch ID"),
+                  headerCell("Location (X, Y)"),
+                  headerCell("Min Thickness (mm)"),
+                  headerCell("Max Wall Loss (%)"),
+              ]
+          }),
+          ...summaryRows
+      ]
+  }));
   
-  if (imagePatches.length > 0 && tableOnlyPatches.length > 0) {
+  if (imagePatches.length > 0) {
     children.push(new PageBreak());
   }
 
@@ -94,48 +80,23 @@ export function buildCorrosionPatches(patches: EnrichedPatch[]) {
     /* -------- PATCH HEADER -------- */
     children.push(
       new Paragraph({
-        text: `Patch ID: ${patch.patchId}`,
+        text: `Corrosion Patch Detail: ${patch.patchId}`,
         heading: HeadingLevel.HEADING_2,
-        spacing: { after: 200 },
+        spacing: { after: 300 },
       })
     );
 
-    /* -------- METADATA TABLE -------- */
-    const { meta } = patch;
-    children.push(
-      new Table({
-        width: { size: 100, type: WidthType.PERCENTAGE },
-        columnWidths: [35, 65],
-        rows: [
-          metaRow("Patch Type", "Corrosion"),
-          metaRow("Severity", meta.severity),
-          metaRow("Location (X Range)", meta.xRange),
-          metaRow("Location (Y Range)", meta.yRange),
-          metaRow("Area (Points)", meta.area),
-          metaRow("Minimum Thickness", `${meta.minThickness} mm`),
-        ],
-      })
-    );
-
-    /* -------- IMAGE GRID (2 × 2) -------- */
-    children.push(new Paragraph({ text: "", spacing: { after: 200 } }));
-    
+    /* -------- IMAGE GRID (2D + ISO) -------- */
     children.push(
         new Table({
             width: { size: 100, type: WidthType.PERCENTAGE },
             rows: [
-            new TableRow({
-                children: [
-                    imageCell(patch.images?.view2D, "2D Patch View"),
-                    imageCell(patch.images?.view3DTop, "3D Top View"),
-                ],
-            }),
-            new TableRow({
-                children: [
-                    imageCell(patch.images?.view3DSide, "3D Side View"),
-                    imageCell(patch.images?.view3DIso, "3D Isometric View"),
-                ],
-            }),
+              new TableRow({
+                  children: [
+                      imageCell(patch.images?.view2D, "2D Patch View"),
+                      imageCell(patch.images?.view3DIso, "3D Isometric View"),
+                  ],
+              }),
             ],
         })
     );
@@ -165,33 +126,6 @@ function tableCell(text: string | undefined) {
         borders: border(),
         children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: text ?? 'N/A', size: 20 })]})]
     });
-}
-
-function metaRow(label: string, value: any) {
-  return new TableRow({
-    children: [
-      metaCell(label, true),
-      metaCell(String(value ?? "N/A")),
-    ],
-  });
-}
-
-function metaCell(text: string, bold = false) {
-  return new TableCell({
-    width: { size: 50, type: WidthType.PERCENTAGE },
-    borders: border(),
-    children: [
-      new Paragraph({
-        children: [
-          new TextRun({
-            text,
-            bold,
-            size: 20
-          }),
-        ],
-      }),
-    ],
-  });
 }
 
 function imageCell(base64?: string, caption?: string) {
@@ -235,7 +169,12 @@ function imageCell(base64?: string, caption?: string) {
   
   return new TableCell({
     width: { size: 50, type: WidthType.PERCENTAGE },
-    borders: border(),
+    borders: {
+      top: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+      bottom: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+      left: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+      right: { style: BorderStyle.NONE, size: 0, color: "FFFFFF" },
+    },
     children,
   });
 }
