@@ -136,7 +136,7 @@ export const PlateView2D = forwardRef<PlateView2DRef, PlateView2DProps>((props, 
 
         const centerX = (patch.center.x + 0.5) * scaledCellSize;
         const centerY = (patch.center.y + 0.5) * scaledCellSize;
-        ctx.fillStyle = '#ffffff';
+        ctx.fillStyle = '#000000';
         ctx.font = `${Math.max(10, 12 * zoom / 10)}px sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
