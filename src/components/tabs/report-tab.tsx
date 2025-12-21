@@ -202,7 +202,7 @@ export function ReportTab({ twoDViewRef, threeDeeViewRef }: ReportTabProps) {
                     xRange: `${p.coordinates.xMin} - ${p.coordinates.xMax}`,
                     yRange: `${p.coordinates.yMin} - ${p.coordinates.yMax}`,
                     area: p.pointCount,
-                    minThickness: p.worstThickness?.toFixed(2),
+                    minThickness: p.worstThickness,
                     severity: p.tier,
                 },
                 images: null, // Images will be added later on the main thread

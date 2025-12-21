@@ -1,3 +1,4 @@
+
 import {
   Paragraph,
   TextRun,
@@ -50,7 +51,7 @@ export function buildCorrosionPatches(patches: EnrichedPatch[], nominalThickness
         children: [
             tableCell(p.patchId),
             tableCell(`${p.meta.xRange}, ${p.meta.yRange}`),
-            tableCell(p.meta.minThickness?.toFixed(2)),
+            tableCell(p.meta.minThickness),
             tableCell(wallLoss.toFixed(1)),
         ]
     })
@@ -121,10 +122,17 @@ function headerCell(text: string) {
   });
 }
 
-function tableCell(text: string | undefined) {
+function tableCell(text: string | number | undefined | null) {
+    let displayText = 'N/A';
+    if (typeof text === 'number') {
+        displayText = text.toFixed(2);
+    } else if (typeof text === 'string') {
+        displayText = text;
+    }
+
     return new TableCell({
         borders: border(),
-        children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: text ?? 'N/A', size: 20 })]})]
+        children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: displayText, size: 20 })]})]
     });
 }
 
