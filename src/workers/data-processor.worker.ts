@@ -1,3 +1,4 @@
+
 import * as XLSX from 'xlsx';
 import type { MergedGrid, InspectionStats, Condition, Plate, AssetType, SegmentBox, SeverityTier, PatchKind, GridCell, PatchRepresentation } from '../lib/types';
 import { type MergeFormValues } from '@/components/tabs/merge-alert-dialog';
@@ -133,106 +134,158 @@ function parseFileToPlateData(fileBuffer: ArrayBuffer, fileName: string, config:
 }
 
 
-function createEmptyGrid(height: number, yResolution: number): MasterGrid {
-    const points: GridCell[][] = [];
-    for (let y = 0; y < height; y++) {
-        points.push([]);
-    }
-    return {
-        points,
-        width: 0,
-        height,
-        minXmm: 0,
-        maxXmm: -Infinity,
-        resolutionX: 1, // Default, will be updated by first plate
-        yResolution: yResolution,
-        baseConfig: {} as ProcessConfig,
-    };
-}
-
-
-function appendNDGap(grid: MasterGrid, fromX: number, toX: number) {
-    for (let x = fromX; x < toX; x += grid.resolutionX) {
-        for (let y = 0; y < grid.height; y++) {
+function injectNDColumns(grid: MasterGrid, count: number) {
+    if (count <= 0) return;
+    for (let y = 0; y < grid.height; y++) {
+        for (let i = 0; i < count; i++) {
             grid.points[y].push({
-                plateId: null,
-                rawThickness: null,
-                effectiveThickness: null,
-                percentage: null,
-                xMm: x,
-                yMm: y * grid.yResolution,
-                isND: true
+                plateId: null, rawThickness: null, effectiveThickness: null, percentage: null,
+                isND: true, xMm: 0, yMm: 0 // placeholder coords
             });
         }
-        grid.width++;
     }
+    grid.width += count;
+}
+
+function injectNDRows(grid: MasterGrid, count: number) {
+    if (count <= 0) return;
+    const ndRow = Array(grid.width).fill(null).map(() => ({
+        plateId: null, rawThickness: null, effectiveThickness: null, percentage: null,
+        isND: true, xMm: 0, yMm: 0 // placeholder coords
+    }));
+    for (let i = 0; i < count; i++) {
+        grid.points.push(JSON.parse(JSON.stringify(ndRow)));
+    }
+    grid.height += count;
 }
 
 
-function appendPlate(grid: MasterGrid, plate: PlateData, startX: number) {
-    let currentGlobalX = startX;
-    for (let col = 0; col < plate.width; col++) {
-        const globalX = startX + col * plate.resolutionX;
-        for (let y = 0; y < grid.height; y++) {
-            const src = plate.points[y]?.[col];
-            if (src) {
-                grid.points[y].push({ 
-                    ...src,
-                    xMm: globalX,
-                    yMm: y * grid.yResolution,
-                });
-            } else {
-                 grid.points[y].push({
-                    plateId: null, rawThickness: null, effectiveThickness: null, percentage: null,
-                    xMm: globalX, yMm: y * grid.yResolution, isND: true
-                });
+function appendPlateHorizontally(grid: MasterGrid, plate: PlateData, startColumn: number) {
+    const requiredWidth = startColumn + plate.width;
+    if (grid.width < requiredWidth) {
+        injectNDColumns(grid, requiredWidth - grid.width);
+    }
+    for (let y = 0; y < plate.height; y++) {
+        for (let x = 0; x < plate.width; x++) {
+            if (grid.points[y] && grid.points[y][startColumn + x]) {
+                grid.points[y][startColumn + x] = plate.points[y][x];
             }
         }
-        grid.width++;
-        currentGlobalX = globalX;
     }
-    grid.maxXmm = Math.max(grid.maxXmm, currentGlobalX);
 }
 
-
-function freezeGrid<T extends { points: any[][] }>(grid: T): T {
-    Object.freeze(grid);
-    Object.freeze(grid.points);
-    grid.points.forEach(r => Object.freeze(r));
-    return grid;
+function appendPlateVertically(grid: MasterGrid, plate: PlateData, startRow: number) {
+    const requiredHeight = startRow + plate.height;
+    if (grid.height < requiredHeight) {
+        injectNDRows(grid, requiredHeight - grid.height);
+    }
+    for (let y = 0; y < plate.height; y++) {
+        for (let x = 0; x < plate.width; x++) {
+            if (grid.points[startRow + y]) {
+                 grid.points[startRow + y][x] = plate.points[y][x];
+            }
+        }
+    }
 }
 
 
 function mergePlatesSequentially(plates: PlateData[]): MasterGrid {
     if (plates.length === 0) throw new Error("No plates to merge.");
-
-    const sortedPlates = [...plates].sort((a, b) => (a.mergeConfig?.start ?? a.minXmm) - (b.mergeConfig?.start ?? b.minXmm));
-
-    const maxHeight = Math.max(...sortedPlates.map(p => p.height));
-    const firstPlate = sortedPlates[0];
-    const yResolution = firstPlate.yResolution;
-
-    const grid = createEmptyGrid(maxHeight, yResolution);
-    grid.resolutionX = firstPlate.resolutionX;
-    grid.baseConfig = firstPlate.config;
+    const firstPlate = plates[0];
     
-    let currentX = firstPlate.minXmm;
-    grid.minXmm = currentX;
+    let grid: MasterGrid = {
+        points: JSON.parse(JSON.stringify(firstPlate.points)),
+        width: firstPlate.width,
+        height: firstPlate.height,
+        minXmm: firstPlate.minXmm,
+        maxXmm: firstPlate.maxXmm,
+        resolutionX: firstPlate.resolutionX,
+        yResolution: firstPlate.yResolution,
+        baseConfig: firstPlate.config,
+    };
 
-    for (const plate of sortedPlates) {
-        const plateStartX = plate.mergeConfig?.start ?? plate.minXmm;
-        if (plateStartX > currentX) {
-            appendNDGap(grid, currentX, plateStartX);
-            currentX = plateStartX;
+    for (let i = 1; i < plates.length; i++) {
+        const plate = plates[i];
+        const mergeConfig = plate.mergeConfig;
+        if (!mergeConfig) throw new Error(`Plate ${plate.name} is missing merge configuration.`);
+
+        const start = mergeConfig.start;
+        switch (mergeConfig.direction) {
+            case 'right': {
+                const gap = start - grid.width;
+                if(gap > 0) injectNDColumns(grid, gap);
+                appendPlateHorizontally(grid, plate, grid.width);
+                break;
+            }
+            case 'bottom': {
+                 const gap = start - grid.height;
+                if (gap > 0) injectNDRows(grid, gap);
+                // Ensure new plate has same width as grid, pad if necessary
+                if (plate.width < grid.width) {
+                    plate.points.forEach(row => {
+                        for(let k=plate.width; k < grid.width; k++) {
+                            row.push({plateId: null, rawThickness: null, effectiveThickness: null, percentage: null, isND: true, xMm: 0, yMm: 0});
+                        }
+                    });
+                    plate.width = grid.width;
+                }
+                appendPlateVertically(grid, plate, grid.height);
+                break;
+            }
+             case 'left': {
+                const gap = start - plate.width;
+                const newPoints: GridCell[][] = Array(grid.height).fill(0).map(() => []);
+                
+                // Add new plate
+                for (let y = 0; y < plate.height; y++) {
+                    for (let x = 0; x < plate.width; x++) {
+                        newPoints[y].push(plate.points[y][x]);
+                    }
+                }
+                // Add gap
+                if (gap > 0) {
+                   for (let y = 0; y < grid.height; y++) {
+                        for(let i=0; i<gap; i++) newPoints[y].push({plateId: null, rawThickness: null, effectiveThickness: null, percentage: null, isND: true, xMm: 0, yMm: 0});
+                   }
+                }
+                // Add original grid
+                for (let y = 0; y < grid.height; y++) {
+                    newPoints[y].push(...grid.points[y]);
+                }
+                grid.points = newPoints;
+                grid.width = newPoints[0].length;
+                break;
+            }
+             case 'top': {
+                const gap = start - plate.height;
+                const newPoints: GridCell[][] = [];
+                 if (plate.width < grid.width) {
+                    plate.points.forEach(row => {
+                        for(let k=plate.width; k < grid.width; k++) {
+                            row.push({plateId: null, rawThickness: null, effectiveThickness: null, percentage: null, isND: true, xMm: 0, yMm: 0});
+                        }
+                    });
+                    plate.width = grid.width;
+                }
+                // Add new plate rows
+                for(let y=0; y<plate.height; y++) newPoints.push(plate.points[y]);
+                // Add gap rows
+                if (gap > 0) {
+                    const ndRow = Array(grid.width).fill(null).map(()=> ({plateId: null, rawThickness: null, effectiveThickness: null, percentage: null, isND: true, xMm: 0, yMm: 0}));
+                    for(let i=0; i<gap; i++) newPoints.push(JSON.parse(JSON.stringify(ndRow)));
+                }
+                // Add original grid
+                newPoints.push(...grid.points);
+                grid.points = newPoints;
+                grid.height = newPoints.length;
+                break;
+            }
         }
-        
-        appendPlate(grid, plate, currentX);
-        currentX += plate.width * plate.resolutionX;
     }
     
-    grid.maxXmm = currentX > grid.minXmm ? currentX - grid.resolutionX : currentX;
-    return freezeGrid(grid);
+    return grid;
 }
+
 
 // Re-implementation of getNormalizedColor without THREE.js
 function hslToRgb(h: number, s: number, l: number): [number, number, number] {
