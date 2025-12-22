@@ -2,20 +2,19 @@
 
 "use client"
 
-import React, { useRef, useEffect, useState, useCallback } from 'react'
-import * as THREE from 'three'
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
-import { useInspectionStore } from '@/store/use-inspection-store'
-import { DataVault } from '@/store/data-vault'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Slider } from '@/components/ui/slider'
-import { Label } from '@/components/ui/label'
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
-import { RefreshCw, LocateFixed, Pin, Loader2 } from 'lucide-react'
-import { useImperativeHandle } from 'react'
+import React, { useRef, useEffect, useState, useCallback, useImperativeHandle, forwardRef } from 'react';
+import * as THREE from 'three';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { useInspectionStore } from '@/store/use-inspection-store';
+import { DataVault } from '@/store/data-vault';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Slider } from '@/components/ui/slider';
+import { Label } from '@/components/ui/label';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { RefreshCw, LocateFixed, Pin, Loader2 } from 'lucide-react';
 import { PipeEngine, type HoverInfo } from '@/plate-engine/PipeEngine';
-import { ColorLegend } from './ColorLegend'
+import { ColorLegend } from './ColorLegend';
 
 const delayFrame = (ms = 70) => new Promise(res => setTimeout(res, ms));
 
@@ -28,9 +27,9 @@ export type PipeView3DRef = {
 
 interface PipeView3DProps {}
 
-export const PipeView3D = React.forwardRef<PipeView3DRef, PipeView3DProps>((props, ref) => {
-  const { inspectionResult, dataVersion } = useInspectionStore()
-  const mountRef = useRef<HTMLDivElement>(null)
+export const PipeView3D = forwardRef<PipeView3DRef, PipeView3DProps>((props, ref) => {
+  const { inspectionResult, dataVersion } = useInspectionStore();
+  const mountRef = useRef<HTMLDivElement>(null);
   const isReady = dataVersion > 0 && !!DataVault.stats && !!DataVault.gridMatrix && !!inspectionResult?.pipeOuterDiameter && !!inspectionResult?.pipeLength;
   
   const [hoveredPoint, setHoveredPoint] = useState<HoverInfo & { clientX: number, clientY: number } | null>(null);
@@ -55,16 +54,25 @@ export const PipeView3D = React.forwardRef<PipeView3DRef, PipeView3DProps>((prop
   }, []);
 
   const setView = useCallback(async (view: "iso" | "top" | "side") => {
-    if (!cameraRef.current || !controlsRef.current || !engineRef.current) return;
+    if (!cameraRef.current || !controlsRef.current || !engineRef.current || !pipeOuterDiameter || !pipeLength) return;
     const cam = cameraRef.current;
     const ctl = controlsRef.current;
     const target = new THREE.Vector3(0, 0, 0); // Pipe is centered at origin
-    const dist = Math.max(pipeOuterDiameter || 0, pipeLength || 0) * 1.5;
+    const dist = Math.max(pipeOuterDiameter, pipeLength) * 1.5;
+    
     switch (view) {
-      case "top": cam.position.set(target.x, target.y + dist, target.z + 0.01); break;
-      case "side": cam.position.set(target.x + dist, target.y, target.z); break;
-      case "iso": default: cam.position.set(dist * 0.7, dist * 0.5, dist * 0.7); break;
+      case "top":
+        cam.position.set(target.x, target.y + dist, target.z);
+        break;
+      case "side":
+        cam.position.set(target.x + dist, target.y, target.z);
+        break;
+      case "iso":
+      default:
+        cam.position.set(dist * 0.7, dist * 0.5, dist * 0.7);
+        break;
     }
+    
     ctl.target.copy(target);
     ctl.update();
     await delayFrame();
@@ -118,7 +126,7 @@ export const PipeView3D = React.forwardRef<PipeView3DRef, PipeView3DProps>((prop
         stats: DataVault.stats,
         nominalThickness: nominalThickness,
         pipeRadius: pipeOuterDiameter / 2,
-        pipeHeight: pipeLength,
+        pipeHeight: pipeLength, // This will be interpreted as length
         depthExaggeration: depthExaggeration,
         startAngle: startAngle,
     });
@@ -182,7 +190,7 @@ export const PipeView3D = React.forwardRef<PipeView3DRef, PipeView3DProps>((prop
             <div ref={mountRef} className="w-full h-full" />
              {hoveredPoint && (
               <div className="fixed p-2 text-xs rounded-md shadow-lg pointer-events-none bg-popover text-popover-foreground border z-50" style={{ left: `${hoveredPoint.clientX + 15}px`, top: `${hoveredPoint.clientY - 30}px` }}>
-                <div className="font-bold">X: {hoveredPoint.gridX}, Y: {hoveredPoint.gridY}</div>
+                <div className="font-bold">Grid: ({hoveredPoint.gridX}, {hoveredPoint.gridY})</div>
                 <div>Thick: {hoveredPoint.effectiveThickness?.toFixed(2) ?? 'ND'} mm</div>
                 <div>Percent: {hoveredPoint.percentage?.toFixed(1) ?? 'N/A'} %</div>
               </div>

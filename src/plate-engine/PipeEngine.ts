@@ -5,7 +5,7 @@ export type HoverInfo = {
   gridX: number;
   gridY: number;
   worldX: number;
-  worldY: number;
+  worldZ: number; // Switched from Y to Z for horizontal pipe
   effectiveThickness: number | null;
   percentage: number | null;
 };
@@ -15,7 +15,7 @@ export class PipeEngine {
   private stats: InspectionStats;
   private nominalThickness: number;
   private pipeRadius: number;
-  private pipeHeight: number;
+  private pipeLength: number; // Changed from pipeHeight
   private depthExaggeration: number;
   private startAngle: number; // in degrees
 
@@ -37,7 +37,7 @@ export class PipeEngine {
     stats: InspectionStats;
     nominalThickness: number;
     pipeRadius: number;
-    pipeHeight: number;
+    pipeHeight: number; // Interpreted as length
     depthExaggeration: number;
     startAngle: number;
   }) {
@@ -47,12 +47,12 @@ export class PipeEngine {
     this.stats = params.stats;
     this.nominalThickness = params.nominalThickness;
     this.pipeRadius = params.pipeRadius;
-    this.pipeHeight = params.pipeHeight;
+    this.pipeLength = params.pipeHeight; // Use height as length
     this.depthExaggeration = params.depthExaggeration;
     this.startAngle = params.startAngle;
 
     this.cellWidth = (Math.PI * 2 * this.pipeRadius) / this.stats.gridSize.width;
-    this.cellHeight = this.pipeHeight / this.stats.gridSize.height;
+    this.cellHeight = this.pipeLength / this.stats.gridSize.height;
 
     this.createPipe();
     this.createWorldFrame();
@@ -80,8 +80,8 @@ export class PipeEngine {
     const heightSegments = Math.min(gridH - 1, MAX_SEGMENTS);
     const startAngleRad = THREE.MathUtils.degToRad(this.startAngle);
 
-    const geom = new THREE.CylinderGeometry(this.pipeRadius, this.pipeRadius, this.pipeHeight, widthSegments, heightSegments, true);
-    geom.translate(0, 0, 0); // Center the pipe
+    // Create a cylinder aligned with Y-axis, which we will then rotate
+    const geom = new THREE.CylinderGeometry(this.pipeRadius, this.pipeRadius, this.pipeLength, widthSegments, heightSegments, true);
     
     const colors: number[] = [];
     const positions = geom.attributes.position;
@@ -104,16 +104,23 @@ export class PipeEngine {
 
         const originalPos = new THREE.Vector3().fromBufferAttribute(positions, i);
         
-        const angle = u * Math.PI * 2; // Keep angle relative to 0 for position calculation
-        
+        // The cylinder is vertical, so its radius is in XZ plane
         const currentRadius = this.pipeRadius + radialDisplacement;
-        const newX = currentRadius * Math.cos(angle);
-        const newZ = currentRadius * Math.sin(angle);
+        const newX = currentRadius * Math.cos(originalPos.x / this.pipeRadius * Math.PI * 2);
+        const newZ = currentRadius * Math.sin(originalPos.x / this.pipeRadius * Math.PI * 2);
         
-        positions.setXYZ(i, newX, originalPos.y, newZ);
+        // This displacement logic is for a vertical cylinder
+        const angle = u * Math.PI * 2;
+        positions.setXYZ(
+          i,
+          currentRadius * Math.cos(angle), 
+          originalPos.y, // Y is the height/length axis for the base cylinder
+          currentRadius * Math.sin(angle)
+        );
     }
     
-    geom.rotateY(startAngleRad); // Rotate the entire geometry to the start angle
+    geom.rotateY(startAngleRad);
+    geom.rotateX(Math.PI / 2); // Rotate to be horizontal along Z axis
 
     geom.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
     positions.needsUpdate = true;
@@ -123,7 +130,6 @@ export class PipeEngine {
     this.pipeMesh = new THREE.Mesh(geom, mat);
     this.scene.add(this.pipeMesh);
     
-    // Add Seam Line
     this.createSeamLine();
   }
 
@@ -135,11 +141,13 @@ export class PipeEngine {
     }
     const seamMaterial = new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 2 });
     const startAngleRad = THREE.MathUtils.degToRad(this.startAngle);
-    const seamX = (this.pipeRadius + 1) * Math.cos(startAngleRad); // Small offset to avoid z-fighting
-    const seamZ = (this.pipeRadius + 1) * Math.sin(startAngleRad);
+    
+    const seamX = (this.pipeRadius + 1) * Math.cos(startAngleRad);
+    const seamY = (this.pipeRadius + 1) * Math.sin(startAngleRad);
+
     const points = [
-        new THREE.Vector3(seamX, -this.pipeHeight / 2, seamZ),
-        new THREE.Vector3(seamX, this.pipeHeight / 2, seamZ)
+        new THREE.Vector3(seamX, seamY, -this.pipeLength / 2),
+        new THREE.Vector3(seamX, seamY, this.pipeLength / 2)
     ];
     const seamGeometry = new THREE.BufferGeometry().setFromPoints(points);
     this.seamLine = new THREE.Line(seamGeometry, seamMaterial);
@@ -147,21 +155,7 @@ export class PipeEngine {
   }
 
   private createWorldFrame() {
-    const caps = new THREE.Group();
-    const capGeo = new THREE.CircleGeometry(this.pipeRadius, 64);
-    const capMat = new THREE.MeshStandardMaterial({ color: 0x666666, side: THREE.DoubleSide });
-    
-    const topCap = new THREE.Mesh(capGeo, capMat);
-    topCap.position.y = this.pipeHeight / 2;
-    topCap.rotation.x = Math.PI / 2;
-    caps.add(topCap);
-
-    const bottomCap = new THREE.Mesh(capGeo, capMat);
-    bottomCap.position.y = -this.pipeHeight / 2;
-    bottomCap.rotation.x = -Math.PI / 2;
-    caps.add(bottomCap);
-
-    this.scene.add(caps);
+    // No caps for a pipe
   }
 
   handleMouseMove(ndc: THREE.Vector2) {
@@ -185,7 +179,7 @@ export class PipeEngine {
       return;
     }
     this.hoverCallback?.({
-      gridX, gridY, worldX: hit.point.x, worldY: hit.point.z,
+      gridX, gridY, worldX: hit.point.x, worldZ: hit.point.z,
       effectiveThickness: cell.effectiveThickness, percentage: cell.percentage,
     });
   }
@@ -195,15 +189,16 @@ export class PipeEngine {
   gridToWorld(gridX: number, gridY: number): THREE.Vector3 {
       const startAngleRad = THREE.MathUtils.degToRad(this.startAngle);
       const angle = (gridX / this.stats.gridSize.width) * 2 * Math.PI + startAngleRad;
-      const h = (gridY / this.stats.gridSize.height) * this.pipeHeight - (this.pipeHeight / 2);
+      const h = (gridY / this.stats.gridSize.height) * this.pipeLength - (this.pipeLength / 2);
       
       const cell = this.grid[gridY]?.[gridX];
       const wallLoss = (cell && !cell.isND && cell.effectiveThickness !== null) ? this.nominalThickness - cell.effectiveThickness : 0;
       const currentRadius = this.pipeRadius - (wallLoss * this.depthExaggeration);
 
+      // Coordinates for horizontal pipe along Z-axis
       const x = currentRadius * Math.cos(angle);
-      const z = currentRadius * Math.sin(angle);
-      return new THREE.Vector3(x, h, z);
+      const y = currentRadius * Math.sin(angle);
+      return new THREE.Vector3(x, y, h);
   }
 
   setDepthExaggeration(scale: number) {
@@ -219,7 +214,7 @@ export class PipeEngine {
   }
 
   dispose() {
-    this.scene.remove(this.pipeMesh);
+    if(this.pipeMesh) this.scene.remove(this.pipeMesh);
     if(this.seamLine) this.scene.remove(this.seamLine);
 
     this.pipeMesh?.geometry.dispose();
