@@ -1,20 +1,18 @@
 
 "use client"
 
-import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react'
-import * as THREE from 'three'
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
-import { useInspectionStore } from '@/store/use-inspection-store'
-import { DataVault } from '@/store/data-vault'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Slider } from '@/components/ui/slider'
-import { Label } from '@/components/ui/label'
-import { Switch } from '@/components/ui/switch'
-import { RefreshCw, LocateFixed, Pin } from 'lucide-react'
-import { useImperativeHandle } from 'react'
-import { PlatePercentLegend } from './PlatePercentLegend'
-
+import React, { useRef, useEffect, useState, useCallback, useImperativeHandle, forwardRef } from 'react';
+import * as THREE from 'three';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { useInspectionStore } from '@/store/use-inspection-store';
+import { DataVault } from '@/store/data-vault';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Slider } from '@/components/ui/slider';
+import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
+import { RefreshCw, LocateFixed, Pin, Loader2 } from 'lucide-react';
+import { PlatePercentLegend } from './PlatePercentLegend';
 
 export type TankView3DRef = {
   capture: () => string;
@@ -25,13 +23,26 @@ export type TankView3DRef = {
 
 interface TankView3DProps {}
 
+const getAbsColor = (percentage: number | null, isND: boolean): THREE.Color => {
+    const c = new THREE.Color();
+    if (isND) {
+      c.set(0x888888); 
+      return c;
+    }
+    if (percentage === null) c.set(0x444444);
+    else if (percentage < 70) c.set(0xff0000);
+    else if (percentage < 80) c.set(0xffff00);
+    else if (percentage < 90) c.set(0x00ff00);
+    else c.set(0x0000ff);
+    return c;
+}
 
 export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>((props, ref) => {
-  const { inspectionResult, selectedPoint, setSelectedPoint, dataVersion } = useInspectionStore()
+  const { inspectionResult, dataVersion } = useInspectionStore()
   const mountRef = useRef<HTMLDivElement>(null)
-  const [zScale, setZScale] = useState(15) // Represents radial exaggeration
-  const [showOrigin, setShowOrigin] = useState(true)
-  const [showMinMax, setShowMinMax] = useState(true);
+  const isReady = dataVersion > 0 && !!DataVault.stats && !!DataVault.gridMatrix && !!inspectionResult?.pipeOuterDiameter && !!inspectionResult?.pipeLength;
+  
+  const [zScale, setZScale] = useState(15);
   const [hoveredPoint, setHoveredPoint] = useState<any>(null);
   
   const sceneRef = useRef<THREE.Scene | null>(null)
@@ -39,69 +50,18 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>((prop
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null)
   const meshRef = useRef<THREE.Mesh | null>(null);
-  const raycasterRef = useRef<THREE.Raycaster | null>(null);
-  const pointerRef = useRef<THREE.Vector2 | null>(null);
-  const originAxesRef = useRef<THREE.AxesHelper | null>(null);
-  const colorTextureRef = useRef<THREE.DataTexture | null>(null);
-  const displacementTextureRef = useRef<THREE.DataTexture | null>(null);
-  const minMarkerRef = useRef<THREE.Mesh | null>(null);
-  const maxMarkerRef = useRef<THREE.Mesh | null>(null);
   const capsRef = useRef<THREE.Group | null>(null);
+  const reqRef = useRef<number>(0);
 
   const { nominalThickness, pipeOuterDiameter, pipeLength } = inspectionResult || {};
   const stats = DataVault.stats;
 
   const animate = useCallback(() => {
     if (!rendererRef.current || !sceneRef.current || !cameraRef.current || !controlsRef.current) return;
-    requestAnimationFrame(animate);
+    reqRef.current = requestAnimationFrame(animate);
     controlsRef.current.update();
     rendererRef.current.render(sceneRef.current, cameraRef.current);
   }, []);
-
-  // This effect runs only when the data from the worker is updated
-  useEffect(() => {
-    if (dataVersion === 0 || !stats) return;
-
-    const { displacementBuffer, colorBuffer } = DataVault;
-    if (!displacementBuffer || !colorBuffer) return;
-
-    const { width, height } = stats.gridSize;
-
-    // Update or create displacement texture
-    if (displacementTextureRef.current) {
-        displacementTextureRef.current.image.data = displacementBuffer;
-        displacementTextureRef.current.needsUpdate = true;
-    } else {
-        const texture = new THREE.DataTexture(displacementBuffer, width, height, THREE.RedFormat, THREE.FloatType);
-        texture.minFilter = THREE.NearestFilter;
-        texture.magFilter = THREE.NearestFilter;
-        texture.needsUpdate = true;
-        displacementTextureRef.current = texture;
-    }
-
-    // Update or create color texture
-    if (colorTextureRef.current) {
-        colorTextureRef.current.image.data = colorBuffer;
-        colorTextureRef.current.needsUpdate = true;
-    } else {
-        const texture = new THREE.DataTexture(colorBuffer, width, height, THREE.RGBAFormat, THREE.UnsignedByteType);
-        texture.minFilter = THREE.NearestFilter;
-        texture.magFilter = THREE.NearestFilter;
-        texture.needsUpdate = true;
-        colorTextureRef.current = texture;
-    }
-    
-    // Update material if mesh exists
-    if (meshRef.current) {
-        const material = meshRef.current.material as THREE.ShaderMaterial;
-        material.uniforms.colorTexture.value = colorTextureRef.current;
-        material.uniforms.displacementTexture.value = displacementTextureRef.current;
-        material.uniforms.zScale.value = zScale;
-        material.uniforms.nominalThickness.value = nominalThickness;
-        material.uniforms.pipeRadius.value = (pipeOuterDiameter || 0) / 2;
-        material.needsUpdate = true;
-    }
-  }, [dataVersion, stats, zScale, nominalThickness, pipeOuterDiameter]);
 
   const setView = useCallback((view: 'iso' | 'top' | 'side') => {
     if (cameraRef.current && controlsRef.current && pipeOuterDiameter && pipeLength) {
@@ -109,7 +69,7 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>((prop
         const distance = Math.max(pipeOuterDiameter, pipeLength) * 1.5;
         switch (view) {
             case 'top':
-                cameraRef.current.position.set(0, distance, 0.001); // slight offset to avoid gimbal lock
+                cameraRef.current.position.set(0, distance, 0.001);
                 break;
             case 'side':
                 cameraRef.current.position.set(distance, 0, 0);
@@ -150,22 +110,18 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>((prop
   }));
 
   useEffect(() => {
-    if (!mountRef.current || !inspectionResult || !pipeOuterDiameter || !pipeLength) return;
+    if (!isReady || !mountRef.current || !stats || !pipeOuterDiameter || !pipeLength || !nominalThickness) return;
     
-    if (!stats) return;
-
     const currentMount = mountRef.current;
-
-    rendererRef.current = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
-    currentMount.innerHTML = '';
-    currentMount.appendChild(rendererRef.current.domElement);
-
+    
     sceneRef.current = new THREE.Scene();
-    raycasterRef.current = new THREE.Raycaster();
-    pointerRef.current = new THREE.Vector2();
-
+    rendererRef.current = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
     cameraRef.current = new THREE.PerspectiveCamera(60, currentMount.clientWidth / currentMount.clientHeight, 0.1, 5000);
     controlsRef.current = new OrbitControls(cameraRef.current, rendererRef.current.domElement);
+    
+    rendererRef.current.setSize(currentMount.clientWidth, currentMount.clientHeight);
+    currentMount.innerHTML = '';
+    currentMount.appendChild(rendererRef.current.domElement);
     
     sceneRef.current.add(new THREE.AmbientLight(0xffffff, 0.7));
     const dirLight = new THREE.DirectionalLight(0xffffff, 1.0);
@@ -175,78 +131,51 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>((prop
     const { width, height } = stats.gridSize;
     const geometry = new THREE.CylinderGeometry(pipeOuterDiameter / 2, pipeOuterDiameter / 2, pipeLength, width > 1 ? width - 1 : 64, height > 1 ? height - 1 : 1, true);
     
-    // Add caps to make it a tank
+    const colors: number[] = [];
+    const positions = geometry.attributes.position;
+    
+    for (let i = 0; i < positions.count; i++) {
+        const u = geometry.attributes.uv.getX(i);
+        const v = 1.0 - geometry.attributes.uv.getY(i); // Flip V for correct texture mapping
+        
+        const gridX = Math.floor(u * (width - 1));
+        const gridY = Math.floor(v * (height - 1));
+        
+        const cell = DataVault.gridMatrix?.[gridY]?.[gridX];
+        const isND = !cell || cell.isND;
+        const color = getAbsColor(cell?.percentage ?? null, isND);
+        colors.push(color.r, color.g, color.b);
+
+        const wallLoss = (cell && !isND && cell.effectiveThickness !== null) ? nominalThickness - cell.effectiveThickness : 0;
+        const radialDisplacement = -wallLoss * zScale;
+        const currentRadius = pipeOuterDiameter / 2 + radialDisplacement;
+        
+        const originalPos = new THREE.Vector3().fromBufferAttribute(positions, i);
+        const angle = Math.atan2(originalPos.z, originalPos.x);
+
+        positions.setXYZ(i, currentRadius * Math.cos(angle), originalPos.y, currentRadius * Math.sin(angle));
+    }
+
+    geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    positions.needsUpdate = true;
+    geometry.computeVertexNormals();
+
+    const mat = new THREE.MeshStandardMaterial({ vertexColors: true, side: THREE.DoubleSide });
+    meshRef.current = new THREE.Mesh(geometry, mat);
+    sceneRef.current.add(meshRef.current);
+
     capsRef.current = new THREE.Group();
     const capGeo = new THREE.CircleGeometry(pipeOuterDiameter / 2, 64);
     const capMat = new THREE.MeshStandardMaterial({ color: 0x666666, side: THREE.DoubleSide });
-    
-    const CAP_OFFSET = 0.01; // Tiny offset to prevent Z-fighting
-
     const topCap = new THREE.Mesh(capGeo, capMat);
-    topCap.position.y = pipeLength / 2 + CAP_OFFSET;
+    topCap.position.y = pipeLength / 2;
     topCap.rotation.x = Math.PI / 2;
     capsRef.current.add(topCap);
-
     const bottomCap = new THREE.Mesh(capGeo, capMat);
-    bottomCap.position.y = -pipeLength / 2 - CAP_OFFSET;
+    bottomCap.position.y = -pipeLength / 2;
     bottomCap.rotation.x = -Math.PI / 2;
     capsRef.current.add(bottomCap);
-
     sceneRef.current.add(capsRef.current);
-
-
-    const material = new THREE.ShaderMaterial({
-        uniforms: {
-            colorTexture: { value: null },
-            displacementTexture: { value: null },
-            zScale: { value: zScale },
-            nominalThickness: { value: nominalThickness || 10 },
-            pipeRadius: { value: pipeOuterDiameter / 2 },
-        },
-        vertexShader: `
-            uniform sampler2D displacementTexture;
-            uniform float zScale;
-            uniform float nominalThickness;
-            uniform float pipeRadius;
-            varying vec2 vUv;
-
-            void main() {
-                vUv = uv;
-                float displacementValue = texture2D(displacementTexture, uv).r;
-                float loss = nominalThickness - displacementValue;
-                float currentRadius = pipeRadius - (loss * zScale);
-                
-                vec3 newPosition = position;
-                newPosition.x = newPosition.x / pipeRadius * currentRadius;
-                newPosition.z = newPosition.z / pipeRadius * currentRadius;
-
-                gl_Position = projectionMatrix * modelViewMatrix * vec4(newPosition, 1.0);
-            }
-        `,
-        fragmentShader: `
-            uniform sampler2D colorTexture;
-            varying vec2 vUv;
-            void main() {
-                gl_FragColor = texture2D(colorTexture, vUv);
-            }
-        `,
-        side: THREE.DoubleSide,
-    });
-    
-    meshRef.current = new THREE.Mesh(geometry, material);
-    sceneRef.current.add(meshRef.current);
-
-    originAxesRef.current = new THREE.AxesHelper(Math.max(pipeOuterDiameter, pipeLength) * 0.1);
-    sceneRef.current.add(originAxesRef.current);
-
-    // Min/Max Markers
-    const markerGeo = new THREE.ConeGeometry(pipeOuterDiameter / 50, pipeOuterDiameter / 25, 8);
-    const minMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
-    const maxMat = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
-    minMarkerRef.current = new THREE.Mesh(markerGeo, minMat);
-    maxMarkerRef.current = new THREE.Mesh(markerGeo, maxMat);
-    sceneRef.current.add(minMarkerRef.current);
-    sceneRef.current.add(maxMarkerRef.current);
 
     const handleResize = () => {
       if (rendererRef.current && cameraRef.current && currentMount) {
@@ -256,112 +185,29 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>((prop
       }
     };
     window.addEventListener('resize', handleResize);
-
-    const onPointerMove = ( event: PointerEvent ) => {
-      if (!pointerRef.current || !mountRef.current || !raycasterRef.current || !cameraRef.current || !meshRef.current || !DataVault.gridMatrix) {
-          setHoveredPoint(null);
-          return;
-      }
-      const rect = mountRef.current.getBoundingClientRect();
-      pointerRef.current.x = ( ( event.clientX - rect.left ) / rect.width ) * 2 - 1;
-      pointerRef.current.y = - ( ( event.clientY - rect.top ) / rect.height ) * 2 + 1;
-
-      raycasterRef.current.setFromCamera( pointerRef.current, cameraRef.current );
-      const intersects = raycasterRef.current.intersectObject( meshRef.current );
-
-      if ( intersects.length > 0 && intersects[0].uv) {
-          const uv = intersects[0].uv;
-          const { width, height } = stats.gridSize;
-          const gridX = Math.floor(uv.x * (width - 1));
-          const gridY = Math.floor((1-uv.y) * (height-1));
-          
-          if (gridX >= 0 && gridX < width && gridY >= 0 && gridY < height) {
-              const pointData = DataVault.gridMatrix[gridY]?.[gridX];
-               if(pointData && typeof pointData.rawThickness === 'number' && !isNaN(pointData.rawThickness)) {
-                  setHoveredPoint({ x: gridX, y: gridY, ...pointData, clientX: event.clientX, clientY: event.clientY });
-              } else {
-                  setHoveredPoint(null);
-              }
-          } else {
-              setHoveredPoint(null);
-          }
-      } else {
-          setHoveredPoint(null);
-      }
-    }
     
-    currentMount.addEventListener('pointermove', onPointerMove);
-    currentMount.addEventListener('pointerleave', () => setHoveredPoint(null));
-    
-    handleResize();
     resetCamera();
     animate();
 
     return () => {
+      cancelAnimationFrame(reqRef.current);
       window.removeEventListener('resize', handleResize);
        if (currentMount) {
-        currentMount.removeEventListener('pointermove', onPointerMove);
-        currentMount.removeEventListener('pointerleave', () => setHoveredPoint(null));
+        // Cleanup if necessary
       }
-      if (sceneRef.current && meshRef.current) sceneRef.current.remove(meshRef.current);
-      if (sceneRef.current && capsRef.current) sceneRef.current.remove(capsRef.current);
+      sceneRef.current?.remove(meshRef.current!);
+      sceneRef.current?.remove(capsRef.current!);
       meshRef.current?.geometry.dispose();
       (meshRef.current?.material as THREE.Material)?.dispose();
       capsRef.current?.children.forEach(c => {
         (c as THREE.Mesh).geometry.dispose();
         ((c as THREE.Mesh).material as THREE.Material).dispose();
       });
-      if (rendererRef.current) {
-        rendererRef.current.dispose();
-        if(rendererRef.current.domElement.parentElement) {
-            rendererRef.current.domElement.parentElement.removeChild(rendererRef.current.domElement);
-        }
-      }
+      rendererRef.current?.dispose();
     };
-  }, [inspectionResult, animate, resetCamera, pipeOuterDiameter, pipeLength, nominalThickness, stats]);
+  }, [isReady, pipeOuterDiameter, pipeLength, nominalThickness, animate, resetCamera, stats, zScale]);
   
-  useEffect(() => {
-    if (meshRef.current) {
-        const material = meshRef.current.material as THREE.ShaderMaterial;
-        material.uniforms.zScale.value = zScale;
-        material.needsUpdate = true;
-    }
-    // Update marker positions when zScale changes
-    if (stats && minMarkerRef.current && maxMarkerRef.current && pipeOuterDiameter && pipeLength && nominalThickness) {
-      const { worstLocation, bestLocation, gridSize } = stats;
-      const pipeRadius = pipeOuterDiameter / 2;
-
-      const placeMarker = (marker: THREE.Mesh, location: any, value: number) => {
-        if (!location) return;
-        const angle = (location.x / (gridSize.width - 1)) * 2 * Math.PI;
-        const h = (location.y / (gridSize.height - 1)) * pipeLength - pipeLength / 2;
-        const loss = nominalThickness - value;
-        const currentRadius = pipeRadius - loss * zScale;
-        const x = currentRadius * Math.cos(angle);
-        const z = currentRadius * Math.sin(angle);
-        marker.position.set(x, h, z);
-        marker.lookAt(new THREE.Vector3(0,h,0));
-        marker.rotateX(Math.PI/2);
-      }
-
-      placeMarker(minMarkerRef.current, worstLocation, worstLocation?.value || 0);
-      placeMarker(maxMarkerRef.current, bestLocation, bestLocation?.value || 0);
-    }
-  }, [zScale, stats, pipeOuterDiameter, pipeLength, nominalThickness]);
-  
-  useEffect(() => {
-    if (originAxesRef.current) {
-        originAxesRef.current.visible = showOrigin;
-    }
-  }, [showOrigin]);
-
-  useEffect(() => {
-    if (minMarkerRef.current) minMarkerRef.current.visible = showMinMax;
-    if (maxMarkerRef.current) maxMarkerRef.current.visible = showMinMax;
-  }, [showMinMax]);
-  
-  
-  if (!inspectionResult) return null;
+  if (!isReady) return <div className="flex items-center justify-center h-full"><Loader2 className="animate-spin" /></div>;
 
   return (
     <div className="grid md:grid-cols-4 gap-6 h-full">
@@ -400,14 +246,6 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>((prop
               <Label>Radial Exaggeration: {zScale.toFixed(1)}x</Label>
               <Slider value={[zScale]} onValueChange={([val]) => setZScale(val)} min={1} max={50} step={0.5} />
             </div>
-             <div className="flex items-center justify-between">
-              <Label htmlFor="origin-switch" className="flex items-center gap-2"><LocateFixed className="h-4 w-4" />Show Origin</Label>
-              <Switch id="origin-switch" checked={showOrigin} onCheckedChange={setShowOrigin} />
-            </div>
-             <div className="flex items-center justify-between">
-              <Label htmlFor="min-max-switch" className="flex items-center gap-2"><Pin className="h-4 w-4" />Show Min/Max Points</Label>
-              <Switch id="min-max-switch" checked={showMinMax} onCheckedChange={setShowMinMax} />
-            </div>
           </CardContent>
         </Card>
         <Card>
@@ -432,8 +270,5 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>((prop
   )
 });
 TankView3D.displayName = "TankView3D";
-
-
-    
 
     
