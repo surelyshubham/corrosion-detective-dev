@@ -1,3 +1,4 @@
+
 export type AssetType = 
   | 'Plate'
   | 'Tank'
@@ -16,6 +17,11 @@ export const assetTypes: AssetType[] = [
   'Ship Hull',
   'LPG/Gas Bullet',
 ];
+
+// New types for Pipe Elbow configuration
+export type ElbowAngle = 30 | 45 | 90;
+export type ElbowRadiusType = 'Long' | 'Short';
+
 
 export interface GridCell {
   plateId: string | null;
@@ -110,6 +116,10 @@ export type Plate = {
   nominalThickness: number;
   pipeOuterDiameter?: number;
   pipeLength?: number;
+  // Elbow specific
+  elbowStartLength?: number;
+  elbowAngle?: ElbowAngle;
+  elbowRadiusType?: ElbowRadiusType;
 };
 
 export type MergedGrid = GridCell[][]; // [y][x]
@@ -126,6 +136,10 @@ export interface MergedInspectionResult {
   aiInsight: AIInsight | null;
   corrosionPatches: SegmentBox[];
   ndPatches: SegmentBox[];
+  // Elbow specific
+  elbowStartLength?: number;
+  elbowAngle?: ElbowAngle;
+  elbowRadiusType?: ElbowRadiusType;
 }
 
 

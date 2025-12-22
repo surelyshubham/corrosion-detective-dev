@@ -1,8 +1,9 @@
 
+
 "use client"
 
 import { create } from 'zustand';
-import type { MergedInspectionResult, AIInsight, Plate, MergedGrid, AssetType, InspectionStats, SegmentBox, GridCell } from '@/lib/types';
+import type { MergedInspectionResult, AIInsight, Plate, MergedGrid, AssetType, InspectionStats, SegmentBox, GridCell, ElbowAngle, ElbowRadiusType } from '@/lib/types';
 import { DataVault } from './data-vault';
 import { type MergeFormValues } from '@/components/tabs/merge-alert-dialog';
 import { toast } from '@/hooks/use-toast';
@@ -42,6 +43,9 @@ export type ProcessConfig = {
     nominalThickness: number;
     pipeOuterDiameter?: number;
     pipeLength?: number;
+    elbowStartLength?: number;
+    elbowAngle?: ElbowAngle;
+    elbowRadiusType?: ElbowRadiusType;
 }
 
 export interface PatchState {
@@ -134,6 +138,8 @@ export const useInspectionStore = create<InspectionState>()(
                   DataVault.stats = data.stats;
                   console.log("🔥 MERGE APPLIED TO DATAVAULT");
                   
+                  const firstPlate = data.plates[0];
+
                   const newResult: MergedInspectionResult = {
                       plates: data.plates,
                       mergedGrid: data.gridMatrix,
@@ -141,9 +147,12 @@ export const useInspectionStore = create<InspectionState>()(
                       stats: data.stats,
                       condition: data.condition,
                       aiInsight: null,
-                      assetType: data.plates[0].assetType,
-                      pipeOuterDiameter: data.plates[0].pipeOuterDiameter,
-                      pipeLength: data.plates[0].pipeLength,
+                      assetType: firstPlate.assetType,
+                      pipeOuterDiameter: firstPlate.pipeOuterDiameter,
+                      pipeLength: firstPlate.pipeLength,
+                      elbowStartLength: firstPlate.elbowStartLength,
+                      elbowAngle: firstPlate.elbowAngle,
+                      elbowRadiusType: firstPlate.elbowRadiusType,
                       corrosionPatches: data.corrosionPatches,
                       ndPatches: data.ndPatches,
                   };

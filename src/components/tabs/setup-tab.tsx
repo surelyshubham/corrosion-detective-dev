@@ -11,7 +11,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { assetTypes, type AssetType } from '@/lib/types'
+import { assetTypes, type AssetType, type ElbowAngle, type ElbowRadiusType } from '@/lib/types'
 import { FileUp, Loader2, Paperclip, X, Merge, Rows3, CheckCircle } from 'lucide-react'
 import { DummyDataGenerator } from '@/components/dummy-data-generator'
 import { useInspectionStore } from '@/store/use-inspection-store'
@@ -23,7 +23,11 @@ const setupSchema = z.object({
   nominalThickness: z.coerce.number().min(0.1, 'Must be positive.'),
   pipeOuterDiameter: z.coerce.number().min(1, 'Must be positive.').optional(),
   pipeLength: z.coerce.number().min(1, 'Must be positive.').optional(),
-})
+  elbowStartLength: z.coerce.number().min(0, "Cannot be negative.").optional(),
+  elbowAngle: z.coerce.number().optional(),
+  elbowRadiusType: z.string().optional(),
+});
+
 
 type SetupFormValues = z.infer<typeof setupSchema>
 
@@ -54,6 +58,9 @@ export function SetupTab() {
       assetType: undefined,
       pipeOuterDiameter: 1000,
       pipeLength: 1000,
+      elbowStartLength: 200,
+      elbowAngle: 90,
+      elbowRadiusType: 'Long'
     },
   })
   
@@ -84,8 +91,12 @@ export function SetupTab() {
       assetType: formData.assetType,
       nominalThickness: formData.nominalThickness,
       pipeOuterDiameter: formData.pipeOuterDiameter,
-      pipeLength: formData.pipeLength
+      pipeLength: formData.pipeLength,
+      elbowStartLength: formData.elbowStartLength,
+      elbowAngle: formData.elbowAngle as ElbowAngle,
+      elbowRadiusType: formData.elbowRadiusType as ElbowRadiusType,
     };
+
 
     // If project already started, trigger the merge flow
     if (isProjectStarted) {
@@ -123,7 +134,10 @@ export function SetupTab() {
         assetType: formData.assetType,
         nominalThickness: formData.nominalThickness,
         pipeOuterDiameter: formData.pipeOuterDiameter,
-        pipeLength: formData.pipeLength
+        pipeLength: formData.pipeLength,
+        elbowStartLength: formData.elbowStartLength,
+        elbowAngle: formData.elbowAngle as ElbowAngle,
+        elbowRadiusType: formData.elbowRadiusType as ElbowRadiusType,
       };
       addFileToStage(fileToMerge, config, mergeData);
       setIsMergeAlertOpen(false);
@@ -141,8 +155,9 @@ export function SetupTab() {
 
     switch (selectedAssetType) {
         case 'Pipe':
+        case 'Pipe Elbow':
             diameterLabel = "Pipe Outer Diameter (mm)";
-            lengthLabel = "Pipe Length (mm)";
+            lengthLabel = "Total Pipe Length (mm)";
             break;
         case 'Tank':
             diameterLabel = "Tank Diameter (mm)";
@@ -171,6 +186,45 @@ export function SetupTab() {
                     <Label htmlFor="pipeLength">{lengthLabel}</Label>
                     <Controller name="pipeLength" control={control} render={({ field }) => ( <Input id="pipeLength" type="number" step="1" {...field} disabled={isProjectStarted} /> )} />
                 </div>
+            )}
+             {selectedAssetType === 'Pipe Elbow' && (
+              <>
+                <div className="space-y-2">
+                    <Label htmlFor="elbowStartLength">Elbow Start Length (mm)</Label>
+                    <Controller name="elbowStartLength" control={control} render={({ field }) => ( <Input id="elbowStartLength" type="number" step="1" {...field} disabled={isProjectStarted} /> )} />
+                </div>
+                 <div className="space-y-2">
+                    <Label htmlFor="elbowAngle">Elbow Angle</Label>
+                    <Controller
+                        name="elbowAngle" control={control}
+                        render={({ field }) => (
+                        <Select onValueChange={(v) => field.onChange(parseInt(v))} defaultValue={String(field.value)} disabled={isProjectStarted}>
+                            <SelectTrigger id="elbowAngle"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="30">30°</SelectItem>
+                                <SelectItem value="45">45°</SelectItem>
+                                <SelectItem value="90">90°</SelectItem>
+                            </SelectContent>
+                        </Select>
+                        )}
+                    />
+                </div>
+                <div className="col-span-2 space-y-2">
+                    <Label htmlFor="elbowRadiusType">Elbow Radius Type</Label>
+                     <Controller
+                        name="elbowRadiusType" control={control}
+                        render={({ field }) => (
+                        <Select onValueChange={field.onChange} defaultValue={field.value} disabled={isProjectStarted}>
+                            <SelectTrigger id="elbowRadiusType"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="Long">Long Radius (1.5D)</SelectItem>
+                                <SelectItem value="Short">Short Radius (1.0D)</SelectItem>
+                            </SelectContent>
+                        </Select>
+                        )}
+                    />
+                </div>
+              </>
             )}
         </div>
     );

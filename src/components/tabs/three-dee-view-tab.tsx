@@ -9,9 +9,10 @@ import { PipeView3D, type PipeView3DRef } from '@/components/visualizations/Pipe
 import { TankView3D, type TankView3DRef } from '@/components/visualizations/TankView3D';
 import { VesselView3D, type VesselView3DRef } from '@/components/visualizations/VesselView3D';
 import { GasBulletView3D, type GasBulletView3DRef } from '@/components/visualizations/GasBulletView3D';
+import { PipeElbowView3D, type PipeElbowView3DRef } from '@/components/visualizations/PipeElbowView3D';
 
 
-type ViewRef = PlateView3DRef | PipeView3DRef | TankView3DRef | VesselView3DRef | GasBulletView3DRef;
+type ViewRef = PlateView3DRef | PipeView3DRef | TankView3DRef | VesselView3DRef | GasBulletView3DRef | PipeElbowView3DRef;
 
 export type ThreeDeeViewRef = {
   capture: () => Promise<string>;
@@ -42,6 +43,8 @@ export const ThreeDeeViewTab = forwardRef<ThreeDeeViewRef, ThreeDeeViewTabProps>
     switch (assetType) {
       case 'Pipe':
         return <PipeView3D ref={viewRef as Ref<PipeView3DRef>} />;
+      case 'Pipe Elbow':
+        return <PipeElbowView3D ref={viewRef as Ref<PipeElbowView3DRef>} />;
       case 'Tank':
         return <TankView3D ref={viewRef as Ref<TankView3DRef>} />;
       case 'Vessel':

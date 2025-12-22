@@ -1,6 +1,7 @@
 
+
 import * as XLSX from 'xlsx';
-import type { MergedGrid, InspectionStats, Condition, Plate, AssetType, SegmentBox, SeverityTier, PatchKind, GridCell, PatchRepresentation } from '../lib/types';
+import type { MergedGrid, InspectionStats, Condition, Plate, AssetType, SegmentBox, SeverityTier, PatchKind, GridCell, PatchRepresentation, ElbowAngle, ElbowRadiusType } from '../lib/types';
 import { type MergeFormValues } from '@/components/tabs/merge-alert-dialog';
 import { type ProcessConfig } from '@/store/use-inspection-store';
 
@@ -669,7 +670,21 @@ self.onmessage = async (event: MessageEvent<any>) => {
             self.postMessage({ type: 'PROGRESS', progress: 90, message: 'Generating buffers...' });
             const { displacementBuffer, colorBuffer } = createBuffers(FINAL_GRID, stats.minThickness, stats.maxThickness);
             
-            const platesForStore = STAGED_PLATES.map(p => ({ id: p.name, fileName: p.name, ...p.config, rawGridData:[], processedData:[], stats:{} as InspectionStats, metadata:[] } as Plate));
+            const platesForStore: Plate[] = STAGED_PLATES.map(p => ({ 
+              id: p.name, 
+              fileName: p.name,
+              assetType: p.config.assetType,
+              nominalThickness: p.config.nominalThickness,
+              pipeOuterDiameter: p.config.pipeOuterDiameter,
+              pipeLength: p.config.pipeLength,
+              elbowStartLength: p.config.elbowStartLength,
+              elbowAngle: p.config.elbowAngle,
+              elbowRadiusType: p.config.elbowRadiusType,
+              rawGridData:[], 
+              processedData:[], 
+              stats:{} as InspectionStats, 
+              metadata:[] 
+            }));
             
             self.postMessage({
                 type: 'FINALIZED', displacementBuffer, colorBuffer,
