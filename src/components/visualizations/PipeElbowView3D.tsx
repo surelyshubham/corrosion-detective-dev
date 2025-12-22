@@ -68,42 +68,41 @@ class PipePath {
     }
 
     getPoint(s: number): { point: THREE.Vector3, tangent: THREE.Vector3, normal: THREE.Vector3, binormal: THREE.Vector3 } {
+        s = Math.max(0, Math.min(s, this.totalLength));
         let accumulatedLength = 0;
         for (const segment of this.segments) {
             if (s <= accumulatedLength + segment.length + 1e-6) {
                 const local_s = s - accumulatedLength;
                 if (segment.type === 'line') {
                     const point = segment.startPoint.clone().add(segment.direction!.clone().multiplyScalar(local_s));
-                    const tangent = segment.direction!.clone();
+                    const tangent = segment.direction!;
                     
-                    // Robustly find a normal vector
-                    let normal: THREE.Vector3;
-                    if (Math.abs(tangent.x) > 0.9) { // If tangent is mostly along X
-                        normal = new THREE.Vector3(0, 1, 0);
-                    } else {
-                        normal = new THREE.Vector3(1, 0, 0);
+                    let up = new THREE.Vector3(0, 0, 1);
+                    if (Math.abs(tangent.z) > 0.999) {
+                        up = new THREE.Vector3(0, 1, 0);
                     }
                     
-                    const binormal = new THREE.Vector3().crossVectors(tangent, normal).normalize();
-                    normal.crossVectors(binormal, tangent).normalize();
+                    const binormal = new THREE.Vector3().crossVectors(tangent, up).normalize();
+                    const normal = new THREE.Vector3().crossVectors(binormal, tangent).normalize();
 
                     return { point, tangent, normal, binormal };
                 } else { // arc
-                    const angle = segment.arcStartAngle! + local_s / segment.arcRadius!;
+                    const safeRadius = Math.max(segment.arcRadius!, 1e-6);
+                    const angle = segment.arcStartAngle! + local_s / safeRadius;
                     const point = new THREE.Vector3(
                         segment.arcCenter!.x + segment.arcRadius! * Math.cos(angle),
                         segment.arcCenter!.y + segment.arcRadius! * Math.sin(angle),
                         segment.arcCenter!.z
                     );
                     const tangent = new THREE.Vector3(-Math.sin(angle), Math.cos(angle), 0).normalize();
-                    const binormal = new THREE.Vector3(0, 0, -1); // For a planar arc in XY
+                    const binormal = new THREE.Vector3(0, 0, -1);
                     const normal = new THREE.Vector3().crossVectors(binormal, tangent).normalize();
                     return { point, tangent, normal, binormal };
                 }
             }
             accumulatedLength += segment.length;
         }
-        // fallback for s > totalLength
+        // Fallback to the very last point if s is out of bounds
         return this.getPoint(this.totalLength);
     }
 }
@@ -320,6 +319,8 @@ export const PipeElbowView3D = forwardRef<PipeElbowView3DRef, PipeElbowView3DPro
   )
 });
 PipeElbowView3D.displayName = "PipeElbowView3D";
+
+    
 
     
 
