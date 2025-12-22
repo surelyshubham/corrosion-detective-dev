@@ -37,34 +37,33 @@ const getAbsColor = (percentage: number | null, isND: boolean): THREE.Color => {
 
 // Centerline Path Class
 class PipePath {
-    private segments: { type: 'line' | 'arc', length: number, startPoint: THREE.Vector3, endPoint: THREE.Vector3, direction?: THREE.Vector3, arcCenter?: THREE.Vector3, arcRadius?: number, arcAngle?: number }[] = [];
+    private segments: { type: 'line' | 'arc', length: number, startPoint: THREE.Vector3, endPoint: THREE.Vector3, direction?: THREE.Vector3, arcCenter?: THREE.Vector3, arcRadius?: number, arcStartAngle?: number, arcEndAngle?: number }[] = [];
     public totalLength: number = 0;
 
     constructor(startLength: number, bendRadius: number, bendAngleRad: number, endLength: number) {
-        // Segment 1: Initial Straight Pipe
         const seg1Start = new THREE.Vector3(0, 0, 0);
         const seg1End = new THREE.Vector3(0, startLength, 0);
         this.addSegment('line', startLength, seg1Start, seg1End, new THREE.Vector3(0, 1, 0));
 
-        // Segment 2: Elbow Bend
         const arcCenter = new THREE.Vector3(bendRadius, startLength, 0);
+        const arcStartAngle = -Math.PI / 2;
+        const arcEndAngle = arcStartAngle + bendAngleRad;
         const arcStart = seg1End;
         const arcEnd = new THREE.Vector3(
-            bendRadius * (1 - Math.cos(bendAngleRad)),
-            startLength + bendRadius * Math.sin(bendAngleRad),
+            arcCenter.x + bendRadius * Math.cos(arcEndAngle),
+            arcCenter.y + bendRadius * Math.sin(arcEndAngle),
             0
         );
-        this.addSegment('arc', bendRadius * bendAngleRad, arcStart, arcEnd, undefined, arcCenter, bendRadius, bendAngleRad);
+        this.addSegment('arc', bendRadius * bendAngleRad, arcStart, arcEnd, undefined, arcCenter, bendRadius, arcStartAngle, arcEndAngle);
 
-        // Segment 3: Final Straight Pipe
-        const seg3Dir = new THREE.Vector3(Math.sin(bendAngleRad), Math.cos(bendAngleRad), 0).normalize();
+        const seg3Dir = new THREE.Vector3(Math.cos(arcEndAngle), Math.sin(arcEndAngle), 0).normalize();
         const seg3Start = arcEnd;
         const seg3End = seg3Start.clone().add(seg3Dir.clone().multiplyScalar(endLength));
         this.addSegment('line', endLength, seg3Start, seg3End, seg3Dir);
     }
 
-    private addSegment(type: 'line' | 'arc', length: number, startPoint: THREE.Vector3, endPoint: THREE.Vector3, direction?: THREE.Vector3, arcCenter?: THREE.Vector3, arcRadius?: number, arcAngle?: number) {
-        this.segments.push({ type, length, startPoint, endPoint, direction, arcCenter, arcRadius, arcAngle });
+    private addSegment(type: 'line' | 'arc', length: number, startPoint: THREE.Vector3, endPoint: THREE.Vector3, direction?: THREE.Vector3, arcCenter?: THREE.Vector3, arcRadius?: number, arcStartAngle?: number, arcEndAngle?: number) {
+        this.segments.push({ type, length, startPoint, endPoint, direction, arcCenter, arcRadius, arcStartAngle, arcEndAngle });
         this.totalLength += length;
     }
 
@@ -76,18 +75,18 @@ class PipePath {
                 if (segment.type === 'line') {
                     const point = segment.startPoint.clone().add(segment.direction!.clone().multiplyScalar(local_s));
                     const tangent = segment.direction!.clone();
-                    const normal = new THREE.Vector3(1, 0, 0); // Arbitrary normal for vertical pipe
+                    const normal = new THREE.Vector3(1, 0, 0).cross(tangent).length() > 0.1 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 0, 1);
                     const binormal = new THREE.Vector3().crossVectors(tangent, normal).normalize();
                     return { point, tangent, normal, binormal };
                 } else { // arc
-                    const angle = local_s / segment.arcRadius!;
+                    const angle = segment.arcStartAngle! + local_s / segment.arcRadius!;
                     const point = new THREE.Vector3(
-                        segment.arcCenter!.x - segment.arcRadius! * Math.cos(angle),
+                        segment.arcCenter!.x + segment.arcRadius! * Math.cos(angle),
                         segment.arcCenter!.y + segment.arcRadius! * Math.sin(angle),
                         segment.arcCenter!.z
                     );
-                    const tangent = new THREE.Vector3(Math.sin(angle), Math.cos(angle), 0).normalize();
-                    const binormal = new THREE.Vector3(0, 0, 1); // For a planar arc in XY
+                    const tangent = new THREE.Vector3(-Math.sin(angle), Math.cos(angle), 0).normalize();
+                    const binormal = new THREE.Vector3(0, 0, -1); // For a planar arc in XY
                     const normal = new THREE.Vector3().crossVectors(binormal, tangent).normalize();
                     return { point, tangent, normal, binormal };
                 }
@@ -95,8 +94,7 @@ class PipePath {
             accumulatedLength += segment.length;
         }
         // fallback for s > totalLength
-        const lastSeg = this.segments[this.segments.length-1];
-        return this.getPoint(lastSeg.length + accumulatedLength - 1e-6);
+        return this.getPoint(this.totalLength);
     }
 }
 
@@ -312,3 +310,5 @@ export const PipeElbowView3D = forwardRef<PipeElbowView3DRef, PipeElbowView3DPro
   )
 });
 PipeElbowView3D.displayName = "PipeElbowView3D";
+
+    
