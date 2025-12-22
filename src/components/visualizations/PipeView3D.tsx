@@ -160,11 +160,16 @@ export const PipeView3D = React.forwardRef<PipeView3DRef, PipeView3DProps>((prop
         rendererRef.current?.dispose();
         currentMount.innerHTML = '';
     };
-}, [isReady, nominalThickness, pipeOuterDiameter, pipeLength, animate, depthExaggeration, startAngle, resetCamera]);
+}, [isReady, nominalThickness, pipeOuterDiameter, pipeLength, animate, resetCamera]);
   
   useEffect(() => {
     engineRef.current?.setDepthExaggeration(depthExaggeration);
   }, [depthExaggeration]);
+
+  useEffect(() => {
+    engineRef.current?.setStartAngle(startAngle);
+  }, [startAngle]);
+
 
   if (!isReady) return <div className="flex items-center justify-center h-full"><Loader2 className="animate-spin" /> <span className="ml-2">Loading 3D View...</span></div>;
 

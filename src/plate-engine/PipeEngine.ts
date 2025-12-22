@@ -22,6 +22,7 @@ export class PipeEngine {
   private scene: THREE.Scene;
   private camera: THREE.Camera;
   private pipeMesh!: THREE.Mesh;
+  private seamLine?: THREE.Line;
   private raycaster = new THREE.Raycaster();
   
   public readonly cellWidth: number;
@@ -84,7 +85,6 @@ export class PipeEngine {
     
     const colors: number[] = [];
     const positions = geom.attributes.position;
-    const normals = geom.attributes.normal;
 
     for (let i = 0; i < positions.count; i++) {
         const u = geom.attributes.uv.getX(i);
@@ -104,16 +104,16 @@ export class PipeEngine {
 
         const originalPos = new THREE.Vector3().fromBufferAttribute(positions, i);
         
-        // Calculate the angle based on UV and add the start angle offset
-        const angle = u * Math.PI * 2 + startAngleRad;
-
-        // Recalculate position based on angle to handle wrapping correctly
+        const angle = u * Math.PI * 2; // Keep angle relative to 0 for position calculation
+        
         const currentRadius = this.pipeRadius + radialDisplacement;
         const newX = currentRadius * Math.cos(angle);
         const newZ = currentRadius * Math.sin(angle);
         
         positions.setXYZ(i, newX, originalPos.y, newZ);
     }
+    
+    geom.rotateY(startAngleRad); // Rotate the entire geometry to the start angle
 
     geom.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
     positions.needsUpdate = true;
@@ -122,6 +122,28 @@ export class PipeEngine {
     const mat = new THREE.MeshStandardMaterial({ vertexColors: true, side: THREE.DoubleSide });
     this.pipeMesh = new THREE.Mesh(geom, mat);
     this.scene.add(this.pipeMesh);
+    
+    // Add Seam Line
+    this.createSeamLine();
+  }
+
+  private createSeamLine() {
+    if (this.seamLine) {
+        this.scene.remove(this.seamLine);
+        this.seamLine.geometry.dispose();
+        (this.seamLine.material as THREE.Material).dispose();
+    }
+    const seamMaterial = new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 2 });
+    const startAngleRad = THREE.MathUtils.degToRad(this.startAngle);
+    const seamX = (this.pipeRadius + 1) * Math.cos(startAngleRad); // Small offset to avoid z-fighting
+    const seamZ = (this.pipeRadius + 1) * Math.sin(startAngleRad);
+    const points = [
+        new THREE.Vector3(seamX, -this.pipeHeight / 2, seamZ),
+        new THREE.Vector3(seamX, this.pipeHeight / 2, seamZ)
+    ];
+    const seamGeometry = new THREE.BufferGeometry().setFromPoints(points);
+    this.seamLine = new THREE.Line(seamGeometry, seamMaterial);
+    this.scene.add(this.seamLine);
   }
 
   private createWorldFrame() {
@@ -186,16 +208,32 @@ export class PipeEngine {
 
   setDepthExaggeration(scale: number) {
     this.depthExaggeration = scale;
-    // For simplicity and correctness, we dispose and recreate on parameter change
-    this.scene.remove(this.pipeMesh);
-    this.pipeMesh.geometry.dispose();
-    (this.pipeMesh.material as THREE.Material).dispose();
+    this.dispose();
+    this.createPipe();
+  }
+
+  setStartAngle(angle: number) {
+    this.startAngle = angle;
+    this.dispose();
     this.createPipe();
   }
 
   dispose() {
     this.scene.remove(this.pipeMesh);
-    this.pipeMesh.geometry.dispose();
-    (this.pipeMesh.material as THREE.Material).dispose();
+    if(this.seamLine) this.scene.remove(this.seamLine);
+
+    this.pipeMesh?.geometry.dispose();
+    if (this.pipeMesh?.material) {
+        if (Array.isArray(this.pipeMesh.material)) {
+            this.pipeMesh.material.forEach(m => m.dispose());
+        } else {
+            this.pipeMesh.material.dispose();
+        }
+    }
+   
+    if(this.seamLine) {
+        this.seamLine.geometry.dispose();
+        (this.seamLine.material as THREE.Material).dispose();
+    }
   }
 }
