@@ -1,3 +1,4 @@
+
 import type { InspectionStats, SegmentBox } from "@/lib/types";
 
 export interface ReportInput {
@@ -14,12 +15,10 @@ export interface ReportInput {
   fullAssetImages: {
     view2D: string;
     view3DIso: string;
-    view3DTop?: string;
-    view3DSide?: string;
   };
 
-  stats: any; // your InspectionStats
-  aiSummary: string;
+  stats: any; // your InspectionStats, plus totalPatches, visualizedPatches
+  aiSummary: string; // Placeholder, not used
 
   corrosionPatches: EnrichedPatch[];
   ndPatches: EnrichedPatch[];
@@ -32,8 +31,8 @@ export interface EnrichedPatch {
   meta: Record<string, any>;
   images: {
     view2D: string;
-    view3DTop: string;
-    view3DSide: string;
+    view3DTop?: string;
+    view3DSide?: string;
     view3DIso: string;
   } | null;
    cells?: {

@@ -1,4 +1,5 @@
 
+
 import {
   Paragraph,
   TextRun,
@@ -14,6 +15,8 @@ import {
 } from "docx";
 import type { EnrichedPatch } from "../types";
 import { base64ToUint8Array } from "../utils";
+
+export const MIN_CELLS_FOR_VISUALIZATION = 20;
 
 /**
  * Builds Corrosion Patch Details section
@@ -31,7 +34,7 @@ export function buildCorrosionPatches(patches: EnrichedPatch[], nominalThickness
   }
 
   const children: any[] = [];
-  const imagePatches = patches.filter(p => p.representation === 'IMAGE');
+  const imagePatches = patches.filter(p => p.meta.area >= MIN_CELLS_FOR_VISUALIZATION);
   
   /* ---------------- SUMMARY TABLE ---------------- */
   children.push(
@@ -43,7 +46,7 @@ export function buildCorrosionPatches(patches: EnrichedPatch[], nominalThickness
   );
 
   const summaryRows = patches.map(p => {
-    const wallLoss = (nominalThickness && p.meta.minThickness) 
+    const wallLoss = (nominalThickness && typeof p.meta.minThickness === 'number') 
       ? ((nominalThickness - p.meta.minThickness) / nominalThickness) * 100
       : 0;
 
@@ -52,7 +55,7 @@ export function buildCorrosionPatches(patches: EnrichedPatch[], nominalThickness
             tableCell(p.patchId),
             tableCell(`${p.meta.xRange}, ${p.meta.yRange}`),
             tableCell(p.meta.minThickness),
-            tableCell(wallLoss.toFixed(1)),
+            tableCell(wallLoss, 1),
         ]
     })
   });
@@ -122,10 +125,10 @@ function headerCell(text: string) {
   });
 }
 
-function tableCell(text: string | number | undefined | null) {
+function tableCell(text: string | number | undefined | null, precision = 2) {
     let displayText = 'N/A';
     if (typeof text === 'number') {
-        displayText = text.toFixed(2);
+        displayText = text.toFixed(precision);
     } else if (typeof text === 'string') {
         displayText = text;
     }

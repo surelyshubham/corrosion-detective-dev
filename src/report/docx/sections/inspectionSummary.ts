@@ -1,3 +1,4 @@
+
 import {
   Paragraph,
   TextRun,
@@ -35,6 +36,8 @@ export function buildInspectionSummary(input: ReportInput) {
         row("Total Scanned Area (m²)", stats.scannedArea.toFixed(2)),
         row("Non-Inspected Area (%)", ndPercentage.toFixed(2)),
         row("Total Scan Points", stats.totalPoints.toLocaleString()),
+        row("Total Patches Detected", stats.totalPatches.toLocaleString()),
+        row("Patches Visualized", `${stats.visualizedPatches} / ${stats.totalPatches}`),
       ],
     }),
   ];

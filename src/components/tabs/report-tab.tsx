@@ -15,6 +15,7 @@ import { generateInspectionReport } from "@/report/docx/ReportBuilder";
 import type { SegmentBox, GridCell } from "@/lib/types";
 import { DataVault } from "@/store/data-vault";
 import { Progress } from "../ui/progress";
+import { MIN_CELLS_FOR_VISUALIZATION } from "@/report/docx/sections/corrosionPatches";
 
 interface ReportTabProps {
   twoDViewRef: React.RefObject<any>;
@@ -32,19 +33,22 @@ async function capturePatchImages(
   const imagePatches = corrosionPatches.filter(p => p.representation === 'IMAGE');
 
   for (const p of imagePatches) {
-    await plate3DRef.current.focus(p.center.x, p.center.y, true, (p.coordinates.xMax - p.coordinates.xMin) ?? 10);
-    await delayFrame();
+    // This check is now redundant because `representation` already gatekeeps this, but it's safe.
+    if (p.pointCount >= MIN_CELLS_FOR_VISUALIZATION) {
+        await plate3DRef.current.focus(p.center.x, p.center.y, true, (p.coordinates.xMax - p.coordinates.xMin) ?? 10);
+        await delayFrame();
 
-    const iso = await plate3DRef.current.capture();
-    const top = await plate3DRef.current.setView("top").then(() => plate3DRef.current.capture());
-    const side = await plate3DRef.current.setView("side").then(() => plate3DRef.current.capture());
+        const iso = await plate3DRef.current.capture();
+        const top = await plate3DRef.current.setView("top").then(() => plate3DRef.current.capture());
+        const side = await plate3DRef.current.setView("side").then(() => plate3DRef.current.capture());
 
-    results[`C-${p.id}`] = {
-      view2D: p.heatmapDataUrl,
-      view3DIso: iso,
-      view3DTop: top,
-      view3DSide: side,
-    };
+        results[`C-${p.id}`] = {
+        view2D: p.heatmapDataUrl,
+        view3DIso: iso,
+        view3DTop: top,
+        view3DSide: side,
+        };
+    }
   }
 
   return results;
@@ -52,10 +56,10 @@ async function capturePatchImages(
 
 function getCorrosionColor(percentage: number | null): string {
     if (percentage === null) return '#bdbdbd';
-    if (percentage < 70) return '#ff0000';
-    if (percentage < 80) return '#ffff00';
-    if (percentage < 90) return '#00ff00';
-    return '#0000ff';
+    if (percentage < 70) return '#d62728';
+    if (percentage < 80) return '#ff7f0e';
+    if (percentage < 90) return '#2ca02c';
+    return '#1f77b4';
 }
 
 function renderFullPlate2D(gridMatrix: GridCell[][]): string {
@@ -141,7 +145,14 @@ export function ReportTab({ twoDViewRef, threeDeeViewRef }: ReportTabProps) {
         const reportBlob = await generateInspectionReport(reportInput);
         
         setProgress({ stage: "Finalizing download...", percent: 100 });
-        downloadFile(reportBlob, `Inspection_Report_${reportMetadata.assetTag}.docx`);
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(reportBlob);
+        link.download = `Inspection_Report_${reportMetadata.assetTag}.docx`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(link.href);
+
         
         toast({
           title: "Report Generated!",
@@ -180,8 +191,9 @@ export function ReportTab({ twoDViewRef, threeDeeViewRef }: ReportTabProps) {
         
         await threeDeeViewRef.current.resetCamera();
         const fullIso = await threeDeeViewRef.current.setView("iso").then(() => threeDeeViewRef.current.capture());
-        const fullTop = await threeDeeViewRef.current.setView("top").then(() => threeDeeViewRef.current.capture());
-        const fullSide = await threeDeeViewRef.current.setView("side").then(() => threeDeeViewRef.current.capture());
+
+        // Count visualized patches
+        const visualizedPatchCount = patches.corrosion.filter(p => p.pointCount >= MIN_CELLS_FOR_VISUALIZATION).length;
 
         // Prepare data-only payload for worker
         const reportInputPayload: ReportInput = {
@@ -191,9 +203,15 @@ export function ReportTab({ twoDViewRef, threeDeeViewRef }: ReportTabProps) {
                 inspectionDate: new Date().toLocaleDateString(),
                 reportId: `REP-${Date.now()}`
             },
-            fullAssetImages: { view2D: full2D, view3DIso: fullIso, view3DTop: fullTop, view3DSide: fullSide },
-            stats: {...inspectionResult.stats, condition: inspectionResult.condition, nominalThickness: inspectionResult.nominalThickness },
-            aiSummary: inspectionResult.aiInsight?.recommendation ?? "AI summary was not generated for this inspection.",
+            fullAssetImages: { view2D: full2D, view3DIso: fullIso },
+            stats: {
+                ...inspectionResult.stats, 
+                condition: inspectionResult.condition, 
+                nominalThickness: inspectionResult.nominalThickness,
+                totalPatches: patches.corrosion.length,
+                visualizedPatches: visualizedPatchCount,
+            },
+            aiSummary: "AI summary has been disabled.", // Placeholder
             corrosionPatches: patches.corrosion.map(p => ({
                 patchId: `C-${p.id}`,
                 type: 'CORROSION',
@@ -304,26 +322,15 @@ export function ReportTab({ twoDViewRef, threeDeeViewRef }: ReportTabProps) {
         <CardContent>
           <ul className="list-disc pl-5 space-y-2 text-sm text-muted-foreground">
             <li>A cover page with client and asset information.</li>
-            <li>An overall asset overview with 2D and 3D images.</li>
-            <li>A high-level AI-generated executive summary.</li>
+            <li>An overall asset overview with 2D and 3D isometric images.</li>
             <li>A detailed inspection statistics table.</li>
+            <li>A color interpretation legend.</li>
+            <li>A summary table for all corrosion patches detected.</li>
             <li>A separate, detailed page for each major corrosion patch.</li>
-            <li>A summary table for all minor (micro) corrosion patches.</li>
             <li>A section listing all non-inspected (ND) areas.</li>
-            <li>A concluding summary and recommendations.</li>
           </ul>
         </CardContent>
       </Card>
     </div>
   );
-}
-
-function downloadFile(blob: Blob, fileName: string) {
-  const link = document.createElement("a");
-  link.href = URL.createObjectURL(blob);
-  link.download = fileName;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(link.href);
 }
