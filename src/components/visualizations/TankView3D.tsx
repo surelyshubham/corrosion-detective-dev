@@ -52,9 +52,12 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>((prop
   const meshRef = useRef<THREE.Mesh | null>(null);
   const capsRef = useRef<THREE.Group | null>(null);
   const reqRef = useRef<number>(0);
+  const raycasterRef = useRef(new THREE.Raycaster());
+  const mouseRef = useRef(new THREE.Vector2());
 
   const { nominalThickness, pipeOuterDiameter, pipeLength } = inspectionResult || {};
   const stats = DataVault.stats;
+  const gridMatrix = DataVault.gridMatrix;
 
   const animate = useCallback(() => {
     if (!rendererRef.current || !sceneRef.current || !cameraRef.current || !controlsRef.current) return;
@@ -69,7 +72,7 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>((prop
         const distance = Math.max(pipeOuterDiameter, pipeLength) * 1.5;
         switch (view) {
             case 'top':
-                cameraRef.current.position.set(0, distance, 0.001);
+                cameraRef.current.position.set(0, distance * 1.001, 0);
                 break;
             case 'side':
                 cameraRef.current.position.set(distance, 0, 0);
@@ -110,7 +113,7 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>((prop
   }));
 
   useEffect(() => {
-    if (!isReady || !mountRef.current || !stats || !pipeOuterDiameter || !pipeLength || !nominalThickness) return;
+    if (!isReady || !mountRef.current || !stats || !pipeOuterDiameter || !pipeLength || !nominalThickness || !gridMatrix) return;
     
     const currentMount = mountRef.current;
     
@@ -136,12 +139,12 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>((prop
     
     for (let i = 0; i < positions.count; i++) {
         const u = geometry.attributes.uv.getX(i);
-        const v = 1.0 - geometry.attributes.uv.getY(i); // Flip V for correct texture mapping
+        const v = 1.0 - geometry.attributes.uv.getY(i);
         
         const gridX = Math.floor(u * (width - 1));
         const gridY = Math.floor(v * (height - 1));
         
-        const cell = DataVault.gridMatrix?.[gridY]?.[gridX];
+        const cell = gridMatrix?.[gridY]?.[gridX];
         const isND = !cell || cell.isND;
         const color = getAbsColor(cell?.percentage ?? null, isND);
         colors.push(color.r, color.g, color.b);
@@ -168,11 +171,11 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>((prop
     const capGeo = new THREE.CircleGeometry(pipeOuterDiameter / 2, 64);
     const capMat = new THREE.MeshStandardMaterial({ color: 0x666666, side: THREE.DoubleSide });
     const topCap = new THREE.Mesh(capGeo, capMat);
-    topCap.position.y = pipeLength / 2;
+    topCap.position.y = pipeLength / 2 + 0.01;
     topCap.rotation.x = Math.PI / 2;
     capsRef.current.add(topCap);
     const bottomCap = new THREE.Mesh(capGeo, capMat);
-    bottomCap.position.y = -pipeLength / 2;
+    bottomCap.position.y = -pipeLength / 2 - 0.01;
     bottomCap.rotation.x = -Math.PI / 2;
     capsRef.current.add(bottomCap);
     sceneRef.current.add(capsRef.current);
@@ -184,6 +187,43 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>((prop
         rendererRef.current.setSize(currentMount.clientWidth, currentMount.clientHeight);
       }
     };
+
+    const onMouseMove = (event: MouseEvent) => {
+        if (!rendererRef.current || !cameraRef.current || !meshRef.current || !gridMatrix) return;
+        const rect = rendererRef.current.domElement.getBoundingClientRect();
+        mouseRef.current.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+        mouseRef.current.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+        raycasterRef.current.setFromCamera(mouseRef.current, cameraRef.current);
+        const intersects = raycasterRef.current.intersectObject(meshRef.current);
+
+        if (intersects.length > 0 && intersects[0].uv) {
+            const uv = intersects[0].uv;
+            const gridX = Math.floor(uv.x * (width - 1));
+            const gridY = Math.floor((1 - uv.y) * (height - 1));
+            const cell = gridMatrix[gridY]?.[gridX];
+            
+            if (cell) {
+                setHoveredPoint({
+                    x: gridX,
+                    y: gridY,
+                    rawThickness: cell.rawThickness,
+                    effectiveThickness: cell.effectiveThickness,
+                    percentage: cell.percentage,
+                    plateId: cell.plateId,
+                    clientX: event.clientX,
+                    clientY: event.clientY,
+                });
+            } else {
+                setHoveredPoint(null);
+            }
+        } else {
+            setHoveredPoint(null);
+        }
+    };
+    
+    currentMount.addEventListener('mousemove', onMouseMove);
+    currentMount.addEventListener('mouseleave', () => setHoveredPoint(null));
     window.addEventListener('resize', handleResize);
     
     resetCamera();
@@ -193,7 +233,8 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>((prop
       cancelAnimationFrame(reqRef.current);
       window.removeEventListener('resize', handleResize);
        if (currentMount) {
-        // Cleanup if necessary
+        currentMount.removeEventListener('mousemove', onMouseMove);
+        currentMount.removeEventListener('mouseleave', () => setHoveredPoint(null));
       }
       sceneRef.current?.remove(meshRef.current!);
       sceneRef.current?.remove(capsRef.current!);
@@ -205,7 +246,7 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>((prop
       });
       rendererRef.current?.dispose();
     };
-  }, [isReady, pipeOuterDiameter, pipeLength, nominalThickness, animate, resetCamera, stats, zScale]);
+  }, [isReady, pipeOuterDiameter, pipeLength, nominalThickness, animate, resetCamera, stats, zScale, gridMatrix]);
   
   if (!isReady) return <div className="flex items-center justify-center h-full"><Loader2 className="animate-spin" /></div>;
 
@@ -270,5 +311,7 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>((prop
   )
 });
 TankView3D.displayName = "TankView3D";
+
+    
 
     
