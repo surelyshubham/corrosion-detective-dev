@@ -75,8 +75,18 @@ class PipePath {
                 if (segment.type === 'line') {
                     const point = segment.startPoint.clone().add(segment.direction!.clone().multiplyScalar(local_s));
                     const tangent = segment.direction!.clone();
-                    const normal = new THREE.Vector3(1, 0, 0).cross(tangent).length() > 0.1 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 0, 1);
+                    
+                    // Robustly find a normal vector
+                    let normal: THREE.Vector3;
+                    if (Math.abs(tangent.x) > 0.9) { // If tangent is mostly along X
+                        normal = new THREE.Vector3(0, 1, 0);
+                    } else {
+                        normal = new THREE.Vector3(1, 0, 0);
+                    }
+                    
                     const binormal = new THREE.Vector3().crossVectors(tangent, normal).normalize();
+                    normal.crossVectors(binormal, tangent).normalize();
+
                     return { point, tangent, normal, binormal };
                 } else { // arc
                     const angle = segment.arcStartAngle! + local_s / segment.arcRadius!;
@@ -310,5 +320,7 @@ export const PipeElbowView3D = forwardRef<PipeElbowView3DRef, PipeElbowView3DPro
   )
 });
 PipeElbowView3D.displayName = "PipeElbowView3D";
+
+    
 
     
