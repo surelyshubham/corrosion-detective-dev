@@ -13,14 +13,14 @@ import { Label } from '@/components/ui/label';
 import { RefreshCw, Loader2 } from 'lucide-react';
 import { PlatePercentLegend } from './PlatePercentLegend';
 
-export type TankView3DRef = {
+export type VesselView3DRef = {
   capture: () => string;
   focus: (x: number, y: number, zoomIn: boolean) => void;
   resetCamera: () => void;
   setView: (view: 'iso' | 'top' | 'side') => void;
 };
 
-interface TankView3DProps {}
+interface VesselView3DProps {}
 
 const getAbsColor = (percentage: number | null, isND: boolean): THREE.Color => {
     const c = new THREE.Color();
@@ -36,7 +36,7 @@ const getAbsColor = (percentage: number | null, isND: boolean): THREE.Color => {
     return c;
 }
 
-export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>((props, ref) => {
+export const VesselView3D = React.forwardRef<VesselView3DRef, VesselView3DProps>((props, ref) => {
   const { inspectionResult, dataVersion } = useInspectionStore()
   const mountRef = useRef<HTMLDivElement>(null)
   const isReady = dataVersion > 0 && !!DataVault.stats && !!DataVault.gridMatrix && !!inspectionResult?.pipeOuterDiameter && !!inspectionResult?.pipeLength;
@@ -54,7 +54,7 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>((prop
   const raycasterRef = useRef(new THREE.Raycaster());
   const mouseRef = useRef(new THREE.Vector2());
 
-  const { nominalThickness, pipeOuterDiameter, pipeLength, assetType } = inspectionResult || {};
+  const { nominalThickness, pipeOuterDiameter, pipeLength } = inspectionResult || {};
   const stats = DataVault.stats;
   const gridMatrix = DataVault.gridMatrix;
 
@@ -71,9 +71,11 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>((prop
         const distance = Math.max(pipeOuterDiameter, pipeLength) * 1.5;
         switch (view) {
             case 'top':
-                cameraRef.current.position.set(0, distance * 1.001, 0);
+                // For horizontal vessel, top view is from Y axis
+                cameraRef.current.position.set(0, distance, 0);
                 break;
             case 'side':
+                 // Side view is from X axis
                 cameraRef.current.position.set(distance, 0, 0);
                 break;
             case 'iso':
@@ -98,13 +100,14 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>((prop
         const { width, height } = stats.gridSize;
         const pipeRadius = pipeOuterDiameter / 2;
         const angle = (x / (width - 1)) * 2 * Math.PI;
-        const h = (y / (height - 1)) * pipeLength - pipeLength / 2;
-        const targetX = pipeRadius * Math.cos(angle);
-        const targetZ = pipeRadius * Math.sin(angle);
+        const l = (y / (height - 1)) * pipeLength - pipeLength / 2; // Position along length
         
-        controlsRef.current.target.set(targetX, h, targetZ);
+        const targetX = pipeRadius * Math.cos(angle);
+        const targetY = pipeRadius * Math.sin(angle);
+        
+        controlsRef.current.target.set(targetX, targetY, l);
         const distance = zoomIn ? pipeRadius / 2 : pipeRadius * 2;
-        cameraRef.current.position.set(targetX * (1 + distance/pipeRadius), h, targetZ * (1 + distance/pipeRadius));
+        cameraRef.current.position.set(targetX * (1 + distance/pipeRadius), targetY * (1 + distance/pipeRadius), l);
         controlsRef.current.update();
     },
     resetCamera: resetCamera,
@@ -133,6 +136,9 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>((prop
     const { width, height } = stats.gridSize;
     const geometry = new THREE.CylinderGeometry(pipeOuterDiameter / 2, pipeOuterDiameter / 2, pipeLength, width > 1 ? width - 1 : 64, height > 1 ? height - 1 : 1, true);
     
+    // Rotate to be horizontal along Z-axis
+    geometry.rotateX(Math.PI / 2);
+
     const colors: number[] = [];
     const positions = geometry.attributes.position;
     
@@ -153,9 +159,10 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>((prop
         const currentRadius = pipeOuterDiameter / 2 + radialDisplacement;
         
         const originalPos = new THREE.Vector3().fromBufferAttribute(positions, i);
-        const angle = Math.atan2(originalPos.z, originalPos.x);
+        // After rotation, Y and Z are switched for radius calculation
+        const angle = Math.atan2(originalPos.y, originalPos.x);
 
-        positions.setXYZ(i, currentRadius * Math.cos(angle), originalPos.y, currentRadius * Math.sin(angle));
+        positions.setXYZ(i, currentRadius * Math.cos(angle), currentRadius * Math.sin(angle), originalPos.z);
     }
 
     geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
@@ -168,18 +175,20 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>((prop
 
     capsRef.current = new THREE.Group();
     const capMat = new THREE.MeshStandardMaterial({ color: 0x666666, side: THREE.DoubleSide });
-    const capGeo = new THREE.CircleGeometry(pipeOuterDiameter / 2, 64);
     
-    const topCap = new THREE.Mesh(capGeo, capMat);
-    topCap.position.y = pipeLength / 2 + 0.01;
-    topCap.rotation.x = -Math.PI / 2;
+    const capRadius = pipeOuterDiameter / 2;
+    const sphereGeo = new THREE.SphereGeometry(capRadius, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2);
     
-    const bottomCap = new THREE.Mesh(capGeo, capMat);
-    bottomCap.position.y = -pipeLength / 2 - 0.01;
-    bottomCap.rotation.x = Math.PI / 2;
+    const cap1 = new THREE.Mesh(sphereGeo, capMat);
+    cap1.rotation.y = Math.PI / 2;
+    cap1.position.z = -pipeLength / 2;
 
-    capsRef.current.add(topCap);
-    capsRef.current.add(bottomCap);
+    const cap2 = new THREE.Mesh(sphereGeo, capMat);
+    cap2.rotation.y = -Math.PI / 2;
+    cap2.position.z = pipeLength / 2;
+    
+    capsRef.current.add(cap1);
+    capsRef.current.add(cap2);
     sceneRef.current.add(capsRef.current);
 
     const handleResize = () => {
@@ -248,7 +257,7 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>((prop
       });
       rendererRef.current?.dispose();
     };
-  }, [isReady, pipeOuterDiameter, pipeLength, nominalThickness, animate, resetCamera, stats, zScale, gridMatrix, assetType]);
+  }, [isReady, pipeOuterDiameter, pipeLength, nominalThickness, animate, resetCamera, stats, zScale, gridMatrix]);
   
   if (!isReady) return <div className="flex items-center justify-center h-full"><Loader2 className="animate-spin" /></div>;
 
@@ -257,7 +266,7 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>((prop
       <div className="md:col-span-3 h-full relative">
         <Card className="h-full flex flex-col border">
           <CardHeader>
-            <CardTitle className="font-headline">3D Tank View</CardTitle>
+            <CardTitle className="font-headline">3D Vessel View</CardTitle>
           </CardHeader>
           <CardContent className="flex-grow p-0 relative">
             <div ref={mountRef} className="w-full h-full" />
@@ -312,4 +321,4 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>((prop
     </div>
   )
 });
-TankView3D.displayName = "TankView3D";
+VesselView3D.displayName = "VesselView3D";
