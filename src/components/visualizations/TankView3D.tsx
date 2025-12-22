@@ -10,8 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
 import { Label } from '@/components/ui/label';
-import { Switch } from '@/components/ui/switch';
-import { RefreshCw, LocateFixed, Pin, Loader2 } from 'lucide-react';
+import { RefreshCw, Loader2 } from 'lucide-react';
 import { PlatePercentLegend } from './PlatePercentLegend';
 
 export type TankView3DRef = {
@@ -55,7 +54,7 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>((prop
   const raycasterRef = useRef(new THREE.Raycaster());
   const mouseRef = useRef(new THREE.Vector2());
 
-  const { nominalThickness, pipeOuterDiameter, pipeLength } = inspectionResult || {};
+  const { nominalThickness, pipeOuterDiameter, pipeLength, assetType } = inspectionResult || {};
   const stats = DataVault.stats;
   const gridMatrix = DataVault.gridMatrix;
 
@@ -168,15 +167,30 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>((prop
     sceneRef.current.add(meshRef.current);
 
     capsRef.current = new THREE.Group();
-    const capGeo = new THREE.CircleGeometry(pipeOuterDiameter / 2, 64);
     const capMat = new THREE.MeshStandardMaterial({ color: 0x666666, side: THREE.DoubleSide });
-    const topCap = new THREE.Mesh(capGeo, capMat);
-    topCap.position.y = pipeLength / 2 + 0.01;
-    topCap.rotation.x = Math.PI / 2;
+    let topCap, bottomCap;
+
+    if (assetType === 'Vessel') {
+        const sphereGeo = new THREE.SphereGeometry(pipeOuterDiameter / 2, 64, 32, 0, Math.PI * 2, 0, Math.PI / 2);
+        topCap = new THREE.Mesh(sphereGeo, capMat);
+        topCap.position.y = pipeLength / 2;
+
+        const bottomSphereGeo = new THREE.SphereGeometry(pipeOuterDiameter / 2, 64, 32, 0, Math.PI * 2, Math.PI/2, Math.PI / 2);
+        bottomCap = new THREE.Mesh(bottomSphereGeo, capMat);
+        bottomCap.position.y = -pipeLength / 2;
+
+    } else { // 'Tank'
+        const capGeo = new THREE.CircleGeometry(pipeOuterDiameter / 2, 64);
+        topCap = new THREE.Mesh(capGeo, capMat);
+        topCap.position.y = pipeLength / 2 + 0.01; // Tiny offset to prevent Z-fighting
+        topCap.rotation.x = -Math.PI / 2;
+        
+        bottomCap = new THREE.Mesh(capGeo, capMat);
+        bottomCap.position.y = -pipeLength / 2 - 0.01; // Tiny offset
+        bottomCap.rotation.x = Math.PI / 2;
+    }
+    
     capsRef.current.add(topCap);
-    const bottomCap = new THREE.Mesh(capGeo, capMat);
-    bottomCap.position.y = -pipeLength / 2 - 0.01;
-    bottomCap.rotation.x = -Math.PI / 2;
     capsRef.current.add(bottomCap);
     sceneRef.current.add(capsRef.current);
 
@@ -246,7 +260,7 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>((prop
       });
       rendererRef.current?.dispose();
     };
-  }, [isReady, pipeOuterDiameter, pipeLength, nominalThickness, animate, resetCamera, stats, zScale, gridMatrix]);
+  }, [isReady, pipeOuterDiameter, pipeLength, nominalThickness, animate, resetCamera, stats, zScale, gridMatrix, assetType]);
   
   if (!isReady) return <div className="flex items-center justify-center h-full"><Loader2 className="animate-spin" /></div>;
 
@@ -255,7 +269,7 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>((prop
       <div className="md:col-span-3 h-full relative">
         <Card className="h-full flex flex-col border">
           <CardHeader>
-            <CardTitle className="font-headline">3D Tank View</CardTitle>
+            <CardTitle className="font-headline">3D {assetType === 'Vessel' ? 'Vessel' : 'Tank'} View</CardTitle>
           </CardHeader>
           <CardContent className="flex-grow p-0 relative">
             <div ref={mountRef} className="w-full h-full" />
@@ -311,7 +325,3 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>((prop
   )
 });
 TankView3D.displayName = "TankView3D";
-
-    
-
-    
