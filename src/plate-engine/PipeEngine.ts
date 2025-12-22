@@ -17,6 +17,7 @@ export class PipeEngine {
   private pipeRadius: number;
   private pipeHeight: number;
   private depthExaggeration: number;
+  private startAngle: number; // in degrees
 
   private scene: THREE.Scene;
   private camera: THREE.Camera;
@@ -37,6 +38,7 @@ export class PipeEngine {
     pipeRadius: number;
     pipeHeight: number;
     depthExaggeration: number;
+    startAngle: number;
   }) {
     this.scene = params.scene;
     this.camera = params.camera;
@@ -46,6 +48,7 @@ export class PipeEngine {
     this.pipeRadius = params.pipeRadius;
     this.pipeHeight = params.pipeHeight;
     this.depthExaggeration = params.depthExaggeration;
+    this.startAngle = params.startAngle;
 
     this.cellWidth = (Math.PI * 2 * this.pipeRadius) / this.stats.gridSize.width;
     this.cellHeight = this.pipeHeight / this.stats.gridSize.height;
@@ -74,6 +77,7 @@ export class PipeEngine {
     const MAX_SEGMENTS = 250;
     const widthSegments  = Math.min(gridW, MAX_SEGMENTS);
     const heightSegments = Math.min(gridH - 1, MAX_SEGMENTS);
+    const startAngleRad = THREE.MathUtils.degToRad(this.startAngle);
 
     const geom = new THREE.CylinderGeometry(this.pipeRadius, this.pipeRadius, this.pipeHeight, widthSegments, heightSegments, true);
     geom.translate(0, 0, 0); // Center the pipe
@@ -81,8 +85,6 @@ export class PipeEngine {
     const colors: number[] = [];
     const positions = geom.attributes.position;
     const normals = geom.attributes.normal;
-    const xStep = gridW / widthSegments;
-    const yStep = (gridH - 1) / heightSegments;
 
     for (let i = 0; i < positions.count; i++) {
         const u = geom.attributes.uv.getX(i);
@@ -101,10 +103,16 @@ export class PipeEngine {
         const radialDisplacement = -wallLoss * this.depthExaggeration;
 
         const originalPos = new THREE.Vector3().fromBufferAttribute(positions, i);
-        const normal = new THREE.Vector3().fromBufferAttribute(normals, i);
         
-        originalPos.addScaledVector(normal, radialDisplacement);
-        positions.setXYZ(i, originalPos.x, originalPos.y, originalPos.z);
+        // Calculate the angle based on UV and add the start angle offset
+        const angle = u * Math.PI * 2 + startAngleRad;
+
+        // Recalculate position based on angle to handle wrapping correctly
+        const currentRadius = this.pipeRadius + radialDisplacement;
+        const newX = currentRadius * Math.cos(angle);
+        const newZ = currentRadius * Math.sin(angle);
+        
+        positions.setXYZ(i, newX, originalPos.y, newZ);
     }
 
     geom.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
@@ -163,7 +171,8 @@ export class PipeEngine {
   onHover(cb: (info: HoverInfo | null) => void) { this.hoverCallback = cb; }
   
   gridToWorld(gridX: number, gridY: number): THREE.Vector3 {
-      const angle = (gridX / this.stats.gridSize.width) * 2 * Math.PI;
+      const startAngleRad = THREE.MathUtils.degToRad(this.startAngle);
+      const angle = (gridX / this.stats.gridSize.width) * 2 * Math.PI + startAngleRad;
       const h = (gridY / this.stats.gridSize.height) * this.pipeHeight - (this.pipeHeight / 2);
       
       const cell = this.grid[gridY]?.[gridX];
@@ -177,34 +186,7 @@ export class PipeEngine {
 
   setDepthExaggeration(scale: number) {
     this.depthExaggeration = scale;
-    const positions = this.pipeMesh.geometry.attributes.position;
-    const normals = this.pipeMesh.geometry.attributes.normal;
-    
-    const gridW = this.stats.gridSize.width;
-    const gridH = this.stats.gridSize.height;
-
-    // We need to rebuild the positions based on the original geometry + new exaggeration
-    const originalPositions = this.pipeMesh.geometry.clone().attributes.position;
-    
-    for (let i = 0; i < positions.count; i++) {
-        const u = this.pipeMesh.geometry.attributes.uv.getX(i);
-        const v = this.pipeMesh.geometry.attributes.uv.getY(i);
-        
-        const gridX = Math.floor(u * (gridW -1));
-        const gridY = Math.floor((1 - v) * (gridH - 1));
-        const cell = this.grid[gridY]?.[gridX];
-        
-        const isND = !cell || cell.isND;
-        const wallLoss = (cell && !isND && cell.effectiveThickness !== null) ? this.nominalThickness - cell.effectiveThickness : 0;
-        const radialDisplacement = -wallLoss * this.depthExaggeration;
-
-        const normal = new THREE.Vector3().fromBufferAttribute(normals, i);
-        
-        // This is tricky: we can't just use the base cylinder, because our segments don't match.
-        // The best way is to recalculate from scratch, or store base positions.
-        // For simplicity, we'll dispose and recreate.
-    }
-    // This is a simplified approach; a more optimized one would not dispose.
+    // For simplicity and correctness, we dispose and recreate on parameter change
     this.scene.remove(this.pipeMesh);
     this.pipeMesh.geometry.dispose();
     (this.pipeMesh.material as THREE.Material).dispose();

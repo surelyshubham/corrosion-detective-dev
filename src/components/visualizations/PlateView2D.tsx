@@ -1,4 +1,5 @@
 
+
 "use client"
 
 import React, { useRef, useEffect, useState, useCallback, useImperativeHandle, forwardRef } from 'react'
@@ -8,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '../ui/label'
 import { ZoomIn, ZoomOut, RefreshCw } from 'lucide-react'
 import { Button } from '../ui/button'
-import { PlatePercentLegend } from './PlatePercentLegend'
+import { ColorLegend } from './ColorLegend'
 import { ScrollArea } from '../ui/scroll-area'
 import { PatchTable } from '../patches/PatchTable'
 
@@ -294,10 +295,7 @@ export const PlateView2D = forwardRef<PlateView2DRef, PlateView2DProps>((props, 
                     </div>
                 </CardContent>
             </Card>
-            <Card>
-              <CardHeader><CardTitle className="text-lg font-headline">Legend</CardTitle></CardHeader>
-              <CardContent><PlatePercentLegend /></CardContent>
-            </Card>
+            <ColorLegend />
             <PatchTable />
           </div>
         </ScrollArea>
@@ -306,3 +304,4 @@ export const PlateView2D = forwardRef<PlateView2DRef, PlateView2DProps>((props, 
   )
 });
 PlateView2D.displayName = "PlateView2D";
+

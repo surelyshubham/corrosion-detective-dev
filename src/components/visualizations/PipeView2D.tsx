@@ -1,3 +1,4 @@
+
 "use client"
 
 import React, { useRef, useEffect, useState, useCallback, useImperativeHandle, forwardRef } from 'react'
@@ -8,6 +9,8 @@ import { Label } from '../ui/label'
 import { ZoomIn, ZoomOut, RefreshCw } from 'lucide-react'
 import { Button } from '../ui/button'
 import { ColorLegend } from './ColorLegend'
+import { PatchTable } from '../patches/PatchTable'
+import { ScrollArea } from '../ui/scroll-area'
 
 const getNiceInterval = (range: number, maxTicks: number): number => {
     if (range === 0) return 1;
@@ -17,6 +20,15 @@ const getNiceInterval = (range: number, maxTicks: number): number => {
     return step;
 };
 
+function getColorByPercentage(pct: number | null, isND: boolean): string {
+  if (isND) return '#888888';
+  if (pct === null) return '#444444'; // Should not happen if not ND
+  if (pct >= 90) return '#0000ff';
+  if (pct >= 80) return '#00ff00';
+  if (pct >= 70) return '#ffff00';
+  return '#ff0000';
+}
+
 export type PipeView2DRef = {
   capture: () => string;
 };
@@ -24,7 +36,7 @@ export type PipeView2DRef = {
 interface PipeView2DProps {}
 
 export const PipeView2D = forwardRef<PipeView2DRef, PipeView2DProps>((props, ref) => {
-  const { inspectionResult, selectedPoint, setSelectedPoint, dataVersion } = useInspectionStore()
+  const { inspectionResult, selectedPoint, setSelectedPoint, dataVersion, patches, selectedPatchId, selectPatch } = useInspectionStore()
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const xAxisRef = useRef<HTMLDivElement>(null);
@@ -34,7 +46,7 @@ export const PipeView2D = forwardRef<PipeView2DRef, PipeView2DProps>((props, ref
   const [hoveredPoint, setHoveredPoint] = useState<any>(null);
 
   const { nominalThickness, pipeOuterDiameter } = inspectionResult || {};
-  const { gridSize, minThickness, maxThickness, totalPoints } = DataVault.stats || {};
+  const { gridSize } = DataVault.stats || {};
   const gridMatrix = DataVault.gridMatrix;
   
   const BASE_CELL_SIZE = 6;
@@ -45,9 +57,9 @@ export const PipeView2D = forwardRef<PipeView2DRef, PipeView2DProps>((props, ref
     capture: () => canvasRef.current?.toDataURL('image/png') || '',
   }));
 
-  const draw = useCallback(() => {
+ const draw = useCallback(() => {
     const canvas = canvasRef.current;
-    if (!canvas || !gridSize || !DataVault.colorBuffer) return;
+    if (!canvas || !gridSize || !gridMatrix) return;
     
     const { width, height } = gridSize;
     const canvasWidth = width * scaledCellSize;
@@ -58,26 +70,70 @@ export const PipeView2D = forwardRef<PipeView2DRef, PipeView2DProps>((props, ref
 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-
-    const imageData = new ImageData(new Uint8ClampedArray(DataVault.colorBuffer), width, height);
-
-    const tempCanvas = document.createElement('canvas');
-    tempCanvas.width = width;
-    tempCanvas.height = height;
-    const tempCtx = tempCanvas.getContext('2d');
-    if (!tempCtx) return;
-    tempCtx.putImageData(imageData, 0, 0);
-
-    ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(tempCanvas, 0, 0, width, height, 0, 0, canvasWidth, canvasHeight);
     
+    ctx.imageSmoothingEnabled = false;
+
+    // Draw heatmap from grid data
+    for (let y = 0; y < gridSize.height; y++) {
+        for (let x = 0; x < gridSize.width; x++) {
+            const cell = gridMatrix[y][x];
+            ctx.fillStyle = getColorByPercentage(cell?.percentage ?? null, cell?.isND ?? true);
+            ctx.fillRect(x * scaledCellSize, y * scaledCellSize, scaledCellSize, scaledCellSize);
+        }
+    }
+    
+    // Draw patch bounding boxes
+    if (patches) {
+      const allPatches = [...patches.corrosion, ...patches.nonInspected];
+      allPatches.forEach(patch => {
+        const { xMin, xMax, yMin, yMax } = patch.coordinates;
+        
+        const patchIdString = `${patch.kind === 'CORROSION' ? 'C' : 'ND'}-${patch.id}`;
+        const isSelected = selectedPatchId === patchIdString;
+
+        if (patch.kind === 'CORROSION') ctx.strokeStyle = isSelected ? '#00ffff' : '#ff00ff';
+        else ctx.strokeStyle = isSelected ? '#00ffff' : '#ffffff';
+        
+        ctx.lineWidth = isSelected ? Math.max(2, 3 * zoom / 10) : Math.max(1, 2 * zoom / 10);
+        if (patch.kind === 'NON_INSPECTED') ctx.setLineDash([4, 2]);
+        else ctx.setLineDash([]);
+
+        ctx.strokeRect(
+          xMin * scaledCellSize,
+          yMin * scaledCellSize,
+          (xMax - xMin + 1) * scaledCellSize,
+          (yMax - yMin + 1) * scaledCellSize
+        );
+
+        if (isSelected) {
+          ctx.fillStyle = 'rgba(0, 255, 255, 0.12)';
+          ctx.fillRect(
+            xMin * scaledCellSize,
+            yMin * scaledCellSize,
+            (xMax - xMin + 1) * scaledCellSize,
+            (yMax - yMin + 1) * scaledCellSize
+          );
+        }
+
+        const centerX = (patch.center.x + 0.5) * scaledCellSize;
+        const centerY = (patch.center.y + 0.5) * scaledCellSize;
+        ctx.fillStyle = '#000000';
+        ctx.font = `${Math.max(10, 12 * zoom / 10)}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(patchIdString, centerX, centerY);
+      });
+      ctx.setLineDash([]);
+    }
+
     if (selectedPoint) {
         ctx.strokeStyle = '#00ffff';
         ctx.lineWidth = Math.max(1.5, 3 * zoom / 10);
         ctx.strokeRect(selectedPoint.x * scaledCellSize, selectedPoint.y * scaledCellSize, scaledCellSize, scaledCellSize);
     }
     
-  }, [gridSize, dataVersion, zoom, scaledCellSize, selectedPoint]);
+  }, [gridSize, gridMatrix, dataVersion, zoom, scaledCellSize, selectedPoint, patches, selectedPatchId]);
+
 
   useEffect(() => {
     draw();
@@ -92,9 +148,7 @@ export const PipeView2D = forwardRef<PipeView2DRef, PipeView2DProps>((props, ref
   };
 
   const adjustZoom = (factor: number) => {
-    const newZoom = zoom * factor;
-    const clampedZoom = Math.max(0.2, Math.min(newZoom, 50));
-    setZoom(clampedZoom);
+    setZoom(prev => Math.max(0.2, Math.min(prev * factor, 50)));
   };
   
   const resetView = () => {
@@ -108,19 +162,13 @@ export const PipeView2D = forwardRef<PipeView2DRef, PipeView2DProps>((props, ref
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!gridSize || !gridMatrix || !canvasRef.current) { setHoveredPoint(null); return; };
     const rect = canvasRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-
-    const gridX = Math.floor(x / scaledCellSize);
-    const gridY = Math.floor(y / scaledCellSize);
+    const x = e.clientX - rect.left, y = e.clientY - rect.top;
+    const gridX = Math.floor(x / scaledCellSize), gridY = Math.floor(y / scaledCellSize);
 
     if (gridX >= 0 && gridX < gridSize.width && gridY >= 0 && gridY < gridSize.height) {
         const pointData = gridMatrix[gridY]?.[gridX];
-        if(pointData && typeof pointData.rawThickness === 'number' && !isNaN(pointData.rawThickness) && pointData.rawThickness !== 0) {
-             setHoveredPoint({ x: gridX, y: gridY, ...pointData, clientX: e.clientX, clientY: e.clientY });
-        } else {
-            setHoveredPoint(null);
-        }
+        if(pointData) setHoveredPoint({ x: gridX, y: gridY, ...pointData, clientX: e.clientX, clientY: e.clientY });
+        else setHoveredPoint(null);
     } else {
         setHoveredPoint(null);
     }
@@ -129,13 +177,18 @@ export const PipeView2D = forwardRef<PipeView2DRef, PipeView2DProps>((props, ref
   const handleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!gridSize || !canvasRef.current) return;
     const rect = canvasRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    const x = e.clientX - rect.left, y = e.clientY - rect.top;
+    const gridX = Math.floor(x / scaledCellSize), gridY = Math.floor(y / scaledCellSize);
 
-    const gridX = Math.floor(x / scaledCellSize);
-    const gridY = Math.floor(y / scaledCellSize);
+    const allPatches = [...(patches?.corrosion || []), ...(patches?.nonInspected || [])];
+    const clickedPatch = allPatches.find(p => gridX >= p.coordinates.xMin && gridX <= p.coordinates.xMax && gridY >= p.coordinates.yMin && gridY <= p.coordinates.yMax);
 
+    if (clickedPatch) {
+        selectPatch(`${clickedPatch.kind === 'CORROSION' ? 'C' : 'ND'}-${clickedPatch.id}`);
+        return;
+    }
     if (gridX >= 0 && gridX < gridSize.width && gridY >= 0 && gridY < gridSize.height) {
+        selectPatch(null);
         setSelectedPoint({ x: gridX, y: gridY });
     }
   }
@@ -229,23 +282,28 @@ export const PipeView2D = forwardRef<PipeView2DRef, PipeView2DProps>((props, ref
             )}
         </CardContent>
       </Card>
-      <div className="md:col-span-1 space-y-4">
-        <Card>
-            <CardHeader>
-                <CardTitle className="font-headline text-lg">Controls</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-                <div className="space-y-2">
-                   <Label>Zoom ({Math.round(zoom*100)}%)</Label>
-                   <div className="flex gap-2">
-                    <Button variant="outline" size="icon" onClick={() => adjustZoom(1.5)}><ZoomIn/></Button>
-                    <Button variant="outline" size="icon" onClick={() => adjustZoom(1/1.5)}><ZoomOut/></Button>
-                    <Button variant="outline" onClick={resetView} className="flex-grow"><RefreshCw className="mr-2"/> Reset</Button>
-                   </div>
-                </div>
-            </CardContent>
-        </Card>
-        <ColorLegend />
+      <div className="md:col-span-1">
+        <ScrollArea className="h-[calc(100vh-10rem)]">
+            <div className="space-y-4 pr-4">
+                <Card>
+                    <CardHeader>
+                        <CardTitle className="font-headline text-lg">Controls</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                        <div className="space-y-2">
+                        <Label>Zoom ({Math.round(zoom*100)}%)</Label>
+                        <div className="flex gap-2">
+                            <Button variant="outline" size="icon" onClick={() => adjustZoom(1.5)}><ZoomIn/></Button>
+                            <Button variant="outline" size="icon" onClick={() => adjustZoom(1/1.5)}><ZoomOut/></Button>
+                            <Button variant="outline" onClick={resetView} className="flex-grow"><RefreshCw className="mr-2"/> Reset</Button>
+                        </div>
+                        </div>
+                    </CardContent>
+                </Card>
+                <ColorLegend />
+                <PatchTable />
+            </div>
+        </ScrollArea>
       </div>
     </div>
   )

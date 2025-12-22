@@ -1,4 +1,5 @@
 
+
 "use client"
 
 import React, { useRef, useEffect, useState, useCallback } from 'react'
@@ -10,11 +11,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Slider } from '@/components/ui/slider'
 import { Label } from '@/components/ui/label'
-import { Switch } from '@/components/ui/switch'
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { RefreshCw, LocateFixed, Pin, Loader2 } from 'lucide-react'
 import { useImperativeHandle } from 'react'
 import { PipeEngine, type HoverInfo } from '@/plate-engine/PipeEngine';
-import { PlatePercentLegend } from './PlatePercentLegend'
+import { ColorLegend } from './ColorLegend'
 
 const delayFrame = (ms = 70) => new Promise(res => setTimeout(res, ms));
 
@@ -34,6 +35,7 @@ export const PipeView3D = React.forwardRef<PipeView3DRef, PipeView3DProps>((prop
   
   const [hoveredPoint, setHoveredPoint] = useState<HoverInfo & { clientX: number, clientY: number } | null>(null);
   const [depthExaggeration, setDepthExaggeration] = useState(10);
+  const [startAngle, setStartAngle] = useState(0);
 
   const engineRef = useRef<PipeEngine | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -118,6 +120,7 @@ export const PipeView3D = React.forwardRef<PipeView3DRef, PipeView3DProps>((prop
         pipeRadius: pipeOuterDiameter / 2,
         pipeHeight: pipeLength,
         depthExaggeration: depthExaggeration,
+        startAngle: startAngle,
     });
 
     engineRef.current.onHover((info) => {
@@ -157,7 +160,7 @@ export const PipeView3D = React.forwardRef<PipeView3DRef, PipeView3DProps>((prop
         rendererRef.current?.dispose();
         currentMount.innerHTML = '';
     };
-}, [isReady, nominalThickness, pipeOuterDiameter, pipeLength, animate, depthExaggeration, resetCamera]);
+}, [isReady, nominalThickness, pipeOuterDiameter, pipeLength, animate, depthExaggeration, startAngle, resetCamera]);
   
   useEffect(() => {
     engineRef.current?.setDepthExaggeration(depthExaggeration);
@@ -190,6 +193,14 @@ export const PipeView3D = React.forwardRef<PipeView3DRef, PipeView3DProps>((prop
               <Label>Depth Exaggeration: {depthExaggeration.toFixed(1)}x</Label>
               <Slider value={[depthExaggeration]} onValueChange={([val]) => setDepthExaggeration(val)} min={1} max={50} step={0.5} />
             </div>
+             <div className="space-y-3">
+                <Label>Starting Point</Label>
+                <RadioGroup defaultValue={String(startAngle)} onValueChange={(val) => setStartAngle(Number(val))}>
+                    <div className="flex items-center space-x-2"><RadioGroupItem value="0" id="r-0" /><Label htmlFor="r-0">0° (Top)</Label></div>
+                    <div className="flex items-center space-x-2"><RadioGroupItem value="120" id="r-120" /><Label htmlFor="r-120">120°</Label></div>
+                    <div className="flex items-center space-x-2"><RadioGroupItem value="240" id="r-240" /><Label htmlFor="r-240">240°</Label></div>
+                </RadioGroup>
+            </div>
           </CardContent>
         </Card>
         <Card>
@@ -201,10 +212,7 @@ export const PipeView3D = React.forwardRef<PipeView3DRef, PipeView3DProps>((prop
             <Button variant="outline" onClick={() => setView('iso')}>Isometric</Button>
           </CardContent>
         </Card>
-        <Card>
-          <CardHeader><CardTitle className="text-lg font-headline">Legend</CardTitle></CardHeader>
-          <CardContent><PlatePercentLegend /></CardContent>
-        </Card>
+        <ColorLegend />
       </div>
     </div>
   )
