@@ -151,6 +151,10 @@ export function SetupTab() {
             diameterLabel = "Vessel Diameter (mm)";
             lengthLabel = "Vessel Length (mm)";
             break;
+        case 'LPG/Gas Bullet':
+            diameterLabel = "Bullet Diameter (mm)";
+            lengthLabel = "Data Length (unwrapped mm)";
+            break;
         default:
             return null;
     }
