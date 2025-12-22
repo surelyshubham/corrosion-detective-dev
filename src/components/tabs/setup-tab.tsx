@@ -137,6 +137,7 @@ export function SetupTab() {
   const renderAssetSpecificInputs = () => {
     let diameterLabel = "";
     let lengthLabel = "";
+    let showLength = true;
 
     switch (selectedAssetType) {
         case 'Pipe':
@@ -153,7 +154,7 @@ export function SetupTab() {
             break;
         case 'LPG/Gas Bullet':
             diameterLabel = "Bullet Diameter (mm)";
-            lengthLabel = "Data Length (unwrapped mm)";
+            showLength = false;
             break;
         default:
             return null;
@@ -161,14 +162,16 @@ export function SetupTab() {
 
     return (
         <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
+            <div className={`space-y-2 ${!showLength ? 'col-span-2' : ''}`}>
                 <Label htmlFor="pipeOuterDiameter">{diameterLabel}</Label>
                 <Controller name="pipeOuterDiameter" control={control} render={({ field }) => ( <Input id="pipeOuterDiameter" type="number" step="1" {...field} disabled={isProjectStarted} /> )} />
             </div>
-            <div className="space-y-2">
-                <Label htmlFor="pipeLength">{lengthLabel}</Label>
-                <Controller name="pipeLength" control={control} render={({ field }) => ( <Input id="pipeLength" type="number" step="1" {...field} disabled={isProjectStarted} /> )} />
-            </div>
+            {showLength && (
+                <div className="space-y-2">
+                    <Label htmlFor="pipeLength">{lengthLabel}</Label>
+                    <Controller name="pipeLength" control={control} render={({ field }) => ( <Input id="pipeLength" type="number" step="1" {...field} disabled={isProjectStarted} /> )} />
+                </div>
+            )}
         </div>
     );
   }

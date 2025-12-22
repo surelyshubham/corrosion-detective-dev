@@ -1,4 +1,5 @@
 
+
 "use client"
 
 import React, { useRef, useEffect, useState, useCallback, useImperativeHandle, forwardRef } from 'react';
@@ -15,7 +16,7 @@ import { PlatePercentLegend } from './PlatePercentLegend';
 
 export type GasBulletView3DRef = {
   capture: () => Promise<string>;
-  focus: (x: number, y: number, zoomIn: boolean) => void;
+  focus: (x: number, y: number, zoomIn: boolean, boxSize: number) => void;
   resetCamera: () => void;
   setView: (view: 'iso' | 'top' | 'side') => void;
 };
