@@ -134,6 +134,38 @@ export function SetupTab() {
     resetProject();
   }
 
+  const renderAssetSpecificInputs = () => {
+    if (selectedAssetType === 'Pipe') {
+      return (
+         <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="pipeOuterDiameter">Pipe Outer Diameter (mm)</Label>
+              <Controller name="pipeOuterDiameter" control={control} render={({ field }) => ( <Input id="pipeOuterDiameter" type="number" step="1" {...field} disabled={isProjectStarted} /> )} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="pipeLength">Pipe Length (mm)</Label>
+              <Controller name="pipeLength" control={control} render={({ field }) => ( <Input id="pipeLength" type="number" step="1" {...field} disabled={isProjectStarted} /> )} />
+            </div>
+          </div>
+      )
+    }
+     if (selectedAssetType === 'Tank' || selectedAssetType === 'Vessel') {
+      return (
+         <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="pipeOuterDiameter">Tank Diameter (mm)</Label>
+              <Controller name="pipeOuterDiameter" control={control} render={({ field }) => ( <Input id="pipeOuterDiameter" type="number" step="1" {...field} disabled={isProjectStarted} /> )} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="pipeLength">Tank Height (mm)</Label>
+              <Controller name="pipeLength" control={control} render={({ field }) => ( <Input id="pipeLength" type="number" step="1" {...field} disabled={isProjectStarted} /> )} />
+            </div>
+          </div>
+      )
+    }
+    return null;
+  }
+
   return (
     <div className="grid md:grid-cols-2 gap-6 h-full">
       <Card className="flex flex-col">
@@ -163,18 +195,7 @@ export function SetupTab() {
               {errors.assetType && <p className="text-sm text-destructive">{errors.assetType.message}</p>}
             </div>
             
-            {(selectedAssetType === 'Pipe' || selectedAssetType === 'Tank' || selectedAssetType === 'Vessel') && (
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="pipeOuterDiameter">{selectedAssetType} Diameter (mm)</Label>
-                  <Controller name="pipeOuterDiameter" control={control} render={({ field }) => ( <Input id="pipeOuterDiameter" type="number" step="1" {...field} disabled={isProjectStarted} /> )} />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="pipeLength">{selectedAssetType === 'Pipe' ? 'Length' : 'Height'} (mm)</Label>
-                  <Controller name="pipeLength" control={control} render={({ field }) => ( <Input id="pipeLength" type="number" step="1" {...field} disabled={isProjectStarted} /> )} />
-                </div>
-              </div>
-            )}
+            {renderAssetSpecificInputs()}
 
             <div className="space-y-2">
               <Label htmlFor="nominalThickness">2. Nominal Thickness (mm)</Label>
