@@ -1,5 +1,4 @@
 
-
 "use client"
 
 import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react'
@@ -14,7 +13,7 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { RefreshCw, LocateFixed, Pin } from 'lucide-react'
 import { useImperativeHandle } from 'react'
-import { ColorLegend } from './ColorLegend'
+import { PlatePercentLegend } from './PlatePercentLegend'
 
 
 export type TankView3DRef = {
@@ -47,6 +46,7 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>((prop
   const displacementTextureRef = useRef<THREE.DataTexture | null>(null);
   const minMarkerRef = useRef<THREE.Mesh | null>(null);
   const maxMarkerRef = useRef<THREE.Mesh | null>(null);
+  const capsRef = useRef<THREE.Group | null>(null);
 
   const { nominalThickness, pipeOuterDiameter, pipeLength } = inspectionResult || {};
   const stats = DataVault.stats;
@@ -173,9 +173,10 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>((prop
     sceneRef.current.add(dirLight);
 
     const { width, height } = stats.gridSize;
-    const geometry = new THREE.CylinderGeometry(pipeOuterDiameter / 2, pipeOuterDiameter / 2, pipeLength, width > 1 ? width - 1 : 64, height > 1 ? height - 1 : 1, false);
+    const geometry = new THREE.CylinderGeometry(pipeOuterDiameter / 2, pipeOuterDiameter / 2, pipeLength, width > 1 ? width - 1 : 64, height > 1 ? height - 1 : 1, true);
     
-    const caps = new THREE.Group();
+    // Add caps to make it a tank
+    capsRef.current = new THREE.Group();
     const capGeo = new THREE.CircleGeometry(pipeOuterDiameter / 2, 64);
     const capMat = new THREE.MeshStandardMaterial({ color: 0x666666, side: THREE.DoubleSide });
     
@@ -184,14 +185,14 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>((prop
     const topCap = new THREE.Mesh(capGeo, capMat);
     topCap.position.y = pipeLength / 2 + CAP_OFFSET;
     topCap.rotation.x = Math.PI / 2;
-    caps.add(topCap);
+    capsRef.current.add(topCap);
 
     const bottomCap = new THREE.Mesh(capGeo, capMat);
     bottomCap.position.y = -pipeLength / 2 - CAP_OFFSET;
     bottomCap.rotation.x = -Math.PI / 2;
-    caps.add(bottomCap);
+    capsRef.current.add(bottomCap);
 
-    sceneRef.current.add(caps);
+    sceneRef.current.add(capsRef.current);
 
 
     const material = new THREE.ShaderMaterial({
@@ -215,12 +216,9 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>((prop
                 float loss = nominalThickness - displacementValue;
                 float currentRadius = pipeRadius - (loss * zScale);
                 
-                float angle = uv.x * 2.0 * 3.14159265;
-
-                vec3 newPosition;
-                newPosition.x = currentRadius * cos(angle);
-                newPosition.z = currentRadius * sin(angle);
-                newPosition.y = position.y;
+                vec3 newPosition = position;
+                newPosition.x = newPosition.x / pipeRadius * currentRadius;
+                newPosition.z = newPosition.z / pipeRadius * currentRadius;
 
                 gl_Position = projectionMatrix * modelViewMatrix * vec4(newPosition, 1.0);
             }
@@ -304,10 +302,23 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>((prop
        if (currentMount) {
         currentMount.removeEventListener('pointermove', onPointerMove);
         currentMount.removeEventListener('pointerleave', () => setHoveredPoint(null));
-        currentMount.innerHTML = '';
+      }
+      if (sceneRef.current && meshRef.current) sceneRef.current.remove(meshRef.current);
+      if (sceneRef.current && capsRef.current) sceneRef.current.remove(capsRef.current);
+      meshRef.current?.geometry.dispose();
+      (meshRef.current?.material as THREE.Material)?.dispose();
+      capsRef.current?.children.forEach(c => {
+        (c as THREE.Mesh).geometry.dispose();
+        ((c as THREE.Mesh).material as THREE.Material).dispose();
+      });
+      if (rendererRef.current) {
+        rendererRef.current.dispose();
+        if(rendererRef.current.domElement.parentElement) {
+            rendererRef.current.domElement.parentElement.removeChild(rendererRef.current.domElement);
+        }
       }
     };
-  }, [inspectionResult, animate, resetCamera, pipeOuterDiameter, pipeLength, zScale, nominalThickness, stats]);
+  }, [inspectionResult, animate, resetCamera, pipeOuterDiameter, pipeLength, nominalThickness, stats]);
   
   useEffect(() => {
     if (meshRef.current) {
@@ -412,12 +423,17 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>((prop
             <Button variant="outline" onClick={() => setView('iso')}>Isometric</Button>
           </CardContent>
         </Card>
-        <ColorLegend />
+        <Card>
+          <CardHeader><CardTitle className="text-lg font-headline">Legend</CardTitle></CardHeader>
+          <CardContent><PlatePercentLegend /></CardContent>
+        </Card>
       </div>
     </div>
   )
 });
 TankView3D.displayName = "TankView3D";
 
+
+    
 
     
