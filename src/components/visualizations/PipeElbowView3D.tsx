@@ -12,6 +12,8 @@ import { Slider } from '@/components/ui/slider';
 import { Label } from '@/components/ui/label';
 import { RefreshCw, Loader2 } from 'lucide-react';
 import { PlatePercentLegend } from './PlatePercentLegend';
+import type { GridCell } from '@/lib/types';
+
 
 export type PipeElbowView3DRef = {
   capture: () => Promise<string>;
@@ -33,16 +35,47 @@ const getAbsColor = (percentage: number | null, isND: boolean): THREE.Color => {
     return c;
 }
 
+const mapDataToVertices = (geom: THREE.BufferGeometry, gridMatrix: GridCell[][], nominalThickness: number, zScale: number, startY: number, endY: number) => {
+    const { width: gridW, height: gridH } = DataVault.stats!.gridSize;
+    const positions = geom.attributes.position;
+    const colors: number[] = [];
+
+    for (let i = 0; i < positions.count; i++) {
+        const u = geom.attributes.uv.getX(i);
+        const v = geom.attributes.uv.getY(i);
+        
+        const gridX = Math.floor(u * (gridW - 1));
+        const gridY = Math.floor(startY + v * (endY - startY));
+
+        const cell = gridMatrix[gridY]?.[gridX];
+        const isND = !cell || cell.isND;
+        const color = getAbsColor(cell?.percentage ?? null, isND);
+        colors.push(color.r, color.g, color.b);
+
+        const wallLoss = (cell && !isND && cell.effectiveThickness !== null) ? nominalThickness - cell.effectiveThickness : 0;
+        const radialDisplacement = -wallLoss * zScale;
+
+        const originalPos = new THREE.Vector3().fromBufferAttribute(positions, i);
+        const normal = new THREE.Vector3().fromBufferAttribute(geom.attributes.normal, i);
+        
+        originalPos.add(normal.multiplyScalar(radialDisplacement));
+
+        positions.setXYZ(i, originalPos.x, originalPos.y, originalPos.z);
+    }
+    geom.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    positions.needsUpdate = true;
+};
+
+
 export const PipeElbowView3D = forwardRef<PipeElbowView3DRef, PipeElbowView3DProps>((props, ref) => {
   const { inspectionResult, dataVersion } = useInspectionStore();
   const mountRef = useRef<HTMLDivElement>(null);
   
   const isReady = dataVersion > 0 && !!DataVault.stats && !!DataVault.gridMatrix &&
                   !!inspectionResult?.pipeOuterDiameter && !!inspectionResult?.pipeLength &&
-                  !!inspectionResult?.elbowStartLength && !!inspectionResult?.elbowAngle && !!inspectionResult?.elbowRadiusType;
+                  inspectionResult?.elbowStartLength !== undefined && !!inspectionResult?.elbowAngle && !!inspectionResult?.elbowRadiusType;
 
   const [zScale, setZScale] = useState(15);
-  const [hoveredPoint, setHoveredPoint] = useState<any>(null);
   
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
@@ -50,8 +83,6 @@ export const PipeElbowView3D = forwardRef<PipeElbowView3DRef, PipeElbowView3DPro
   const controlsRef = useRef<OrbitControls | null>(null);
   const pipeGroupRef = useRef<THREE.Group | null>(null);
   const reqRef = useRef<number>(0);
-  const raycasterRef = useRef(new THREE.Raycaster());
-  const mouseRef = useRef(new THREE.Vector2());
 
   const { nominalThickness, pipeOuterDiameter, pipeLength, elbowStartLength, elbowAngle, elbowRadiusType } = inspectionResult || {};
   const stats = DataVault.stats;
@@ -67,11 +98,11 @@ export const PipeElbowView3D = forwardRef<PipeElbowView3DRef, PipeElbowView3DPro
   const setView = useCallback(async (view: 'iso' | 'top' | 'side') => {
     if (!cameraRef.current || !controlsRef.current || !pipeLength) return;
     const distance = pipeLength * 1.5;
-    controlsRef.current.target.set(0, 0, 0);
+    controlsRef.current.target.set(0, pipeLength / 2, 0); // Center on approx middle of asset
     switch (view) {
-        case 'top': cameraRef.current.position.set(0, distance, 0); break;
-        case 'side': cameraRef.current.position.set(distance, 0, 0); break;
-        case 'iso': default: cameraRef.current.position.set(distance * 0.7, distance * 0.5, distance * 0.7); break;
+        case 'top': cameraRef.current.position.set(0, pipeLength + distance, 0); break;
+        case 'side': cameraRef.current.position.set(distance, pipeLength / 2, 0); break;
+        case 'iso': default: cameraRef.current.position.set(distance * 0.7, pipeLength * 0.7, distance * 0.7); break;
     }
     controlsRef.current.update();
   }, [pipeLength]);
@@ -86,7 +117,7 @@ export const PipeElbowView3D = forwardRef<PipeElbowView3DRef, PipeElbowView3DPro
   }));
   
   useEffect(() => {
-    if (!isReady || !mountRef.current || !stats || !nominalThickness || !pipeOuterDiameter || !pipeLength || !elbowStartLength || !elbowAngle || !elbowRadiusType) return;
+    if (!isReady || !mountRef.current || !stats || !nominalThickness || !pipeOuterDiameter || !pipeLength || elbowStartLength === undefined || !elbowAngle || !elbowRadiusType || !gridMatrix) return;
     
     const currentMount = mountRef.current;
     
@@ -109,69 +140,64 @@ export const PipeElbowView3D = forwardRef<PipeElbowView3DRef, PipeElbowView3DPro
     
     const { width: gridW, height: gridH } = stats.gridSize;
     const pipeRadius = pipeOuterDiameter / 2;
-    const totalDataLength = gridH; 
 
+    const dataLengthPerUnit = gridH / pipeLength;
     const bendRadius = (elbowRadiusType === 'Short' ? 1.0 : 1.5) * pipeOuterDiameter;
     const bendAngleRad = THREE.MathUtils.degToRad(elbowAngle);
     const bendArcLength = bendRadius * bendAngleRad;
 
-    const dataLengthPerUnit = gridH / pipeLength;
-    const elbowStartDataIndex = Math.floor(elbowStartLength * dataLengthPerUnit);
-    const elbowArcDataLength = Math.floor(bendArcLength * dataLengthPerUnit);
-    
+    const dataIndex_sec1_end = Math.floor(elbowStartLength * dataLengthPerUnit);
+    const dataIndex_sec2_end = dataIndex_sec1_end + Math.floor(bendArcLength * dataLengthPerUnit);
+
     // --- Section 1: Straight Pipe ---
     const len1 = elbowStartLength;
-    const geom1 = new THREE.CylinderGeometry(pipeRadius, pipeRadius, len1, gridW, elbowStartDataIndex, true);
-    geom1.translate(0, len1 / 2, 0); // Position it to start at origin
+    if (len1 > 0) {
+      const geom1 = new THREE.CylinderGeometry(pipeRadius, pipeRadius, len1, gridW, dataIndex_sec1_end, true);
+      geom1.translate(0, len1 / 2, 0); 
+      mapDataToVertices(geom1, gridMatrix, nominalThickness, zScale, 0, dataIndex_sec1_end);
+      pipeGroupRef.current.add(new THREE.Mesh(geom1, new THREE.MeshStandardMaterial({ vertexColors: true, side: THREE.DoubleSide })));
+    }
     
     // --- Section 2: Elbow ---
-    const geom2 = new THREE.TorusGeometry(bendRadius, pipeRadius, gridW, elbowArcDataLength, bendAngleRad);
-    // Position and rotate the torus to connect to the first pipe
-    const bendGroup = new THREE.Group();
-    bendGroup.add(new THREE.Mesh(geom2));
-    bendGroup.position.set(bendRadius, len1, 0);
-    bendGroup.rotation.y = Math.PI / 2;
+    const len2_data = dataIndex_sec2_end - dataIndex_sec1_end;
+    if (len2_data > 0) {
+        const geom2 = new THREE.TorusGeometry(bendRadius, pipeRadius, gridW, len2_data, bendAngleRad);
+        geom2.rotateY(Math.PI / 2);
+        geom2.translate(bendRadius, len1, 0);
+        mapDataToVertices(geom2, gridMatrix, nominalThickness, zScale, dataIndex_sec1_end, dataIndex_sec2_end);
+        pipeGroupRef.current.add(new THREE.Mesh(geom2, new THREE.MeshStandardMaterial({ vertexColors: true, side: THREE.DoubleSide })));
+    }
     
     // --- Section 3: Straight Pipe ---
     const len3 = pipeLength - len1 - bendArcLength;
-    if (len3 > 0) {
-      const geom3 = new THREE.CylinderGeometry(pipeRadius, pipeRadius, len3, gridW, gridH - elbowStartDataIndex - elbowArcDataLength, true);
-      const endPointOfBend = new THREE.Vector3(bendRadius * Math.cos(bendAngleRad), len1 + bendRadius * Math.sin(bendAngleRad), 0);
-      geom3.translate(0, len3 / 2, 0);
-      const mesh3 = new THREE.Mesh(geom3);
-      mesh3.position.set(endPointOfBend.x, endPointOfBend.y, 0);
-      mesh3.rotation.z = -bendAngleRad;
-      pipeGroupRef.current.add(mesh3);
+    const len3_data = gridH - dataIndex_sec2_end;
+    if (len3 > 0 && len3_data > 0) {
+      const geom3 = new THREE.CylinderGeometry(pipeRadius, pipeRadius, len3, gridW, len3_data, true);
+      
+      const endPointOfBend = new THREE.Vector3(
+        bendRadius * Math.cos(bendAngleRad),
+        len1 + bendRadius * Math.sin(bendAngleRad),
+        0
+      );
+
+      const directionOfEnd = new THREE.Vector3(
+         Math.sin(bendAngleRad),
+         Math.cos(bendAngleRad),
+         0
+      ).normalize();
+      
+      const quaternion = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), directionOfEnd);
+      geom3.applyQuaternion(quaternion);
+
+      geom3.translate(
+        endPointOfBend.x + directionOfEnd.x * len3 / 2,
+        endPointOfBend.y + directionOfEnd.y * len3 / 2,
+        endPointOfBend.z + directionOfEnd.z * len3 / 2
+      );
+
+      mapDataToVertices(geom3, gridMatrix, nominalThickness, zScale, dataIndex_sec2_end, gridH);
+      pipeGroupRef.current.add(new THREE.Mesh(geom3, new THREE.MeshStandardMaterial({ vertexColors: true, side: THREE.DoubleSide })));
     }
-    
-    // Combine and color (simplified for now)
-    const mesh1 = new THREE.Mesh(geom1);
-    pipeGroupRef.current.add(mesh1);
-    pipeGroupRef.current.add(bendGroup);
-    
-    const allMeshes: THREE.Mesh[] = pipeGroupRef.current.children.flatMap(child => child instanceof THREE.Group ? child.children : child) as THREE.Mesh[];
-
-    allMeshes.forEach(mesh => {
-        const geom = mesh.geometry;
-        const positions = geom.attributes.position;
-        const colors: number[] = [];
-        for (let i = 0; i < positions.count; i++) {
-            const u = geom.attributes.uv.getX(i);
-            const v = 1.0 - geom.attributes.uv.getY(i);
-            
-            // This mapping is simplified and needs to be continuous across sections
-            const gridX = Math.floor(u * (gridW - 1));
-            const gridY = Math.floor(v * (gridH - 1)); 
-
-            const cell = gridMatrix[gridY]?.[gridX];
-            const isND = !cell || cell.isND;
-            const color = getAbsColor(cell?.percentage ?? null, isND);
-            colors.push(color.r, color.g, color.b);
-        }
-        geom.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-        geom.computeVertexNormals();
-        mesh.material = new THREE.MeshStandardMaterial({ vertexColors: true, side: THREE.DoubleSide });
-    });
 
     const handleResize = () => {
       if (rendererRef.current && cameraRef.current && currentMount) {
@@ -189,6 +215,14 @@ export const PipeElbowView3D = forwardRef<PipeElbowView3DRef, PipeElbowView3DPro
     return () => {
       cancelAnimationFrame(reqRef.current);
       window.removeEventListener('resize', handleResize);
+      if (pipeGroupRef.current) {
+        pipeGroupRef.current.children.forEach(child => {
+            const mesh = child as THREE.Mesh;
+            mesh.geometry.dispose();
+            (mesh.material as THREE.Material).dispose();
+        });
+        sceneRef.current?.remove(pipeGroupRef.current);
+      }
       rendererRef.current?.dispose();
     };
   }, [isReady, nominalThickness, pipeOuterDiameter, pipeLength, elbowStartLength, elbowAngle, elbowRadiusType, animate, resetCamera, stats, zScale, gridMatrix]);
