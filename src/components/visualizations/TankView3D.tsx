@@ -179,13 +179,15 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>((prop
     const capGeo = new THREE.CircleGeometry(pipeOuterDiameter / 2, 64);
     const capMat = new THREE.MeshStandardMaterial({ color: 0x666666, side: THREE.DoubleSide });
     
+    const CAP_OFFSET = 0.01; // Tiny offset to prevent Z-fighting
+
     const topCap = new THREE.Mesh(capGeo, capMat);
-    topCap.position.y = pipeLength / 2;
+    topCap.position.y = pipeLength / 2 + CAP_OFFSET;
     topCap.rotation.x = Math.PI / 2;
     caps.add(topCap);
 
     const bottomCap = new THREE.Mesh(capGeo, capMat);
-    bottomCap.position.y = -pipeLength / 2;
+    bottomCap.position.y = -pipeLength / 2 - CAP_OFFSET;
     bottomCap.rotation.x = -Math.PI / 2;
     caps.add(bottomCap);
 
@@ -416,3 +418,6 @@ export const TankView3D = React.forwardRef<TankView3DRef, TankView3DProps>((prop
   )
 });
 TankView3D.displayName = "TankView3D";
+
+
+    
