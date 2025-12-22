@@ -32,7 +32,6 @@ export const PipeView3D = React.forwardRef<PipeView3DRef, PipeView3DProps>((prop
   const mountRef = useRef<HTMLDivElement>(null)
   const isReady = dataVersion > 0 && !!DataVault.stats && !!DataVault.gridMatrix && !!inspectionResult?.pipeOuterDiameter && !!inspectionResult?.pipeLength;
   
-  const [showReference, setShowReference] = useState(true);
   const [hoveredPoint, setHoveredPoint] = useState<HoverInfo & { clientX: number, clientY: number } | null>(null);
   const [depthExaggeration, setDepthExaggeration] = useState(10);
 
@@ -211,3 +210,5 @@ export const PipeView3D = React.forwardRef<PipeView3DRef, PipeView3DProps>((prop
   )
 });
 PipeView3D.displayName = "PipeView3D";
+
+    
