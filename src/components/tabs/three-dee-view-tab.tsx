@@ -1,5 +1,4 @@
 
-
 "use client"
 
 import React, { useRef, useImperativeHandle, forwardRef, Ref } from 'react';
@@ -11,10 +10,10 @@ import { TankView3D, type TankView3DRef } from '@/components/visualizations/Tank
 type ViewRef = PlateView3DRef | PipeView3DRef | TankView3DRef;
 
 export type ThreeDeeViewRef = {
-  capture: () => string; // All views should return a data URL string
-  focus: (x: number, y: number, zoomIn: boolean) => void;
-  resetCamera: () => void;
-  setView: (view: 'iso' | 'top' | 'side') => void;
+  capture: () => Promise<string>;
+  focus: (x: number, y: number, zoomIn: boolean, boxSize: number) => Promise<void>;
+  resetCamera: () => Promise<void>;
+  setView: (view: 'iso' | 'top' | 'side') => Promise<void>;
 };
 
 
@@ -25,10 +24,10 @@ export const ThreeDeeViewTab = forwardRef<ThreeDeeViewRef, ThreeDeeViewTabProps>
   const viewRef = useRef<ViewRef>(null);
 
   useImperativeHandle(ref, () => ({
-      capture: () => viewRef.current?.capture() || '',
-      focus: (x, y, zoomIn) => viewRef.current?.focus(x, y, zoomIn),
-      resetCamera: () => viewRef.current?.resetCamera(),
-      setView: (view) => viewRef.current?.setView(view),
+      capture: async () => viewRef.current?.capture() || Promise.resolve(''),
+      focus: async (x, y, zoomIn, boxSize) => viewRef.current?.focus(x, y, zoomIn, boxSize),
+      resetCamera: async () => viewRef.current?.resetCamera(),
+      setView: async (view) => viewRef.current?.setView(view),
   }));
 
   if (!inspectionResult) return null;
