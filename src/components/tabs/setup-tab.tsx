@@ -135,35 +135,38 @@ export function SetupTab() {
   }
 
   const renderAssetSpecificInputs = () => {
-    if (selectedAssetType === 'Pipe') {
-      return (
-         <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="pipeOuterDiameter">Pipe Outer Diameter (mm)</Label>
-              <Controller name="pipeOuterDiameter" control={control} render={({ field }) => ( <Input id="pipeOuterDiameter" type="number" step="1" {...field} disabled={isProjectStarted} /> )} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="pipeLength">Pipe Length (mm)</Label>
-              <Controller name="pipeLength" control={control} render={({ field }) => ( <Input id="pipeLength" type="number" step="1" {...field} disabled={isProjectStarted} /> )} />
-            </div>
-          </div>
-      )
+    let diameterLabel = "";
+    let lengthLabel = "";
+
+    switch (selectedAssetType) {
+        case 'Pipe':
+            diameterLabel = "Pipe Outer Diameter (mm)";
+            lengthLabel = "Pipe Length (mm)";
+            break;
+        case 'Tank':
+            diameterLabel = "Tank Diameter (mm)";
+            lengthLabel = "Tank Height (mm)";
+            break;
+        case 'Vessel':
+            diameterLabel = "Vessel Diameter (mm)";
+            lengthLabel = "Vessel Length (mm)";
+            break;
+        default:
+            return null;
     }
-     if (selectedAssetType === 'Tank' || selectedAssetType === 'Vessel') {
-      return (
-         <div className="grid grid-cols-2 gap-4">
+
+    return (
+        <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="pipeOuterDiameter">Tank Diameter (mm)</Label>
-              <Controller name="pipeOuterDiameter" control={control} render={({ field }) => ( <Input id="pipeOuterDiameter" type="number" step="1" {...field} disabled={isProjectStarted} /> )} />
+                <Label htmlFor="pipeOuterDiameter">{diameterLabel}</Label>
+                <Controller name="pipeOuterDiameter" control={control} render={({ field }) => ( <Input id="pipeOuterDiameter" type="number" step="1" {...field} disabled={isProjectStarted} /> )} />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="pipeLength">Tank Height (mm)</Label>
-              <Controller name="pipeLength" control={control} render={({ field }) => ( <Input id="pipeLength" type="number" step="1" {...field} disabled={isProjectStarted} /> )} />
+                <Label htmlFor="pipeLength">{lengthLabel}</Label>
+                <Controller name="pipeLength" control={control} render={({ field }) => ( <Input id="pipeLength" type="number" step="1" {...field} disabled={isProjectStarted} /> )} />
             </div>
-          </div>
-      )
-    }
-    return null;
+        </div>
+    );
   }
 
   return (

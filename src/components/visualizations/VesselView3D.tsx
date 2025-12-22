@@ -180,11 +180,11 @@ export const VesselView3D = React.forwardRef<VesselView3DRef, VesselView3DProps>
     const sphereGeo = new THREE.SphereGeometry(capRadius, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2);
     
     const cap1 = new THREE.Mesh(sphereGeo, capMat);
-    cap1.rotation.y = Math.PI / 2;
+    cap1.rotation.x = -Math.PI / 2;
     cap1.position.z = -pipeLength / 2;
 
     const cap2 = new THREE.Mesh(sphereGeo, capMat);
-    cap2.rotation.y = -Math.PI / 2;
+    cap2.rotation.x = Math.PI / 2;
     cap2.position.z = pipeLength / 2;
     
     capsRef.current.add(cap1);
