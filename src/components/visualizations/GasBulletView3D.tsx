@@ -13,6 +13,7 @@ import { Slider } from '@/components/ui/slider';
 import { Label } from '@/components/ui/label';
 import { RefreshCw, Loader2 } from 'lucide-react';
 import { PlatePercentLegend } from './PlatePercentLegend';
+import { RadioGroup, RadioGroupItem } from '../ui/radio-group';
 
 export type GasBulletView3DRef = {
   capture: () => Promise<string>;
@@ -43,6 +44,7 @@ export const GasBulletView3D = React.forwardRef<GasBulletView3DRef, GasBulletVie
   const isReady = dataVersion > 0 && !!DataVault.stats && !!DataVault.gridMatrix && !!inspectionResult?.pipeOuterDiameter;
   
   const [zScale, setZScale] = useState(15);
+  const [startAngle, setStartAngle] = useState(0);
   const [hoveredPoint, setHoveredPoint] = useState<any>(null);
   
   const sceneRef = useRef<THREE.Scene | null>(null)
@@ -96,7 +98,7 @@ export const GasBulletView3D = React.forwardRef<GasBulletView3DRef, GasBulletVie
         if (!rendererRef.current) return '';
         return rendererRef.current.domElement.toDataURL();
     },
-    focus: (x, y, zoomIn) => {
+    focus: (x: number, y: number, zoomIn: boolean, boxSize: number) => {
         if (!cameraRef.current || !controlsRef.current || !stats || !pipeOuterDiameter) return;
         const { width, height } = stats.gridSize;
         const sphereRadius = pipeOuterDiameter / 2;
@@ -142,6 +144,7 @@ export const GasBulletView3D = React.forwardRef<GasBulletView3DRef, GasBulletVie
     
     const colors: number[] = [];
     const positions = geometry.attributes.position;
+    const startAngleRad = THREE.MathUtils.degToRad(startAngle);
     
     for (let i = 0; i < positions.count; i++) {
         const u = geometry.attributes.uv.getX(i);
@@ -160,7 +163,15 @@ export const GasBulletView3D = React.forwardRef<GasBulletView3DRef, GasBulletVie
         const currentRadius = sphereRadius + radialDisplacement;
         
         const originalPos = new THREE.Vector3().fromBufferAttribute(positions, i);
-        originalPos.normalize().multiplyScalar(currentRadius);
+        const phi = Math.acos(originalPos.y / sphereRadius); // latitude
+        const theta = Math.atan2(originalPos.z, originalPos.x); // longitude
+
+        originalPos.set(
+            currentRadius * Math.sin(phi) * Math.cos(theta + startAngleRad),
+            currentRadius * Math.cos(phi),
+            currentRadius * Math.sin(phi) * Math.sin(theta + startAngleRad)
+        );
+
         positions.setXYZ(i, originalPos.x, originalPos.y, originalPos.z);
     }
 
@@ -226,7 +237,7 @@ export const GasBulletView3D = React.forwardRef<GasBulletView3DRef, GasBulletVie
       (meshRef.current?.material as THREE.Material)?.dispose();
       rendererRef.current?.dispose();
     };
-  }, [isReady, pipeOuterDiameter, nominalThickness, animate, resetCamera, stats, zScale, gridMatrix]);
+  }, [isReady, pipeOuterDiameter, nominalThickness, animate, resetCamera, stats, zScale, gridMatrix, startAngle]);
   
   if (!isReady) return <div className="flex items-center justify-center h-full"><Loader2 className="animate-spin" /></div>;
 
@@ -266,6 +277,14 @@ export const GasBulletView3D = React.forwardRef<GasBulletView3DRef, GasBulletVie
             <div className="space-y-3">
               <Label>Radial Exaggeration: {zScale.toFixed(1)}x</Label>
               <Slider value={[zScale]} onValueChange={([val]) => setZScale(val)} min={1} max={50} step={0.5} />
+            </div>
+             <div className="space-y-3">
+                <Label>Starting Point</Label>
+                <RadioGroup defaultValue={String(startAngle)} onValueChange={(val) => setStartAngle(Number(val))}>
+                    <div className="flex items-center space-x-2"><RadioGroupItem value="0" id="r-0" /><Label htmlFor="r-0">0° (Top)</Label></div>
+                    <div className="flex items-center space-x-2"><RadioGroupItem value="120" id="r-120" /><Label htmlFor="r-120">120°</Label></div>
+                    <div className="flex items-center space-x-2"><RadioGroupItem value="240" id="r-240" /><Label htmlFor="r-240">240°</Label></div>
+                </RadioGroup>
             </div>
           </CardContent>
         </Card>
