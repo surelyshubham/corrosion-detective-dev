@@ -18,6 +18,19 @@ import { useInspectionStore } from '@/store/use-inspection-store'
 import { MergeAlertDialog, type MergeFormValues } from './merge-alert-dialog'
 import { useToast } from '@/hooks/use-toast'
 
+// Hull pattern icons
+const GenericHullIcon = () => <svg viewBox="0 0 24 24" fill="none" className="w-8 h-8 mr-2"><path d="M4 6C4 6 8 8 12 8S20 6 20 6V18H4V6Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+const TankerHullIcon = () => <svg viewBox="0 0 24 24" fill="none" className="w-8 h-8 mr-2"><path d="M4 8C4 8 8 10 12 10S20 8 20 8V16C20 17.1046 16.4183 18 12 18S4 17.1046 4 16V8Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+const ContainerHullIcon = () => <svg viewBox="0 0 24 24" fill="none" className="w-8 h-8 mr-2"><path d="M4 8V18H20V8L18 6H6L4 8Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+const BulkCarrierIcon = () => <svg viewBox="0 0 24 24" fill="none" className="w-8 h-8 mr-2"><path d="M4 6 L20 6 V18 H4L4 6Z M 4 10 L20 10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+const DoubleHullIcon = () => <svg viewBox="0 0 24 24" fill="none" className="w-8 h-8 mr-2"><path d="M4 8C4 8 8 10 12 10S20 8 20 8V16C20 17.1 16.4 18 12 18S4 17.1 4 16V8Z M6 9V15.5 M18 9V15.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+const FlatBottomIcon = () => <svg viewBox="0 0 24 24" fill="none" className="w-8 h-8 mr-2"><path d="M4 8V16H20V8L18 6H6L4 8Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" transform="scale(1, 0.8) translate(0, 2)"/></svg>
+const ShallowVIcon = () => <svg viewBox="0 0 24 24" fill="none" className="w-8 h-8 mr-2"><path d="M4 8L12 12L20 8V16H4V8Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+const DeepVIcon = () => <svg viewBox="0 0 24 24" fill="none" className="w-8 h-8 mr-2"><path d="M4 8L12 16L20 8V16H4V8Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+const BulbousBowIcon = () => <svg viewBox="0 0 24 24" fill="none" className="w-8 h-8 mr-2"><path d="M20 6C20 6 16 8 12 8S4 6 4 6V18H20V6Z M2 12C2 10 4 9 6 9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+const SymmetricHullIcon = () => <svg viewBox="0 0 24 24" fill="none" className="w-8 h-8 mr-2"><path d="M12 4L20 10V14L12 20L4 14V10L12 4Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+
+
 const setupSchema = z.object({
   assetType: z.enum(assetTypes, { required_error: 'Asset type is required.' }),
   nominalThickness: z.coerce.number().min(0.1, 'Must be positive.'),
@@ -26,6 +39,7 @@ const setupSchema = z.object({
   elbowStartLength: z.coerce.number().min(0, "Cannot be negative.").optional(),
   elbowAngle: z.coerce.number().optional(),
   elbowRadiusType: z.string().optional(),
+  hullPattern: z.string().optional(),
 });
 
 
@@ -60,12 +74,12 @@ export function SetupTab() {
       pipeLength: 1000,
       elbowStartLength: 200,
       elbowAngle: 90,
-      elbowRadiusType: 'Long'
+      elbowRadiusType: 'Long',
+      hullPattern: 'GenericDisplacementHull',
     },
   })
   
   useEffect(() => {
-    // This effect now only resets the form when the project is fully cleared
     if (stagedFiles.length === 0) {
         setValue('assetType', undefined);
         setValue('nominalThickness', 6);
@@ -76,7 +90,6 @@ export function SetupTab() {
   
   const handleFileDrop = async (newFiles: FileList | null) => {
     if (!newFiles || newFiles.length === 0) return;
-
     const validFile = Array.from(newFiles).find(file => file.name.endsWith('.xlsx') || file.name.endsWith('.csv'));
     
     if (!validFile) {
@@ -95,15 +108,14 @@ export function SetupTab() {
       elbowStartLength: formData.elbowStartLength,
       elbowAngle: formData.elbowAngle as ElbowAngle,
       elbowRadiusType: formData.elbowRadiusType as ElbowRadiusType,
+      hullPattern: formData.hullPattern,
     };
 
 
-    // If project already started, trigger the merge flow
     if (isProjectStarted) {
         setFileToMerge(validFile);
         setIsMergeAlertOpen(true);
     } else {
-        // Otherwise, it's the first file, add it directly
         addFileToStage(validFile, config, null);
     }
   }
@@ -138,6 +150,7 @@ export function SetupTab() {
         elbowStartLength: formData.elbowStartLength,
         elbowAngle: formData.elbowAngle as ElbowAngle,
         elbowRadiusType: formData.elbowRadiusType as ElbowRadiusType,
+        hullPattern: formData.hullPattern,
       };
       addFileToStage(fileToMerge, config, mergeData);
       setIsMergeAlertOpen(false);
@@ -147,6 +160,19 @@ export function SetupTab() {
   const handleClear = () => {
     resetProject();
   }
+  
+  const HULL_PATTERNS = [
+      { value: 'GenericDisplacementHull', label: 'Generic Displacement Hull', icon: GenericHullIcon },
+      { value: 'FullBodiedTankerHull', label: 'Full-Bodied Tanker Hull', icon: TankerHullIcon },
+      { value: 'ContainerShipHull', label: 'Container Ship Hull', icon: ContainerHullIcon },
+      { value: 'BulkCarrierHull', label: 'Bulk Carrier Hull', icon: BulkCarrierIcon },
+      { value: 'DoubleHullPattern', label: 'Double Hull Pattern', icon: DoubleHullIcon },
+      { value: 'FlatBottomHull', label: 'Flat Bottom Hull', icon: FlatBottomIcon },
+      { value: 'ShallowVHull', label: 'Shallow V Hull', icon: ShallowVIcon },
+      { value: 'DeepVHull', label: 'Deep V Hull', icon: DeepVIcon },
+      { value: 'BulbousBowInfluenceHull', label: 'Bulbous-Bow Influence Hull', icon: BulbousBowIcon },
+      { value: 'SymmetricEngineeringHull', label: 'Symmetric Engineering Hull', icon: SymmetricHullIcon },
+  ];
 
   const renderAssetSpecificInputs = () => {
     let diameterLabel = "";
@@ -154,6 +180,31 @@ export function SetupTab() {
     let showLength = true;
 
     switch (selectedAssetType) {
+        case 'Ship Hull':
+            return (
+              <div className="space-y-2">
+                <Label htmlFor="hullPattern">Hull Pattern Type</Label>
+                <Controller
+                  name="hullPattern"
+                  control={control}
+                  render={({ field }) => (
+                    <Select onValueChange={field.onChange} defaultValue={field.value} disabled={isProjectStarted}>
+                      <SelectTrigger id="hullPattern"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {HULL_PATTERNS.map(pattern => (
+                          <SelectItem key={pattern.value} value={pattern.value}>
+                            <div className="flex items-center">
+                              <pattern.icon />
+                              <span>{pattern.label}</span>
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
+              </div>
+            );
         case 'Pipe':
             diameterLabel = "Pipe Outer Diameter (mm)";
             lengthLabel = "Data Length (mm)";

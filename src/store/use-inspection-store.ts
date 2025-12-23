@@ -13,7 +13,7 @@ import { generateCorrosionInsight, type CorrosionInsightInput } from '@/ai/flows
 export type StagedFile = {
   name: string;
   mergeConfig: MergeFormValues | null;
-  dimensions: { width: number; height: number; } | null; // Added dimensions
+  dimensions: { width: number; height: number; } | null;
 }
 
 export interface WorkerOutput {
@@ -22,7 +22,7 @@ export interface WorkerOutput {
   progress?: number;
   
   // STAGED output
-  plateDimensions?: { width: number; height: number; }; // Changed from 'dimensions'
+  plateDimensions?: { width: number; height: number; };
   projectDimensions?: { width: number; height: number };
 
   // FINALIZED / SEGMENTS_UPDATED output
@@ -48,6 +48,7 @@ export type ProcessConfig = {
     elbowStartLength?: number;
     elbowAngle?: ElbowAngle;
     elbowRadiusType?: ElbowRadiusType;
+    hullPattern?: string;
 }
 
 export interface PatchState {
@@ -120,7 +121,6 @@ export const useInspectionStore = create<InspectionState>()(
               const lastStagedFile = get().stagedFiles.slice(-1)[0];
               toast({ title: 'File Staged', description: `${lastStagedFile?.name} has been added.` });
 
-              // Update the last staged file with its dimensions
               set(state => ({
                 isLoading: false,
                 projectDimensions: data.projectDimensions || null,
@@ -146,7 +146,6 @@ export const useInspectionStore = create<InspectionState>()(
                       return;
                   }
                   
-                  // CRITICAL FIX: Update DataVault with the new merged data
                   DataVault.displacementBuffer = data.displacementBuffer;
                   DataVault.colorBuffer = data.colorBuffer;
                   DataVault.gridMatrix = data.gridMatrix;
@@ -155,7 +154,7 @@ export const useInspectionStore = create<InspectionState>()(
                   
                   const firstPlate = data.plates[0];
 
-                  const newResult: MergedInspectionResult = {
+                  const newResult: any = { // Using any to accommodate hullPattern
                       plates: data.plates,
                       mergedGrid: data.gridMatrix,
                       nominalThickness: data.stats.nominalThickness,
@@ -168,6 +167,7 @@ export const useInspectionStore = create<InspectionState>()(
                       elbowStartLength: firstPlate.elbowStartLength,
                       elbowAngle: firstPlate.elbowAngle,
                       elbowRadiusType: firstPlate.elbowRadiusType,
+                      hullPattern: firstPlate.hullPattern, // Add hullPattern
                       corrosionPatches: data.corrosionPatches,
                       ndPatches: data.ndPatches,
                   };
@@ -177,10 +177,9 @@ export const useInspectionStore = create<InspectionState>()(
                       patches: { corrosion: data.corrosionPatches!, nonInspected: data.ndPatches! },
                       isFinalizing: false,
                       error: null,
-                      dataVersion: Date.now() // Use timestamp for unique version
+                      dataVersion: Date.now()
                   }));
 
-                  // Fire off AI insight generation
                   set({ isGeneratingAI: true });
                   const aiInput: CorrosionInsightInput = {
                       assetType: newResult.assetType,

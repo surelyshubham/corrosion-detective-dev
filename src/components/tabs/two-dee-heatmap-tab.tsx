@@ -28,6 +28,7 @@ export const TwoDeeHeatmapTab = forwardRef<TwoDeeViewRef, {}>((props, ref) => {
             return vesselViewRef.current?.capture() || '';
         case 'Plate':
         case 'LPG/Gas Bullet':
+        case 'Ship Hull':
         default:
           return plateViewRef.current?.capture() || '';
       }
@@ -47,6 +48,7 @@ export const TwoDeeHeatmapTab = forwardRef<TwoDeeViewRef, {}>((props, ref) => {
       return <VesselView2D ref={vesselViewRef} />;
     case 'Plate':
     case 'LPG/Gas Bullet':
+    case 'Ship Hull':
     default:
       return <PlateView2D ref={plateViewRef} />;
   }
