@@ -13,6 +13,7 @@ import { generateCorrosionInsight, type CorrosionInsightInput } from '@/ai/flows
 export type StagedFile = {
   name: string;
   mergeConfig: MergeFormValues | null;
+  dimensions: { width: number; height: number; } | null; // Added dimensions
 }
 
 export interface WorkerOutput {
@@ -21,7 +22,8 @@ export interface WorkerOutput {
   progress?: number;
   
   // STAGED output
-  dimensions?: { width: number; height: number };
+  plateDimensions?: { width: number; height: number; }; // Changed from 'dimensions'
+  projectDimensions?: { width: number; height: number };
 
   // FINALIZED / SEGMENTS_UPDATED output
   plates?: Plate[];
@@ -115,8 +117,21 @@ export const useInspectionStore = create<InspectionState>()(
               toast({ variant: 'destructive', title: 'Processing Error', description: message });
               set({ isLoading: false, isFinalizing: false, error: message || "An unknown error occurred in the worker." });
             } else if (type === 'STAGED') {
-              toast({ title: 'File Staged', description: `${get().stagedFiles.slice(-1)[0]?.name} has been added.` });
-              set({ isLoading: false, projectDimensions: data.dimensions || null, thicknessConflict: null });
+              const lastStagedFile = get().stagedFiles.slice(-1)[0];
+              toast({ title: 'File Staged', description: `${lastStagedFile?.name} has been added.` });
+
+              // Update the last staged file with its dimensions
+              set(state => ({
+                isLoading: false,
+                projectDimensions: data.projectDimensions || null,
+                thicknessConflict: null,
+                stagedFiles: state.stagedFiles.map((file, index) => 
+                  index === state.stagedFiles.length - 1 
+                  ? { ...file, dimensions: data.plateDimensions || null }
+                  : file
+                )
+              }));
+
             } else if (type === 'THICKNESS_CONFLICT') {
                set({ isLoading: false, thicknessConflict: data.conflict || null });
             } else if (type === 'SEGMENTS_UPDATED') {
@@ -242,7 +257,7 @@ export const useInspectionStore = create<InspectionState>()(
             if (!worker) return;
             set({ isLoading: true, error: null });
             
-            const newStagedFile: StagedFile = { name: file.name, mergeConfig };
+            const newStagedFile: StagedFile = { name: file.name, mergeConfig, dimensions: null };
             set(state => ({ stagedFiles: [...state.stagedFiles, newStagedFile] }));
 
             const buffer = await file.arrayBuffer();

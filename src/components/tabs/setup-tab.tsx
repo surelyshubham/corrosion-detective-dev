@@ -155,6 +155,9 @@ export function SetupTab() {
 
     switch (selectedAssetType) {
         case 'Pipe':
+            diameterLabel = "Pipe Outer Diameter (mm)";
+            lengthLabel = "Data Length (mm)";
+            break;
         case 'Pipe Elbow':
             diameterLabel = "Pipe Outer Diameter (mm)";
             lengthLabel = "Total Pipe Length (mm)";
@@ -297,12 +300,15 @@ export function SetupTab() {
                   <h3 className="text-sm font-medium text-muted-foreground flex items-center gap-2"><Rows3 className="h-4 w-4" /> Staged Files</h3>
                   <div className="space-y-2 rounded-md border p-3 bg-background max-h-48 overflow-y-auto">
                     {stagedFiles.map((f, i) => (
-                        <div key={i} className="flex items-center justify-between text-sm">
-                            <div className="flex items-center gap-2">
-                                <span className="font-mono text-xs bg-muted text-muted-foreground rounded-full h-5 w-5 flex items-center justify-center">{i+1}</span>
-                                <span className="font-medium truncate max-w-[200px]">{f.name}</span>
+                        <div key={i} className="flex items-center justify-between text-sm gap-2">
+                            <div className="flex items-center gap-2 min-w-0">
+                                <span className="font-mono text-xs bg-muted text-muted-foreground rounded-full h-5 w-5 flex items-center justify-center shrink-0">{i+1}</span>
+                                <span className="font-medium truncate" title={f.name}>{f.name}</span>
                             </div>
-                            <span className="text-xs font-mono text-muted-foreground">{f.mergeConfig ? `${f.mergeConfig.direction} @ ${f.mergeConfig.start}` : 'Base'}</span>
+                            <div className="text-xs font-mono text-muted-foreground text-right shrink-0">
+                                {f.dimensions && <span>{f.dimensions.width}x{f.dimensions.height}pts</span>}
+                                {f.mergeConfig && <span className="ml-2">{f.mergeConfig.direction} @ {f.mergeConfig.start}</span>}
+                            </div>
                         </div>
                     ))}
                   </div>

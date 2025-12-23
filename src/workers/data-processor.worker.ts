@@ -630,7 +630,12 @@ self.onmessage = async (event: MessageEvent<any>) => {
 
             STAGED_PLATES.push(plateData);
             const tempMaster = mergePlatesSequentially(STAGED_PLATES);
-            self.postMessage({ type: 'STAGED', dimensions: { width: tempMaster.width, height: tempMaster.height }});
+            
+            self.postMessage({ 
+                type: 'STAGED', 
+                projectDimensions: { width: tempMaster.width, height: tempMaster.height },
+                plateDimensions: { width: plateData.width, height: plateData.height }
+            });
             return;
         }
 
@@ -644,7 +649,12 @@ self.onmessage = async (event: MessageEvent<any>) => {
              const plateData = parseFileToPlateData(file.buffer, file.name, config, mergeConfig);
              STAGED_PLATES.push(plateData);
              const tempMaster = mergePlatesSequentially(STAGED_PLATES);
-             self.postMessage({ type: 'STAGED', dimensions: { width: tempMaster.width, height: tempMaster.height }});
+             
+             self.postMessage({ 
+                type: 'STAGED',
+                projectDimensions: { width: tempMaster.width, height: tempMaster.height },
+                plateDimensions: { width: plateData.width, height: plateData.height }
+            });
              return;
         }
 
