@@ -1,4 +1,5 @@
 
+
 "use client"
 
 import React, { useRef, useEffect, useState, useCallback, useImperativeHandle, forwardRef } from 'react';
@@ -46,7 +47,7 @@ class PipePath {
         this.addSegment('line', startLength, seg1Start, seg1End, new THREE.Vector3(0, 1, 0));
 
         const arcCenter = new THREE.Vector3(bendRadius, startLength, 0);
-        const arcStartAngle = -Math.PI / 2;
+        const arcStartAngle = Math.PI / 2; // Start from top, bending right
         const arcEndAngle = arcStartAngle + bendAngleRad;
         const arcStart = seg1End;
         const arcEnd = new THREE.Vector3(
@@ -55,8 +56,8 @@ class PipePath {
             0
         );
         this.addSegment('arc', bendRadius * bendAngleRad, arcStart, arcEnd, undefined, arcCenter, bendRadius, arcStartAngle, arcEndAngle);
-
-        const seg3Dir = new THREE.Vector3(-Math.sin(arcEndAngle), Math.cos(arcEndAngle), 0).normalize();
+        
+        const seg3Dir = new THREE.Vector3(Math.cos(arcEndAngle), Math.sin(arcEndAngle), 0).normalize();
         const seg3Start = arcEnd;
         const seg3End = seg3Start.clone().add(seg3Dir.clone().multiplyScalar(endLength));
         this.addSegment('line', endLength, seg3Start, seg3End, seg3Dir);
@@ -78,7 +79,7 @@ class PipePath {
                     const tangent = segment.direction!;
                     
                     let up = new THREE.Vector3(0, 0, 1);
-                    if (Math.abs(tangent.z) > 0.999) {
+                    if (Math.abs(tangent.dot(up)) > 0.999) { // if tangent is parallel to Z
                         up = new THREE.Vector3(0, 1, 0);
                     }
                     const binormal = new THREE.Vector3().crossVectors(tangent, up).normalize();
@@ -94,15 +95,19 @@ class PipePath {
                         segment.arcCenter!.z
                     );
                     const tangent = new THREE.Vector3(-Math.sin(angle), Math.cos(angle), 0).normalize();
-                    const binormal = new THREE.Vector3(0, 0, -1); // For a 2D bend in XY plane, binormal is along Z
+                    const binormal = new THREE.Vector3(0, 0, -1);
                     const normal = new THREE.Vector3().crossVectors(binormal, tangent).normalize();
                     return { point, tangent, normal, binormal };
                 }
             }
             accumulatedLength += segment.length;
         }
-        // Fallback to the very last point if s is out of bounds
-        return this.getPoint(this.totalLength);
+
+        // Fallback for floating point errors: return the very last point directly.
+        const lastSegment = this.segments[this.segments.length - 1];
+        const { point, tangent, normal, binormal } = this.getPoint(lastSegment.startPoint.length());
+        const finalPoint = lastSegment.endPoint.clone();
+        return { point: finalPoint, tangent: lastSegment.direction!, normal, binormal };
     }
 }
 
@@ -180,7 +185,8 @@ export const PipeElbowView3D = forwardRef<PipeElbowView3DRef, PipeElbowView3DPro
 
     const { width: gridW, height: gridH } = stats.gridSize;
     const pipeRadius = pipeOuterDiameter / 2;
-    const bendRadius = (elbowRadiusType === 'Short' ? 1.0 : 1.5) * pipeOuterDiameter;
+    const bendRadiusMultiplier = elbowRadiusType === 'Short' ? 1.0 : 1.5;
+    const bendRadius = bendRadiusMultiplier * pipeOuterDiameter;
     const bendAngleRad = THREE.MathUtils.degToRad(elbowAngle);
     const bendArcLength = bendRadius * bendAngleRad;
     const endLength = Math.max(0, pipeLength - elbowStartLength - bendArcLength);
@@ -230,6 +236,11 @@ export const PipeElbowView3D = forwardRef<PipeElbowView3DRef, PipeElbowView3DPro
                 vertexNormal.clone().multiplyScalar(currentRadius)
             );
             
+            if (!Number.isFinite(vertex.x) || !Number.isFinite(vertex.y) || !Number.isFinite(vertex.z)) {
+              console.error("NaN vertex detected!", { s, v, u, point, vertex });
+              vertex.set(0,0,0);
+            }
+
             vertices.push(vertex.x, vertex.y, vertex.z);
             normals.push(vertexNormal.x, vertexNormal.y, vertexNormal.z);
             uvs.push(u, v);
