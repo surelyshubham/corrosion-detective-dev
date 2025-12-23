@@ -20,10 +20,14 @@ export const TwoDeeHeatmapTab = forwardRef<TwoDeeViewRef, {}>((props, ref) => {
   useImperativeHandle(ref, () => ({
     capture: () => {
       switch (inspectionResult?.assetType) {
-        case 'Pipe': return pipeViewRef.current?.capture() || '';
-        case 'Vessel': return vesselViewRef.current?.capture() || '';
-        case 'Tank': return pipeViewRef.current?.capture() || ''; // Tank also uses unwrapped view
+        case 'Pipe':
+        case 'Pipe Elbow':
+        case 'Tank': 
+            return pipeViewRef.current?.capture() || '';
+        case 'Vessel': 
+            return vesselViewRef.current?.capture() || '';
         case 'Plate':
+        case 'LPG/Gas Bullet':
         default:
           return plateViewRef.current?.capture() || '';
       }
@@ -37,10 +41,12 @@ export const TwoDeeHeatmapTab = forwardRef<TwoDeeViewRef, {}>((props, ref) => {
   switch (assetType) {
     case 'Pipe':
     case 'Tank':
+    case 'Pipe Elbow':
       return <PipeView2D ref={pipeViewRef} />;
     case 'Vessel':
       return <VesselView2D ref={vesselViewRef} />;
     case 'Plate':
+    case 'LPG/Gas Bullet':
     default:
       return <PlateView2D ref={plateViewRef} />;
   }
