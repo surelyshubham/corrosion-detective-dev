@@ -13,7 +13,7 @@ import { Label } from '@/components/ui/label';
 import { RefreshCw, Loader2 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { PlatePercentLegend } from './PlatePercentLegend';
-import type { ShipHullView3DRef as ShipHullView3DRefType } from './three-dee-view-tab';
+import type { ShipHullView3DRef as ShipHullView3DRefType } from '../tabs/three-dee-view-tab';
 
 export type ShipHullView3DRef = ShipHullView3DRefType;
 
@@ -57,6 +57,7 @@ export const ShipHullView3D = React.forwardRef<ShipHullView3DRef, {}>((props, re
     
     const [depthExaggeration, setDepthExaggeration] = useState(10);
     const [hullPattern, setHullPattern] = useState<HullPattern>('GenericDisplacementHull');
+    const [hoveredPoint, setHoveredPoint] = useState<any>(null);
 
     const sceneRef = useRef<THREE.Scene | null>(null);
     const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
@@ -64,6 +65,8 @@ export const ShipHullView3D = React.forwardRef<ShipHullView3DRef, {}>((props, re
     const controlsRef = useRef<OrbitControls | null>(null);
     const hullMeshRef = useRef<THREE.Mesh | null>(null);
     const reqRef = useRef<number>(0);
+    const raycasterRef = useRef(new THREE.Raycaster());
+    const mouseRef = useRef(new THREE.Vector2());
 
     const { nominalThickness } = inspectionResult || {};
     const stats = DataVault.stats;
@@ -165,6 +168,35 @@ export const ShipHullView3D = React.forwardRef<ShipHullView3DRef, {}>((props, re
             rendererRef.current.setSize(currentMount.clientWidth, currentMount.clientHeight);
         };
 
+        const onMouseMove = (event: MouseEvent) => {
+            if (!rendererRef.current || !cameraRef.current || !hullMeshRef.current || !gridMatrix) return;
+            const rect = rendererRef.current.domElement.getBoundingClientRect();
+            mouseRef.current.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+            mouseRef.current.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+    
+            raycasterRef.current.setFromCamera(mouseRef.current, cameraRef.current);
+            const intersects = raycasterRef.current.intersectObject(hullMeshRef.current);
+    
+            if (intersects.length > 0 && intersects[0].uv) {
+                const uv = intersects[0].uv;
+                const gridX = Math.floor(uv.x * (stats.gridSize.width - 1));
+                const gridY = Math.floor(uv.y * (stats.gridSize.height - 1));
+                const cell = gridMatrix[gridY]?.[gridX];
+                
+                if (cell) {
+                    setHoveredPoint({
+                        x: gridX, y: gridY, rawThickness: cell.rawThickness, effectiveThickness: cell.effectiveThickness, percentage: cell.percentage, plateId: cell.plateId, clientX: event.clientX, clientY: event.clientY,
+                    });
+                } else {
+                    setHoveredPoint(null);
+                }
+            } else {
+                setHoveredPoint(null);
+            }
+        };
+
+        currentMount.addEventListener('mousemove', onMouseMove);
+        currentMount.addEventListener('mouseleave', () => setHoveredPoint(null));
         window.addEventListener('resize', handleResize);
         
         resetCamera();
@@ -173,6 +205,10 @@ export const ShipHullView3D = React.forwardRef<ShipHullView3DRef, {}>((props, re
         return () => {
             cancelAnimationFrame(reqRef.current);
             window.removeEventListener('resize', handleResize);
+            if(currentMount) {
+                currentMount.removeEventListener('mousemove', onMouseMove);
+                currentMount.removeEventListener('mouseleave', () => setHoveredPoint(null));
+            }
             if (hullMeshRef.current) sceneRef.current?.remove(hullMeshRef.current);
             rendererRef.current?.dispose();
         };
@@ -187,6 +223,21 @@ export const ShipHullView3D = React.forwardRef<ShipHullView3DRef, {}>((props, re
                     <CardHeader><CardTitle className="font-headline">3D Ship Hull View</CardTitle></CardHeader>
                     <CardContent className="flex-grow p-0 relative">
                         <div ref={mountRef} className="w-full h-full" />
+                        {hoveredPoint && (
+                          <div
+                            className="fixed p-2 text-xs rounded-md shadow-lg pointer-events-none bg-popover text-popover-foreground border z-20"
+                            style={{
+                              left: `${hoveredPoint.clientX + 15}px`,
+                              top: `${hoveredPoint.clientY - 30}px`,
+                            }}
+                          >
+                            <div className="font-bold">X: {hoveredPoint.x}, Y: {hoveredPoint.y}</div>
+                            {hoveredPoint.plateId && <div className="text-muted-foreground truncate max-w-[200px]">{hoveredPoint.plateId}</div>}
+                            <div>Raw Thick: {hoveredPoint.rawThickness?.toFixed(2) ?? 'ND'} mm</div>
+                            <div>Eff. Thick: {hoveredPoint.effectiveThickness?.toFixed(2) ?? 'ND'} mm</div>
+                            <div>Percentage: {hoveredPoint.percentage?.toFixed(1) ?? 'N/A'}%</div>
+                          </div>
+                        )}
                     </CardContent>
                 </Card>
             </div>
@@ -227,3 +278,4 @@ export const ShipHullView3D = React.forwardRef<ShipHullView3DRef, {}>((props, re
     );
 });
 ShipHullView3D.displayName = "ShipHullView3D";
+
