@@ -56,7 +56,7 @@ class PipePath {
         );
         this.addSegment('arc', bendRadius * bendAngleRad, arcStart, arcEnd, undefined, arcCenter, bendRadius, arcStartAngle, arcEndAngle);
 
-        const seg3Dir = new THREE.Vector3(Math.cos(arcEndAngle), Math.sin(arcEndAngle), 0).normalize();
+        const seg3Dir = new THREE.Vector3(-Math.sin(arcEndAngle), Math.cos(arcEndAngle), 0).normalize();
         const seg3Start = arcEnd;
         const seg3End = seg3Start.clone().add(seg3Dir.clone().multiplyScalar(endLength));
         this.addSegment('line', endLength, seg3Start, seg3End, seg3Dir);
@@ -81,7 +81,6 @@ class PipePath {
                     if (Math.abs(tangent.z) > 0.999) {
                         up = new THREE.Vector3(0, 1, 0);
                     }
-                    
                     const binormal = new THREE.Vector3().crossVectors(tangent, up).normalize();
                     const normal = new THREE.Vector3().crossVectors(binormal, tangent).normalize();
 
@@ -95,7 +94,7 @@ class PipePath {
                         segment.arcCenter!.z
                     );
                     const tangent = new THREE.Vector3(-Math.sin(angle), Math.cos(angle), 0).normalize();
-                    const binormal = new THREE.Vector3(0, 0, -1);
+                    const binormal = new THREE.Vector3(0, 0, -1); // For a 2D bend in XY plane, binormal is along Z
                     const normal = new THREE.Vector3().crossVectors(binormal, tangent).normalize();
                     return { point, tangent, normal, binormal };
                 }
@@ -117,6 +116,7 @@ export const PipeElbowView3D = forwardRef<PipeElbowView3DRef, PipeElbowView3DPro
                   inspectionResult?.elbowStartLength !== undefined && !!inspectionResult?.elbowAngle && !!inspectionResult?.elbowRadiusType;
 
   const [zScale, setZScale] = useState(15);
+  const [hoveredPoint, setHoveredPoint] = useState<any>(null);
   
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
@@ -124,6 +124,8 @@ export const PipeElbowView3D = forwardRef<PipeElbowView3DRef, PipeElbowView3DPro
   const controlsRef = useRef<OrbitControls | null>(null);
   const pipeMeshRef = useRef<THREE.Mesh | null>(null);
   const reqRef = useRef<number>(0);
+  const raycasterRef = useRef(new THREE.Raycaster());
+  const mouseRef = useRef(new THREE.Vector2());
 
   const { nominalThickness, pipeOuterDiameter, pipeLength, elbowStartLength, elbowAngle, elbowRadiusType } = inspectionResult || {};
   const stats = DataVault.stats;
@@ -190,6 +192,7 @@ export const PipeElbowView3D = forwardRef<PipeElbowView3DRef, PipeElbowView3DPro
     const colors: number[] = [];
     const normals: number[] = [];
     const indices: number[] = [];
+    const uvs: number[] = [];
 
     const tubularSegments = Math.min(gridH -1, 200);
     const radialSegments = Math.min(gridW-1, 64);
@@ -229,6 +232,7 @@ export const PipeElbowView3D = forwardRef<PipeElbowView3DRef, PipeElbowView3DPro
             
             vertices.push(vertex.x, vertex.y, vertex.z);
             normals.push(vertexNormal.x, vertexNormal.y, vertexNormal.z);
+            uvs.push(u, v);
         }
     }
 
@@ -238,8 +242,8 @@ export const PipeElbowView3D = forwardRef<PipeElbowView3DRef, PipeElbowView3DPro
             const b = a + 1;
             const c = (j + 1) * (radialSegments + 1) + i;
             const d = c + 1;
-            indices.push(a, b, c);
-            indices.push(b, d, c);
+            indices.push(a, c, b);
+            indices.push(b, c, d);
         }
     }
 
@@ -247,6 +251,7 @@ export const PipeElbowView3D = forwardRef<PipeElbowView3DRef, PipeElbowView3DPro
     geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
     geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
     geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
     geometry.setIndex(indices);
 
     const material = new THREE.MeshStandardMaterial({ vertexColors: true, side: THREE.DoubleSide });
@@ -262,6 +267,35 @@ export const PipeElbowView3D = forwardRef<PipeElbowView3DRef, PipeElbowView3DPro
       }
     };
     
+    const onMouseMove = (event: MouseEvent) => {
+        if (!rendererRef.current || !cameraRef.current || !pipeMeshRef.current || !gridMatrix) return;
+        const rect = rendererRef.current.domElement.getBoundingClientRect();
+        mouseRef.current.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+        mouseRef.current.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+        raycasterRef.current.setFromCamera(mouseRef.current, cameraRef.current);
+        const intersects = raycasterRef.current.intersectObject(pipeMeshRef.current);
+
+        if (intersects.length > 0 && intersects[0].uv) {
+            const uv = intersects[0].uv;
+            const gridX = Math.floor(uv.x * (gridW - 1));
+            const gridY = Math.floor(uv.y * (gridH - 1));
+            const cell = gridMatrix[gridY]?.[gridX];
+            
+            if (cell) {
+                setHoveredPoint({
+                    x: gridX, y: gridY, rawThickness: cell.rawThickness, effectiveThickness: cell.effectiveThickness, percentage: cell.percentage, plateId: cell.plateId, clientX: event.clientX, clientY: event.clientY,
+                });
+            } else {
+                setHoveredPoint(null);
+            }
+        } else {
+            setHoveredPoint(null);
+        }
+    };
+    
+    currentMount.addEventListener('mousemove', onMouseMove);
+    currentMount.addEventListener('mouseleave', () => setHoveredPoint(null));
     window.addEventListener('resize', handleResize);
     
     resetCamera();
@@ -270,6 +304,10 @@ export const PipeElbowView3D = forwardRef<PipeElbowView3DRef, PipeElbowView3DPro
     return () => {
       cancelAnimationFrame(reqRef.current);
       window.removeEventListener('resize', handleResize);
+      if (currentMount) {
+        currentMount.removeEventListener('mousemove', onMouseMove);
+        currentMount.removeEventListener('mouseleave', () => setHoveredPoint(null));
+      }
       if (pipeMeshRef.current) {
         sceneRef.current?.remove(pipeMeshRef.current);
         pipeMeshRef.current.geometry.dispose();
@@ -288,6 +326,21 @@ export const PipeElbowView3D = forwardRef<PipeElbowView3DRef, PipeElbowView3DPro
           <CardHeader><CardTitle className="font-headline">3D Pipe Elbow View</CardTitle></CardHeader>
           <CardContent className="flex-grow p-0 relative">
             <div ref={mountRef} className="w-full h-full" />
+            {hoveredPoint && (
+              <div
+                className="fixed p-2 text-xs rounded-md shadow-lg pointer-events-none bg-popover text-popover-foreground border z-20"
+                style={{
+                  left: `${hoveredPoint.clientX + 15}px`,
+                  top: `${hoveredPoint.clientY - 30}px`,
+                }}
+              >
+                <div className="font-bold">X: {hoveredPoint.x}, Y: {hoveredPoint.y}</div>
+                {hoveredPoint.plateId && <div className="text-muted-foreground truncate max-w-[200px]">{hoveredPoint.plateId}</div>}
+                <div>Raw Thick: {hoveredPoint.rawThickness?.toFixed(2) ?? 'ND'} mm</div>
+                <div>Eff. Thick: {hoveredPoint.effectiveThickness?.toFixed(2) ?? 'ND'} mm</div>
+                <div>Percentage: {hoveredPoint.percentage?.toFixed(1) ?? 'N/A'}%</div>
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -319,9 +372,5 @@ export const PipeElbowView3D = forwardRef<PipeElbowView3DRef, PipeElbowView3DPro
   )
 });
 PipeElbowView3D.displayName = "PipeElbowView3D";
-
-    
-
-    
 
     
